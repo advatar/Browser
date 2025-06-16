@@ -1,0 +1,23 @@
+{
+  "name": "browser",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Decentralized Browser Application",
+  "lint-staged": {
+    "*.rs": [
+      "cargo fmt --",
+      "cargo clippy -- -D warnings"
+    ]
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2"
+  }
+}
