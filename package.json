@@ -1,16 +1,30 @@
 {
   "name": "browser",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "cd crates/gui && npm run dev",
+    "build": "cd crates/gui && npm run build",
+    "preview": "cd crates/gui && npm run preview",
+    "test": "cd crates/gui && npm test",
+    "test:ui": "cd crates/gui && npm run test:ui",
+    "test:coverage": "cd crates/gui && npm run test:coverage",
+    "typecheck": "cd crates/gui && npm run typecheck",
+    "lint": "cd crates/gui && npm run lint",
     "prepare": "husky"
   },
-  "keywords": [],
+  "keywords": ["browser", "decentralized", "web3"],
   "author": "",
   "license": "ISC",
   "description": "Decentralized Browser Application",
+  "workspaces": [
+    "crates/gui"
+  ],
   "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix"
+    ],
     "*.rs": [
       "cargo fmt --",
       "cargo clippy -- -D warnings"

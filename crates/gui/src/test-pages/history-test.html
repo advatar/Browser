@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History Test Page</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #333;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background-color: #f9f9f9;
+    }
+    .test-button {
+      display: inline-block;
+      padding: 10px 15px;
+      margin: 5px;
+      background-color: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 14px;
+      transition: background-color 0.2s;
+    }
+    .test-button:hover {
+      background-color: #357abd;
+    }
+    .test-links {
+      margin: 15px 0;
+    }
+    .test-links a {
+      display: block;
+      padding: 8px 0;
+      color: #1a73e8;
+      text-decoration: none;
+    }
+    .test-links a:hover {
+      text-decoration: underline;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    .success {
+      background-color: #e6f4ea;
+      color: #0d652d;
+      border: 1px solid #a5d6a7;
+    }
+    .error {
+      background-color: #fce8e6;
+      color: #c5221f;
+      border: 1px solid #f4b6b4;
+    }
+  </style>
+</head>
+<body>
+  <h1>History Test Page</h1>
+  
+  <div class="test-section">
+    <h2>Navigation Test</h2>
+    <p>Click the links below to test history tracking:</p>
+    
+    <div class="test-links">
+      <a href="https://www.example.com" target="_blank">Example.com (external)</a>
+      <a href="https://www.wikipedia.org" target="_blank">Wikipedia (external)</a>
+      <a href="#section1">Jump to Section 1 (internal)</a>
+      <a href="#section2">Jump to Section 2 (internal)</a>
+    </div>
+    
+    <div>
+      <button id="test-back" class="test-button">Go Back</button>
+      <button id="test-forward" class="test-button">Go Forward</button>
+      <button id="test-reload" class="test-button">Reload</button>
+    </div>
+    
+    <div id="nav-status" class="status"></div>
+  </div>
+  
+  <div class="test-section">
+    <h2>History API Test</h2>
+    <p>Test the History API integration:</p>
+    
+    <div>
+      <button id="test-pushstate" class="test-button">Push State</button>
+      <button id="test-replacestate" class="test-button">Replace State</button>
+      <button id="test-hashchange" class="test-button">Trigger Hash Change</button>
+    </div>
+    
+    <div id="history-state" class="status"></div>
+  </div>
+  
+  <div id="section1" class="test-section">
+    <h2>Section 1</h2>
+    <p>This is section 1 content. Use the back/forward buttons to test navigation.</p>
+    <p><a href="#top">Back to top</a></p>
+  </div>
+  
+  <div id="section2" class="test-section">
+    <h2>Section 2</h2>
+    <p>This is section 2 content. Use the back/forward buttons to test navigation.</p>
+    <p><a href="#top">Back to top</a></p>
+  </div>
+  
+  <script>
+    // Navigation test
+    document.getElementById('test-back')?.addEventListener('click', () => window.history.back());
+    document.getElementById('test-forward')?.addEventListener('click', () => window.history.forward());
+    document.getElementById('test-reload')?.addEventListener('click', () => window.location.reload());
+    
+    // History API test
+    let stateCounter = 0;
+    
+    document.getElementById('test-pushstate')?.addEventListener('click', () => {
+      stateCounter++;
+      const state = { test: `pushstate-${stateCounter}`, timestamp: Date.now() };
+      history.pushState(state, `State ${stateCounter}`, `?state=${stateCounter}`);
+      showStatus('history-state', `Pushed state: ${JSON.stringify(state)}`, 'success');
+    });
+    
+    document.getElementById('test-replacestate')?.addEventListener('click', () => {
+      const state = { test: `replacestate-${stateCounter}`, timestamp: Date.now() };
+      history.replaceState(state, `Replaced State`, window.location.pathname);
+      showStatus('history-state', `Replaced state: ${JSON.stringify(state)}`, 'success');
+    });
+    
+    document.getElementById('test-hashchange')?.addEventListener('click', () => {
+      const hash = `#test-${Date.now()}`;
+      window.location.hash = hash;
+      showStatus('history-state', `Hash changed to: ${hash}`, 'success');
+    });
+    
+    // Show status message
+    function showStatus(elementId, message, type = 'success') {
+      const element = document.getElementById(elementId);
+      if (element) {
+        element.textContent = message;
+        element.className = `status ${type}`;
+        element.style.display = 'block';
+        
+        // Hide after 3 seconds
+        setTimeout(() => {
+          element.style.display = 'none';
+        }, 3000);
+      }
+    }
+    
+    // Show current URL in status
+    window.addEventListener('popstate', (event) => {
+      showStatus('nav-status', `Navigated to: ${window.location.href}`, 'success');
+    });
+    
+    // Initial status
+    showStatus('nav-status', 'Ready for testing history navigation', 'success');
+  </script>
+</body>
+</html>

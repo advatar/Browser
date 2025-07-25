@@ -1,0 +1,4 @@
+[dependencies.overrides]
+"libp2p-core:0.39.2" = { version = "=0.43.0" }
+"libp2p-core:0.40.1" = { version = "=0.43.0" }
+"multistream-select:0.12.1" = { version = "=0.13.0" }

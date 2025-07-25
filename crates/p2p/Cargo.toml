@@ -2,12 +2,93 @@
 name = "p2p"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "P2P networking for the browser"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "p2p"
+path = "src/lib.rs"
+
+[[bin]]
+name = "p2pd"
+path = "src/bin/main.rs"
 
 [features]
 default = []
+# Optional features
+kad = ["libp2p-kad"]
+mdns = ["libp2p-mdns"]
+floodsub = ["libp2p-floodsub"]
+# gossipsub is not available in libp2p 0.40.x, using floodsub instead
 
 [dependencies]
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
+# Core libp2p dependencies - using version 0.48.0 with compatible components
+# Main libp2p crate with minimal features
+libp2p = { version = "0.48.0", default-features = false, features = [
+    "identify",
+    "noise",
+    "yamux",
+    "mplex",
+    "ping",
+    "kad"
+]}
+
+# Individual libp2p components with compatible versions
+libp2p-core = { version = "0.36.0", default-features = false }
+libp2p-identity = { version = "0.2.0", default-features = false }
+libp2p-swarm = { version = "0.39.0", default-features = false }
+libp2p-identify = { version = "0.39.0", default-features = false }
+libp2p-ping = { version = "0.39.0", default-features = false }
+libp2p-tcp = { version = "0.36.0", default-features = false }
+libp2p-yamux = { version = "0.40.0", default-features = false }
+
+# Optional libp2p features - enabled via feature flags
+libp2p-kad = { version = "0.48.0", optional = true, default-features = false }
+libp2p-mdns = { version = "0.48.0", optional = true, default-features = false }
+libp2p-floodsub = { version = "0.47.0", optional = true, default-features = false }
+libp2p-gossipsub = { version = "0.49.0", optional = true, default-features = false }
+libp2p-websocket = { version = "0.45.1", optional = true, default-features = false }
+
+# Core async runtime
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time", "full"] }
+futures = "0.3"
+
+# Logging
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+log = "0.4"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async traits
+async-trait = "0.1"
+
+# Direct dependencies
+tokio-util = { version = "0.7", features = ["compat"] }
+clap = { version = "4.0", features = ["derive"] }
+
+
+
+# Utilities
+bytes = "1.5"
+void = "1.0"
+fastrand = "2.0.0"
+
+# Multiaddress support
+
+
+[dev-dependencies]
+tempfile = "3.10.0"
+tokio-test = "0.4.3"
+env_logger = "0.10.1"
+
+# Version overrides will be set in the workspace root Cargo.toml
+

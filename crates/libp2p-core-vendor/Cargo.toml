@@ -1,0 +1,10 @@
+[package]
+name = "libp2p-core-vendor"
+version = "0.43.7"
+edition = "2021"
+description = "Vendored version of libp2p-core to ensure version consistency"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+libp2p-core = { version = "=0.43.7", default-features = false }

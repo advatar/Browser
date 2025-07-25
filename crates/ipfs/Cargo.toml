@@ -2,12 +2,91 @@
 name = "ipfs"
 version = "0.1.0"
 edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "IPFS implementation with enhanced P2P capabilities"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/browser"
 
 [features]
-default = []
+default = ["kad", "mdns"]
+kad = ["libp2p/kad"]
+mdns = ["libp2p/mdns"]
 
 [dependencies]
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
+# Core dependencies
+anyhow = "1.0.75"
+thiserror = "1.0.52"
+async-trait = "0.1.77"
+bytes = "1.5.0"
+
+# IPFS and IPLD
+cid = { version = "0.8.6", features = ["std"] }
+ipld-core = { version = "0.4.2", features = ["codec", "std"] }
+ipfs-embed = "0.26.1"
+
+# File system and paths
+dirs = "5.0.1"
+
+# Local P2P crate with Kademlia and mDNS support
+p2p = { path = "../p2p", features = ["kad", "mdns"], default-features = false }
+
+# Libp2p stack
+libp2p = { version = "0.47.0", default-features = false, features = [
+    "tcp-tokio",
+    "dns-tokio",
+    "identify",
+    "ping",
+    "kad",
+    "mdns",
+    "noise",
+    "yamux",
+    "mplex"
+]}
+
+# Async runtime
+tokio = { version = "1.35.1", features = ["rt-multi-thread", "net", "time", "io-util"] }
+futures = { version = "0.3.30", default-features = false, features = ["std", "async-await"] }
+
+# Logging and diagnostics
+log = "0.4.20"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
+# Serialization
+serde = { version = "1.0.192", features = ["derive"] }
+serde_json = "1.0.108"
+prost = "0.12.1"
+prost-types = "0.12.1"
+
+# Utilities
+parking_lot = "0.12.1"
+rand = "0.8.5"
+hex = "0.4.3"
+multihash = "0.19.3"
+multibase = "0.9.1"
+multistream-select = "0.13.0"
+
+# Metrics (optional)
+prometheus = { version = "0.13.3", optional = true }
+
+# Testing (dev-only)
+[dev-dependencies]
+tempfile = "3.8.1"
+criterion = { version = "0.5.1", features = ["html_reports"] }
+libp2p-identity = { version = "0.2.0" }
+
+# Benchmarks
+[[bench]]
+name = "bench"
+harness = false
+path = "benches/bench.rs"
+
+# Ensure consistent versions for multiaddr and multihash in tests
+[dev-dependencies.multiaddr]
+version = "0.16.0"
+default-features = false
+
+[dev-dependencies.multihash]
+version = "0.19.3"
+default-features = false
+features = ["std"]

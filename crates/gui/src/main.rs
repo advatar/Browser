@@ -1,11 +1,241 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+use std::sync::Mutex;
+use tauri::{
+    menu::{Menu, MenuItem, Submenu, IsMenuItem},
+    webview::WebviewWindowBuilder,
+    Manager, Runtime
+};
+
+// Store application state
+struct AppState {
+    current_url: Mutex<String>,
+}
+
+fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> {
+    // Create menu items
+    let new_tab = MenuItem::with_id(manager, "new_tab", "New Tab", true, None::<&str>)?;
+    let new_window = MenuItem::with_id(manager, "new_window", "New Window", true, None::<&str>)?;
+    let settings = MenuItem::with_id(manager, "settings", "Settings", true, None::<&str>)?;
+    let quit = MenuItem::with_id(manager, "quit", "Quit", true, None::<&str>)?;
+    
+    // Create file menu
+    let file_menu = Submenu::with_items(
+        manager,
+        "File",
+        true,
+        &[
+            &new_tab as &dyn IsMenuItem<R>,
+            &new_window,
+            &MenuItem::new(manager, "-", true, None::<&str>)?,
+            &settings,
+            &MenuItem::new(manager, "-", true, None::<&str>)?,
+            &quit,
+        ],
+    )?;
+
+    // Create edit menu
+    let cut = MenuItem::with_id(manager, "cut", "Cut", true, Some("CmdOrCtrl+X"))?;
+    let copy = MenuItem::with_id(manager, "copy", "Copy", true, Some("CmdOrCtrl+C"))?;
+    let paste = MenuItem::with_id(manager, "paste", "Paste", true, Some("CmdOrCtrl+V"))?;
+    let select_all = MenuItem::with_id(manager, "select_all", "Select All", true, Some("CmdOrCtrl+A"))?;
+    
+    let edit_menu = Submenu::with_items(
+        manager,
+        "Edit",
+        true,
+        &[
+            &cut as &dyn IsMenuItem<R>,
+            &copy,
+            &paste,
+            &MenuItem::new(manager, "-", true, None::<&str>)?,
+            &select_all,
+        ],
+    )?;
+
+    // Create view menu
+    let zoom_in = MenuItem::with_id(manager, "zoomin", "Zoom In", true, Some("CmdOrCtrl+Plus"))?;
+    let zoom_out = MenuItem::with_id(manager, "zoomout", "Zoom Out", true, Some("CmdOrCtrl+-"))?;
+    let reset_zoom = MenuItem::with_id(manager, "resetzoom", "Reset Zoom", true, Some("CmdOrCtrl+0"))?;
+    
+    let view_menu = Submenu::with_items(
+        manager,
+        "View",
+        true,
+        &[
+            &zoom_in as &dyn IsMenuItem<R>,
+            &zoom_out,
+            &reset_zoom,
+        ],
+    )?;
+
+    // Create main menu
+    let menu = Menu::with_items(
+        manager,
+        &[&file_menu as &dyn IsMenuItem<R>, &edit_menu, &view_menu],
+    )?;
+    
+    Ok(menu)
+}
+
+fn create_browser_window<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    url: Option<&str>,
+) -> tauri::Result<()> {
+    let initial_url = url.unwrap_or("about:blank");
+    
+    // Create the menu first
+    let menu = create_main_menu(app)?;
+
+    let webview = WebviewWindowBuilder::new(
+        app,
+        "main",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Decentralized Browser")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .menu(menu)
+    .build()?;
+
+    // Store the initial URL in the app state
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut current_url) = state.current_url.lock() {
+            *current_url = initial_url.to_string();
+        }
+    }
+
+    // Enable dev tools in debug mode
+    #[cfg(debug_assertions)]
+    webview.open_devtools();
+    
+    // Setup menu event handlers
+    let webview_ = webview.clone();
+    webview.on_menu_event(move |_webview, event| {
+        let webview = webview_.clone();
+        tauri::async_runtime::spawn(async move {
+            let id = event.id().as_ref();
+            if id == "new_tab" {
+                println!("New tab requested");
+            } else if id == "new_window" {
+                println!("New window requested");
+            } else if id == "settings" {
+                println!("Settings requested");
+            } else if id == "zoomin" {
+                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0.5);") {
+                    eprintln!("Zoom in failed: {}", e);
+                }
+            } else if id == "zoomout" {
+                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(-0.5);") {
+                    eprintln!("Zoom out failed: {}", e);
+                }
+            } else if id == "resetzoom" {
+                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0);") {
+                    eprintln!("Reset zoom failed: {}", e);
+                }
+            } else if id == "quit" {
+                std::process::exit(0);
+            }
+        });
+    });
+
+    Ok(())
+}
+
 fn main() {
-    println!("Hello from gui!");
+    tauri::Builder::default()
+        .manage(AppState {
+            current_url: Mutex::new("about:blank".to_string()),
+        })
+        .setup(|app| {
+            create_browser_window(app.app_handle(), None)?;
+            
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            navigate_to,
+            get_current_url,
+            execute_script
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+// Tauri command to navigate to a URL
+#[tauri::command]
+async fn navigate_to<R: Runtime>(
+    url: String,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let webview = match app_handle.get_webview_window("main") {
+        Some(webview) => webview,
+        None => return Err("Webview not found".to_string()),
+    };
+    
+    // Update the URL in app state
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        if let Ok(mut current_url) = state.current_url.lock() {
+            *current_url = url.clone();
+        }
+    }
+    
+    // Execute navigation in the webview
+    let script = format!("document.getElementById('webview').src = '{}';", url);
+    if let Err(e) = webview.eval(&script) {
+        return Err(format!("Failed to navigate: {}", e));
+    }
+    
+    Ok(())
+}
+
+// Tauri command to get the current URL
+#[tauri::command]
+async fn get_current_url<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        if let Ok(current_url) = state.current_url.lock() {
+            return Ok(current_url.clone());
+        }
+    }
+    Ok("about:blank".to_string())
+}
+
+// Tauri command to execute JavaScript in the webview
+#[tauri::command]
+async fn execute_script<R: Runtime>(
+    script: String,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let webview = match app_handle.get_webview_window("main") {
+        Some(webview) => webview,
+        None => return Err("Webview not found".to_string()),
+    };
+    
+    if let Err(e) = webview.eval(&script) {
+        return Err(format!("Failed to execute script: {}", e));
+    }
+    
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_app_state() {
+        let state = AppState {
+            current_url: Mutex::new("https://example.com".to_string()),
+        };
+        
+        let url = state.current_url.lock().unwrap();
+        assert_eq!(*url, "https://example.com");
     }
 }

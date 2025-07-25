@@ -1,3 +1,13 @@
+[package]
+name = "browser-workspace"
+version = "0.1.0"
+edition = "2021"
+description = "Workspace for the Browser project"
+
+[[bin]]
+name = "browser"
+path = "src/main.rs"
+
 [workspace]
 members = [
     "crates/p2p",
@@ -9,9 +19,61 @@ members = [
 ]
 resolver = "2"
 
+# Set up profiles for consistent builds
+[profile.dev]
+incremental = true
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+codegen-units = 1
+
+# Workspace dependencies - all versions must be consistent
 [workspace.dependencies]
+# Core dependencies
 anyhow = "1.0"
 thiserror = "1.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures = { version = "0.3.31", features = ["thread-pool"] }
+
+# Shared dependencies that might cause conflicts
+multihash = "=0.19.3"
+multiaddr = "=0.18.2"
+unsigned-varint = "=0.7.2"
+
+# Core libp2p crates with exact versions and features
+libp2p-core = { version = "=0.43.0", default-features = false }
+libp2p-identity = { version = "=0.2.11", features = ["rand"] }
+libp2p-identify = { version = "=0.43.0", default-features = false }
+libp2p-ping = { version = "=0.43.0", default-features = false }
+libp2p-noise = { version = "=0.43.0", default-features = false }
+libp2p-tcp = { version = "=0.43.0", default-features = false, features = ["tokio"] }
+libp2p-yamux = { version = "=0.43.0", default-features = false }
+libp2p-swarm = { version = "=0.43.0", default-features = false, features = ["tokio", "macros"] }
+
+# Optional libp2p features
+libp2p-kad = { version = "=0.43.0", default-features = false }
+libp2p-mdns = { version = "=0.43.0", default-features = false }
+libp2p-floodsub = { version = "=0.43.0", default-features = false }
+libp2p-gossipsub = { version = "=0.43.0", default-features = false }
+
+# Override all dependencies to use consistent versions
+[package.metadata.cargo-workspace-dependency.overrides]
+libp2p-core = { version = "=0.43.0" }
+libp2p-swarm = { version = "=0.43.0" }
+libp2p-identify = { version = "=0.43.0" }
+libp2p-ping = { version = "=0.43.0" }
+libp2p-noise = { version = "=0.43.0" }
+libp2p-yamux = { version = "=0.43.0" }
+
+# Patch section removed to avoid git revision errors with the stub implementation
+# Once we implement real networking functionality, we can revisit dependency unification
