@@ -90,6 +90,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     bitswap::{BitswapService, BitswapConfig},
+    dht::{DhtService, DhtConfig, DhtEvent},
     node::NodeEvent,
     Block, BlockStore, Config, Error, Result,
 };
@@ -361,174 +362,111 @@ pub struct Node {
     event_sender: mpsc::Sender<NodeEvent>,
     /// Receiver for node events
     event_receiver: mpsc::Receiver<NodeEvent>,
-    /// Sender for block requests
-    block_sender: mpsc::Sender<BlockRequest>,
     /// Local peer ID
     peer_id: PeerId,
     /// Keypair for this node
     keypair: libp2p_identity::Keypair,
     /// Bootstrap nodes to connect to on startup
     bootstrap_nodes: Vec<Multiaddr>,
-},
+    /// DHT service
+    dht: Option<DhtService>,
+    /// Bitswap service
+    bitswap: Option<BitswapService>,
+}
+
+/// Events emitted by the Node
+#[derive(Debug)]
+pub enum NodeEvent {
+    /// An IPFS node that implements the IPFS protocol
     /// Provide a block to the network
     ProvideBlock { cid: Vec<u8> },
     /// Request a block from the network
     WantBlock { 
         /// The CID of the block to request
+        cid: Vec<u8>,
+        /// Priority of the request
+        priority: u32,
+    },
+    /// Cancel a block request
+    CancelBlock { cid: Vec<u8> },
+    /// Block received from the network
+    BlockReceived { cid: Vec<u8>, data: Vec<u8> },
+    /// Block sent to the network
+    BlockSent { cid: Vec<u8>, peer_id: PeerId },
+    /// Find closest peers to a given peer ID
+    FindPeer { peer_id: Vec<u8> },
+}
+
 /// Create a new IPFS node with the given configuration
 pub async fn new(config: Config) -> Result<Self> {
-    // Generate a new keypair for this node if not provided
-    let keypair = libp2p_identity::Keypair::generate_ed25519();
+    // Initialize IPFS-embed
+    let ipfs = Ipfs::<DefaultParams>::new(Default::default()).await?;
+    
+    // Generate or load keypair
+    let keypair = if let Some(key_bytes) = config.keypair {
+        libp2p_identity::Keypair::from_protobuf_encoding(&key_bytes)?
+    } else {
+        libp2p_identity::Keypair::generate_ed25519()
+    };
+    
     let peer_id = keypair.public().to_peer_id();
     
-    // Initialize the IPFS node
-    let ipfs = Self::init_ipfs(&config).await?;
-    
-    // Create channels for events and block requests
+    // Create channels for node events
     let (event_sender, event_receiver) = mpsc::channel(32);
-    let (block_sender, block_receiver) = mpsc::channel(32);
     
-    // Create the network behaviour with our keypair
-    let behaviour = NodeBehaviour::new(peer_id, &keypair);
+    // Initialize DHT if enabled
+    let dht = if config.dht_enabled {
+        let dht_config = DhtConfig {
+            enabled: true,
+            protocol_name: "/ipfs/kad/1.0.0".to_string(),
+            bootstrap_nodes: config.bootstrap_nodes.clone(),
+            ..Default::default()
+        };
+        
+        // Create DHT metrics
+        let registry = Registry::new();
+        let metrics = DhtMetrics::new(&registry)?;
+        
+        Some(DhtService::new(peer_id, dht_config, metrics)?)
+    } else {
+        None
+    };
     
-    // Create the transport
-    let transport = Self::build_transport(&keypair)?;
+    // Initialize Bitswap if enabled
+    let bitswap = if config.bitswap_enabled {
+        let bitswap_config = BitswapConfig::default();
+        let metrics = BitswapMetrics::new()?;
+        
+        Some(BitswapService::new(
+            peer_id,
+            bitswap_config,
+            metrics,
+            event_sender.clone(),
+        )?)
+    } else {
+        None
+    };
     
-    // Create the swarm
-    let swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build();
-    
-    Ok(Self {
+    // Create the node
+    let mut node = Self {
         ipfs,
-        swarm,
+        swarm: Swarm::new(
+            keypair.public().to_peer_id(),
+            NodeBehaviour::new(peer_id, &keypair)?,
+        ),
         event_sender,
         event_receiver,
-        block_sender,
         peer_id,
         keypair,
         bootstrap_nodes: config.bootstrap_nodes,
-    })
-
-/// Build the libp2p transport with the given keypair
-fn build_transport(keypair: &libp2p_identity::Keypair) -> Result<Boxed<(PeerId, StreamMuxerBox)>> {
-    let tcp = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
+        dht,
+        bitswap,
+    };
     
-    // Create authenticated transport with noise
-    let noise_keys = libp2p_noise::Keypair::<libp2p_noise::X25519Spec>::new()
-        .into_authentic(keypair)
-        .expect("Signing libp2p-noise static DH keypair failed.");
-        
-    let transport = tcp
-        .upgrade(upgrade::Version::V1)
-        .authenticate(libp2p_noise::NoiseConfig::xx(noise_keys).into_authenticated())
-        .multiplex(yamux::Config::default())
-        .boxed();
-        
-    Ok(transport)
-
-/// Handle node events from the application
-async fn handle_node_event(&mut self, event: NodeEvent) -> Result<()> {
-    match event {
-        NodeEvent::FindPeer { peer_id } => {
-            // Handle find peer request
-            log::debug!("Finding closest peers to: {:?}", peer_id);
-            match PeerId::from_bytes(&peer_id) {
-                Ok(peer_id) => {
-                    self.swarm.behaviour_mut().kademlia.get_closest_peers(peer_id);
-                }
-                Err(e) => {
-                    log::warn!("Invalid peer ID: {}", e);
-                }
-            }
-        },
-        NodeEvent::ProvideBlock { cid } => {
-            // Handle provide block request
-            log::debug!("Providing block: {:?}", cid);
-            match Cid::try_from(cid.as_slice()) {
-                Ok(cid) => {
-                    // Add to our local store's provided blocks
-                    if let Some(wantlist) = Arc::get_mut(&mut self.bitswap.wantlist) {
-                        wantlist.provided_blocks.insert(cid);
-                    }
-                    
-                    // Also provide to DHT
-                    let key = Key::from(cid);
-                    let _ = self.swarm.behaviour_mut().kademlia.start_providing(key);
-                }
-                Err(e) => {
-                    log::warn!("Invalid CID: {}", e);
-                }
-            }
-        },
-        NodeEvent::WantBlock { cid, priority } => {
-            // Handle block want request
-            log::debug!("Want block: {} with priority {:?}", cid, priority);
-            match Cid::try_from(cid.as_slice()) {
-                Ok(cid) => {
-                    // Check if we already have the block
-                    if let Ok(Some(_)) = self.ipfs.get(&cid).await {
-                        log::debug!("Block {} already in local store", cid);
-                        return Ok(());
-                    }
-                    
-                    // Request the block via Bitswap
-                    if let Err(e) = self.bitswap.request_block(&cid, priority).await {
-                        log::error!("Failed to request block {}: {}", cid, e);
-                        return Err(anyhow::anyhow!("Failed to request block: {}", e));
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Invalid CID: {}", e);
-                    return Err(anyhow::anyhow!("Invalid CID: {}", e));
-                }
-            }
-        },
-        NodeEvent::CancelBlock { cid } => {
-            // Handle block cancel request
-            log::debug!("Cancel want for block: {:?}", cid);
-            if let Ok(cid) = Cid::try_from(cid.as_slice()) {
-                self.bitswap.cancel_want(&cid);
-            }
-        },
-        NodeEvent::BlockReceived { cid, data } => {
-            // Handle block received event
-            log::debug!("Received block: {} with data {:?}", cid, data);
-            // Add the block to our local store
-            let block = ipfs_embed::Block::new(cid, data);
-            self.ipfs.insert(&block).await?;
-        },
-        NodeEvent::BlockSent { cid, peer_id } => {
-            // Handle block sent event
-            log::debug!("Sent block: {} to peer {}", cid, peer_id);
-        },
-        _ => {
-            log::debug!("Unhandled node event: {:?}", event);
-        }
-    }
-    Ok(())
-}
-
-/// Store a block in the IPFS node and announce it to the network
-pub async fn put_block(
-    &mut self,
-    data: Vec<u8>,
-    codec: Option<cid::Codec>,
-    hash: Option<multihash::Code>,
-) -> Result<Cid> {
-    // Create a CID for the data
-    let cid = self.ipfs.create_block(data, codec, hash).await?;
+    // Configure the swarm
+    node.configure_swarm().await?;
     
-    // Announce the block to the DHT if Kademlia is enabled
-    #[cfg(feature = "kad")]
-    {
-        let key = cid.to_bytes();
-        if let Err(e) = self.swarm.behaviour_mut().start_providing(key) {
-            log::warn!("Failed to announce block to DHT: {}", e);
-        } else {
-            log::debug!("Announced block {} to DHT", cid);
-        }
-    }
-    
-    Ok(cid)
+    Ok(node)
 }
 
 /// Start the IPFS node
@@ -537,23 +475,6 @@ pub async fn start(&mut self) -> Result<()> {
     self.swarm
         .listen_on("/ip4/0.0.0.0/tcp/0".parse()?)
         .map_err(|e| anyhow::anyhow!("Failed to listen on any interface: {}", e))?;
-const IPFS_BOOTSTRAP_NODES: &[&str] = &[
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
-    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use libp2p::{multiaddr::Protocol, Multiaddr, kad::Key};
-    use std::{time::Duration, str::FromStr};
-    use tempfile::tempdir;
-    use tokio::time::timeout;
-    use ipfs_embed::SledStore;
-
-    /// Test helper to create a test node
     async fn create_test_node() -> (Node, tempfile::TempDir) {
         let _ = env_logger::try_init();
         let temp_dir = tempdir().unwrap();

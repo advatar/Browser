@@ -36,9 +36,9 @@ This checklist tracks the implementation status of all features and components i
 ### IPFS Integration
 - [x] Add IPFS implementation using ipfs-embed - Completed
 - [x] Create Node struct with Swarm integration - Completed
-- [ ] Implement Bitswap protocol - In Progress
+- [x] Implement Bitswap protocol - Complete (with documentation in BITSWAP.md)
 - [x] Handle block storage - Implemented with SledStore
-- [ ] Implement DHT functionality - Not started
+- [x] Implement DHT functionality - Completed with Kademlia integration and tests
 
 ### Blockchain Integration
 - [ ] Set up Substrate client - Not started

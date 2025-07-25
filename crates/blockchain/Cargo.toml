@@ -1,0 +1,74 @@
+[package]
+name = "blockchain"
+version = "0.1.0"
+edition = "2024"
+description = "Blockchain integration for the Browser project"
+authors = ["Your Name <your.email@example.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yourusername/browser"
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-io/std",
+    "sp-runtime/std",
+    "sp-std/std",
+]
+
+[dependencies]
+# Substrate
+frame-support = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+frame-system = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+sp-core = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+sp-runtime = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+sp-std = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+sp-io = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+
+# Crypto and serialization
+parity-scale-codec = { version = "3.0.0", default-features = false, features = ["derive"] }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+# Async and networking
+futures = "0.3"
+tokio = { version = "1.0", features = ["full"] }
+
+# Logging
+tracing = "0.1"
+log = "0.4"
+thiserror = "1.0"
+
+# Web3 and Ethereum compatibility (optional)
+web3 = { version = "0.18", optional = true, features = ["signing"] }
+
+[dev-dependencies]
+sp-core = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0", features = ["full"] }
+sp-io = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0", features = ["full"] }
+sp_keyring = { version = "7.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+tempfile = "3.3"
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+hex = "0.4"
+substrate-subxt = { version = "0.28", default-features = false, features = ["system"] }
+substrate-subxt-build = "0.28"
+substrate-subxt-proc-macros = "0.28"
+substrate-subxt-cli = "0.28"
+substrate-subxt-client = "0.28"
+substrate-subxt-codec = "0.28"
+substrate-subxt-core = "0.28"
+substrate-subxt-lightclient = { version = "0.28", optional = true }
+substrate-subxt-ws = "0.28"
+substrate-subxt-metadata = "0.28"
+substrate-subxt-rpc = "0.28"
+substrate-subxt-runtime = "0.28"
+substrate-subxt-signer = "0.28"
+substrate-subxt-test = { version = "0.28", features = ["test-runtime"] }
+substrate-subxt-wasm = { version = "0.28", optional = true }
+substrate-subxt-wasm-light = { version = "0.28", optional = true }
+substrate-subxt-wasm-runtime = { version = "0.28", optional = true }
+substrate-subxt-wasm-runtime-light = { version = "0.28", optional = true }
+substrate-subxt-wasm-test = { version = "0.28", optional = true }
+substrate-subxt-wasm-test-light = { version = "0.28", optional = true }

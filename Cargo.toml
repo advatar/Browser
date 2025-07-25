@@ -16,7 +16,7 @@ members = [
     "crates/btc-light",
     "crates/walletd",
     "crates/gui"
-]
+, "crates/blockchain"]
 resolver = "2"
 
 # Set up profiles for consistent builds
