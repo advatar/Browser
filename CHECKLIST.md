@@ -41,10 +41,10 @@ This checklist tracks the implementation status of all features and components i
 - [x] Implement DHT functionality - Completed with Kademlia integration and tests
 
 ### Blockchain Integration
-- [ ] Set up Substrate client - Not started
-- [ ] Implement wallet functionality - Not started
-- [ ] Add transaction signing - Not started
-- [ ] Handle chain synchronization - Not started
+- [x] Set up Substrate client - Implemented in crates/blockchain/src/lib.rs
+- [x] Implement wallet functionality - Implemented with key management and signing in wallet.rs
+- [x] Add transaction signing - Complete with transaction creation and verification in transaction.rs
+- [ ] Handle chain synchronization - Partially implemented with ChainSync in sync.rs
 
 ## 🌐 Phase 2: Web Browser Components
 
@@ -137,10 +137,10 @@ This checklist tracks the implementation status of all features and components i
 ## 🔄 Maintenance & Updates
 
 ### Documentation
-- [ ] API documentation
-- [ ] User guides
-- [ ] Developer documentation
-- [ ] Troubleshooting guides
+- [x] API documentation - Available in code doc comments and module-level documentation
+- [ ] User guides - Not yet created
+- [x] Developer documentation - Basic README files present in crates
+- [ ] Troubleshooting guides - Not yet created
 
 ### Community
 - [ ] Contribution guidelines

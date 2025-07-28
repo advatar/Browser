@@ -1,199 +1,308 @@
 # 🌐 Decentralized Web Browser
 
-A blueprint for building a fully-decentralized browser that can fetch content from IPFS, interact directly with blockchains, and provide a smooth user experience comparable to Chrome or Safari.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
+[![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org)
+[![Build Status](https://github.com/yourusername/browser/workflows/CI/badge.svg)](https://github.com/yourusername/browser/actions)
 
----
+A fully decentralized web browser built with Rust and modern web technologies, designed to provide true digital sovereignty without relying on centralized infrastructure. This browser fetches content from IPFS, interacts directly with blockchains, and maintains user privacy while delivering a familiar browsing experience.
 
-## 🎯 1. Clarify the End-State
+## 🎯 Vision
 
-| Requirement | What it means in practice |
-|-------------|---------------------------|
-| **No single point of failure** | The browser must resolve names, download assets, and submit transactions without relying on any vendor-hosted gateway, RPC service, or DNS server. |
-| **End-to-end verifiability** | Every byte that reaches the renderer must be content-addressed (IPFS CID or a blockchain Merkle proof) so the user can verify authenticity offline. |
-| **Local keys = local authority** | Wallet keys never leave the machine; signing flows happen in a hardware wallet or an isolated OS key-slot. |
-| **Opt-in bridges only** | HTTP(S) and DNS gateways are plug-ins that a power-user can turn on, but they start disabled. |
+This project aims to create a browser that operates without any single point of failure, where:
 
-> **Note**: Projects like Brave show it is possible to bundle an IPFS node, but they still default to central RPC endpoints and HTTP fall-backs, making them only "partly decentralised.”  ￼
+- **No centralized dependencies**: Content resolution, asset downloads, and transactions work without vendor-hosted gateways, RPC services, or DNS servers
+- **End-to-end verifiability**: Every byte is content-addressed (IPFS CID or blockchain Merkle proof) for offline verification
+- **Local key sovereignty**: Wallet keys never leave the device; all signing happens locally or via hardware wallets
+- **Privacy by design**: HTTP(S) and DNS gateways are optional plugins, disabled by default
 
-⸻
-
-## 🏗️ 2. High-Level Architecture
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
     subgraph Browser_Shell ["Browser Shell (Rust/Tauri)"]
-        UI["Tabs | Address-bar | Wallet UI | Settings | Extensions"]
+        UI["Tabs | Address Bar | Wallet UI | Settings"]
     end
     
     subgraph Core_Services ["Core Services"]
-        Renderer["Renderer<br/>(WebKit/Self)"]
-        Wallet["Wallet / Identity<br/>(SLIP-10 keystore)"]
+        Renderer["Web Renderer"]
+        Wallet["Wallet & Identity"]
     end
     
     subgraph P2P_Layer ["P2P Network Layer"]
-        libp2p["libp2p Fabric\n• Multiaddr stack\n• Kademlia DHT\n• Autonat\n• gossipsub\n• QUIC/Noise"]
+        libp2p["libp2p Stack\n• Kademlia DHT\n• Gossipsub\n• QUIC/Noise"]
     end
     
-    subgraph Blockchain_Nodes ["Blockchain Nodes"]
-        IPFS["IPFS Node\n(Bitswap + GraphSync)"]
-        ETH["ETH Light Client\n(Portal Network + Verkle trees)"]
-        BTC["BTC Neutrino\n(BIP-157/158)"]
-        L2s["Other L2s\n(SPV / ZK light)"]
+    subgraph Blockchain_Nodes ["Blockchain Integration"]
+        IPFS["IPFS Node\n(Bitswap)"]
+        ETH["Ethereum Light Client"]
+        BTC["Bitcoin Light Client"]
+        Substrate["Substrate Client"]
     end
     
-    UI -->|User Interaction| Renderer
-    UI -->|Wallet Operations| Wallet
-    
-    Renderer -->|Service-worker-like API| libp2p
-    Wallet -->|EIP-1193, PSBT| libp2p
-    
+    UI --> Renderer
+    UI --> Wallet
+    Renderer --> libp2p
+    Wallet --> libp2p
     libp2p --> IPFS
     libp2p --> ETH
     libp2p --> BTC
-    libp2p --> L2s
+    libp2p --> Substrate
 ```
 
-> **Note**: Everything in the P2P Network Layer and below operates in a peer-to-peer manner; there is no centralized "backend."”
+## ✨ Features
 
-⸻
+- **🔗 Native IPFS Integration**: Built-in IPFS node with Bitswap protocol for decentralized content retrieval
+- **⚡ Multi-Blockchain Support**: Integrated light clients for Ethereum, Bitcoin, and Substrate-based chains
+- **🔐 Secure Wallet Management**: Hardware wallet support with local key storage and signing
+- **🌐 P2P Networking**: libp2p-based networking stack with Kademlia DHT and Gossipsub
+- **🔒 Privacy-First Design**: No telemetry, optional Tor support, and local-first architecture
+- **🎨 Modern UI**: Cross-platform desktop application built with Tauri and TypeScript
+- **🧪 Comprehensive Testing**: Unit tests, integration tests, and end-to-end testing with Playwright
 
-## 🔧 3. Key Subsystems & Design Choices
+## 🛠️ Technology Stack
 
-| Subsystem | Design Notes |
-|-----------|--------------|
-| **Networking** | Use libp2p for discovery, multiplexing and encryption—IPFS, Portal (Ethereum), Filecoin, and Polkadot all share it, so one stack serves many chains. This keeps binary size reasonable. |
-| **Content Retrieval** | Implement the `ipfs://` and `ipns://` schemes natively. A request returns a CID, the browser asks Bitswap/GraphSync for the corresponding blocks, verifies each block's hash, reconstructs the file, and streams it into the renderer pipe. |
-| **Blockchain RPC** | Ship embedded light clients:<br>• Ethereum: Portal client + optional ZK-verifier for historical proofs<br>• Bitcoin: Neutrino<br>• EVM side-chains: sync headers only, then use on-demand proofs<br><br>No Infura/Alchemy by default (users may add them as a "bridge" plug-in). |
-| **Name Resolution** | Two layers:<br>1. ENS/Handshake/Unstoppable via on-chain look-ups<br>2. IPNS records (mutable signed pointers inside libp2p DHT)<br><br>ENS → IPFS hash mapping gives human-readable URLs without DNS. |
-| **Wallet & Signing** | Follow Frame's approach of exposing a system-wide provider (`window.ethereum`, `window.btc`) so any dApp or even an external CLI can request a signature through DBus/Native-messaging. Hardware wallets get first-class support (Ledger, Trezor, GridPlus) just like Frame does. |
-| **Execution Sandbox** | Keep Chromium/Servo rendering but run third-party JS in isolated WebAssembly compartments with a capability (cap)-oriented API. A cap can grant IPFS read, blockchain call, or sign rights independently. |
-| **Updates** | Ship the core via IPFS as a signed immutable bundle. The browser only trusts a new version if:<br>1. The CID matches a hash pinned in the project's community multisig on the governance chain, and<br>2. The binary signature matches at least N-of-M developer keys. |
-| **Privacy Defaults** | 1 Hop DHT queries, dandelion++ transaction relay, optional Tor/Noise transports, and no telemetry—metrics are published by opt-in relays and aggregated off-chain. |
-| **Bridges (Optional)** | A "gateway" plug-in can forward unresolved requests to HTTPS or a central RPC, but the UI shows a clear yellow indicator so the user knows they have left the trustless zone. |
+### Backend (Rust)
+- **[Rust](https://www.rust-lang.org/)** 1.70+ - Systems programming language for performance and safety
+- **[Tokio](https://tokio.rs/)** - Asynchronous runtime for concurrent networking
+- **[libp2p](https://libp2p.io/)** 0.48+ - Modular peer-to-peer networking stack
+- **[IPFS](https://ipfs.io/)** - InterPlanetary File System for decentralized storage
+- **[Substrate](https://substrate.io/)** - Blockchain development framework
+- **[sp-core](https://docs.rs/sp-core/)** - Substrate core primitives for cryptography
+- **[anyhow](https://docs.rs/anyhow/)** - Error handling
+- **[thiserror](https://docs.rs/thiserror/)** - Custom error types
 
-⸻
+### Frontend (TypeScript)
+- **[Tauri](https://tauri.app/)** 2.0+ - Cross-platform desktop application framework
+- **[TypeScript](https://www.typescriptlang.org/)** 5.0+ - Type-safe JavaScript for robust development
+- **[Vite](https://vitejs.dev/)** - Fast build tool and development server
+- **[Vitest](https://vitest.dev/)** - Unit testing framework
+- **[Playwright](https://playwright.dev/)** - End-to-end testing framework
+- **[ESLint](https://eslint.org/)** - Code linting and formatting
 
-## 🔄 4. Boot-sequence (cold start → first page)
+### Key Components
 
-1. **Bootstrap peers** – Hard-code 20 multiaddrs (can be replaced by scanning a QR code or Bluetooth-pairing with a friend).
-2. **Sync chain headers** – Download compact headers for each blockchain the user enables.
-3. **Initialize IPFS** – Join the IPFS swarm and prime a small block cache (logo, fonts, UI assets).
-4. **Load home tab** – Open the home tab served from a pinned CID; no HTTP involved.
+| Component | Technology | Purpose |
+|-----------|------------|----------|
+| **P2P Networking** | libp2p (Rust) | Peer discovery, multiplexing, encryption |
+| **Content Storage** | IPFS with Bitswap | Decentralized content addressing and retrieval |
+| **Blockchain Integration** | Substrate, Custom light clients | Multi-chain transaction and state verification |
+| **Wallet Management** | sp-core, Hardware wallet APIs | Secure key management and transaction signing |
+| **UI Framework** | Tauri + TypeScript | Cross-platform desktop interface |
+| **Testing** | Cargo test, Vitest, Playwright | Comprehensive test coverage |
 
-⸻
+## 🚀 Quick Start
 
-## 🛠️ 5. Developer Ergonomics
+### Prerequisites
 
-| Feature | Why it matters |
-|---------|----------------|
-| **File-system overlay** (`ipfs mount`) | Developers can press Save in their editor and files immediately appear at a new CID with automatic tab hot-reloading. |
-| **Chain-emulated test-nets** | Ship with Anvil-like in-process chains (EVM & Bitcoin regtest) for seamless development without external dependencies. |
-| **Extension model** | Web-extensions use local IPC instead of `chrome.*` API, with UIs published as IPFS CIDs for true decentralization. |
-| **CLI companion** | Powerful command-line interface with commands like `browserctl pin Qm…` and `browserctl send 0.1 ETH` for CI/CD integration. |
+- **Rust** 1.70 or later ([Install Rust](https://rustup.rs/))
+- **Node.js** 18+ and **pnpm** ([Install Node.js](https://nodejs.org/))
+- **Git** for version control
 
-⸻
+### Installation
 
-## 🔒 6. Security Hardening
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/browser.git
+cd browser
 
-- **Deterministic builds** using Nix/Guix for verifiable release hashes
-- **Secure IPC** with protobuf-encoded and session key-signed inter-process messages
-- **Strict CSP** defaulting to `ipfs://` and local origin only
-- **Storage management** with automatic pin-set garbage collection and cost estimation for Filecoin/Arweave storage
+# Install Rust dependencies
+cargo build
 
-⸻
+# Install Node.js dependencies
+pnpm install
 
-## 🔍 7. Browser Comparison: Current State vs. Our Vision
-
-| Browser | Current Capabilities | Centralization Concerns |
-|---------|----------------------|-------------------------|
-| **Brave** | • Bundles go-IPFS<br>• Built-in EVM wallet | • Default RPC uses Brave/Infura<br>• Falls back to HTTPS for slow IPFS blocks |
-| **Frame** | • System-wide wallet<br>• Hardware wallet support<br>• Open source | • Requires user-supplied RPC endpoints |
-| **Agregore/Beaker** | • Experimental P2P fetch<br>• dat:// protocol support | • No production-grade light clients<br>• No hardware wallet integration |
-
-> **Our Solution** removes these bottlenecks by shipping all necessary components (light clients, DHT, P2P transport) in a single binary with community-governed updates via on-chain multisig.
-
-⸻
-
-## 🧱 8. Implementation Stack
-
-| Layer | Technology | Why We Chose It |
-|-------|------------|------------------|
-| **P2P Transport** | rust-libp2p, quinn (QUIC) | Unified crate supporting multiple protocols |
-| **IPFS** | rust-ipfs / firestorm | Memory-safe, async, libp2p-compatible |
-| **Ethereum Light Client** | trin (Portal Network) + reth components | Modular Rust implementation |
-| **Bitcoin Light Client** | neutrino-rs | Implements BIP-157/158 for compact verification |
-| **WASM Sandbox** | wasmtime with capability masks | High-performance, security-audited runtime |
-| **UI Framework** | tauri + wry | Native WebKit/WebView2/WebKitGTK with <60MB footprint |
-
-
-⸻
-
-## 🗓️ 9. Roll-out Plan
-
-```mermaid
-gantt
-    title Development Roadmap
-    dateFormat  YYYY-MM
-    section Phase 1
-    α-prototype (CLI)        :2025-01, 3m
-    section Phase 2
-    β (Renderer + Wallet)    :2025-04, 6m
-    section Phase 3
-    v1.0 (Full Release)     :2025-10, 6m
-    section Future
-    v1.1+ (Advanced Features) :2026-04, 6m
+# Build the GUI components
+pnpm run build
 ```
 
-| Version | Timeline | Key Features |
-|---------|----------|--------------|
-| **α-prototype** | Q1 2025 | • CLI for `ipfs://` URLs<br>• ENS → IPFS resolution |
-| **β Release** | Q2 2025 | • Web renderer<br>• Wallet UI<br>• Ethereum Portal light client |
-| **v1.0** | Q4 2025 | • Hardware wallet support<br>• Bitcoin Neutrino<br>• Auto-updates via CID-gated multisig |
-| **v1.1+** | 2026+ | • Privacy transports<br>• ZK-verified historical states<br>• Community extension store |
+### Running the Application
 
-⸻
+```bash
+# Development mode with hot reload
+pnpm run dev
 
-## 🚧 10. Key Challenges
+# Build for production
+cargo build --release
 
-```mermaid
-pie
-    title Technical Challenges
-    "Mobile Optimization" : 35
-    "Proof Sizes" : 25
-    "User Experience" : 25
-    "Regulatory" : 15
+# Run tests
+cargo test --workspace
+pnpm run test
 ```
 
-| Challenge | Impact | Mitigation Strategy |
-|-----------|--------|----------------------|
-| **Mobile Power Consumption** | High battery drain from light clients | • Optimize sync algorithms<br>• Implement background throttling<br>• Cache aggressively |
-| **Large Proof Sizes** | ~40kB per Verkle proof impacts performance | • Implement proof batching<br>• Explore ZK-succinct proofs<br>• Progressive verification |
-| **First-run Experience** | Long sync times may frustrate users | • Clear progress indicators<br>• Progressive loading<br>• PWA fallback mode |
-| **Regulatory Compliance** | Potential KYC requirements in some regions | • Modular architecture<br>• Optional compliance layers<br>• Community governance for regional adaptations |
+## 🏗️ Development Setup
 
-⸻
+### Project Structure
 
-## 🎯 Take-away
-
-> **A truly decentralised browser is not just "Chrome with an RPC key"**
-> 
-> It's a **self-sovereign node suite**—combining IPFS, light clients, and wallet functionality—
-> wrapped in a familiar user experience. This blueprint delivers a powerful, all-in-one solution 
-> that puts users in full control of their digital sovereignty.
-
-### Key Benefits
-
-```mermaid
-flowchart LR
-    A[User Control] -->|Empowers| B[Digital Sovereignty]
-    C[Decentralized Architecture] -->|Ensures| D[Resilience]
-    E[Open Source] -->|Enables| F[Community Trust]
-    G[Modular Design] -->|Allows| H[Future Extensibility]
+```
+browser/
+├── crates/
+│   ├── blockchain/     # Substrate client and wallet management
+│   ├── p2p/           # libp2p networking stack
+│   ├── ipfs/          # IPFS node implementation
+│   ├── gui/           # Tauri-based frontend
+│   ├── eth-light/     # Ethereum light client
+│   ├── btc-light/     # Bitcoin light client
+│   └── walletd/       # Wallet daemon
+├── src/               # Main application entry point
+├── Cargo.toml         # Rust workspace configuration
+└── package.json       # Node.js workspace configuration
 ```
 
-- **User Empowerment**: Full control over data and digital identity
-- **True Decentralization**: No reliance on centralized services
-- **Verifiable Security**: All components are open source and auditable
-- **Future-Proof**: Modular architecture adapts to evolving web standards
+### Development Workflow
 
-By following this blueprint, we can deliver a powerful, user-friendly browser that respects privacy and puts users back in control of their online experience.
+1. **Backend Development** (Rust)
+   ```bash
+   # Run specific crate tests
+   cargo test -p blockchain
+   cargo test -p p2p
+   
+   # Check code formatting
+   cargo fmt --check
+   
+   # Run clippy for linting
+   cargo clippy -- -D warnings
+   ```
+
+2. **Frontend Development** (TypeScript)
+   ```bash
+   cd crates/gui
+   
+   # Start development server
+   npm run dev
+   
+   # Run type checking
+   npm run typecheck
+   
+   # Run linting
+   npm run lint
+   ```
+
+3. **Integration Testing**
+   ```bash
+   # Run all tests
+   cargo test --workspace
+   
+   # Run end-to-end tests
+   pnpm run test:e2e
+   
+   # Generate test coverage
+   pnpm run test:coverage
+   ```
+
+### Environment Setup
+
+For blockchain integration tests, you may need a local Substrate node:
+
+```bash
+# Install substrate (optional, for integration tests)
+cargo install --git https://github.com/paritytech/substrate substrate --tag v3.0.0
+
+# Run local test node
+substrate --dev --tmp
+```
+
+## 📚 Usage
+
+### Basic Operations
+
+```bash
+# Start the browser
+./target/release/browser
+
+# CLI operations (when implemented)
+browserctl --help
+browserctl wallet create
+browserctl ipfs pin <CID>
+```
+
+### Configuration
+
+Configuration files are stored in:
+- **Linux**: `~/.config/browser/`
+- **macOS**: `~/Library/Application Support/browser/`
+- **Windows**: `%APPDATA%\browser\`
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+
+### Development Process
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
+4. **Push** to the branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Code Standards
+
+- **Rust**: Follow `rustfmt` and `clippy` recommendations
+- **TypeScript**: Use ESLint configuration provided
+- **Commits**: Use [Conventional Commits](https://conventionalcommits.org/)
+- **Documentation**: Update relevant docs for new features
+
+### Testing Requirements
+
+- Unit tests for all new functionality
+- Integration tests for cross-component features
+- End-to-end tests for user-facing features
+- Minimum 80% code coverage
+
+## 📖 Documentation
+
+- **[API Documentation](https://docs.rs/browser)** - Rust API docs
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - Detailed system design
+- **[Development Guide](docs/DEVELOPMENT.md)** - Setup and contribution guide
+- **[User Manual](docs/USER_GUIDE.md)** - End-user documentation
+
+## 🐛 Bug Reports & Feature Requests
+
+Please use [GitHub Issues](https://github.com/yourusername/browser/issues) to:
+- Report bugs with detailed reproduction steps
+- Request new features with clear use cases
+- Ask questions about usage or development
+
+## 🔒 Security
+
+For security vulnerabilities, please email [security@yourdomain.com](mailto:security@yourdomain.com) instead of using public issues.
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+```
+MIT License
+
+Copyright (c) 2025 Browser Project Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## 🙏 Acknowledgments
+
+- **[libp2p](https://libp2p.io/)** - Modular peer-to-peer networking
+- **[IPFS](https://ipfs.io/)** - InterPlanetary File System
+- **[Substrate](https://substrate.io/)** - Blockchain development framework
+- **[Tauri](https://tauri.app/)** - Cross-platform app framework
+- **[Rust Community](https://www.rust-lang.org/community)** - Amazing ecosystem and support
+
+---
+
+**Built with ❤️ by the decentralized web community**
