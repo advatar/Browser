@@ -32,20 +32,37 @@ flowchart TD
     Launch --> Setup[Initial Setup]
 ```
 
+#### Option A: Download from GitHub Releases
+
 1. Visit the [Releases page](https://github.com/advatar/browser/releases)
 2. Download the appropriate installer for your platform:
-   - **Windows**: `browser-setup-x64.msi`
-   - **macOS**: `browser-x64.dmg`
-   - **Linux**: `browser-x64.AppImage` or `browser-x64.deb`
+   - **Windows**: `decentralized-browser-v0.1.0.msi`
+   - **macOS**: `decentralized-browser-v0.1.0.dmg`
+   - **Linux**: `decentralized-browser-v0.1.0.AppImage`, `decentralized-browser-v0.1.0.deb`, or `decentralized-browser-v0.1.0.rpm`
 
-3. Verify the download signature (recommended):
-   ```bash
-   # Download the signature file
-   curl -O https://github.com/advatar/browser/releases/download/v0.1.0/browser-setup-x64.msi.sig
-   
-   # Verify with GPG
-   gpg --verify browser-setup-x64.msi.sig browser-setup-x64.msi
-   ```
+#### Option B: Download from Repository
+
+Alternatively, download directly from the repository's dist/ folder:
+
+- **Windows**: [decentralized-browser-v0.1.0.msi](../dist/decentralized-browser-v0.1.0.msi)
+- **macOS**: [decentralized-browser-v0.1.0.dmg](../dist/decentralized-browser-v0.1.0.dmg)
+- **Linux (DEB)**: [decentralized-browser-v0.1.0.deb](../dist/decentralized-browser-v0.1.0.deb)
+- **Linux (RPM)**: [decentralized-browser-v0.1.0.rpm](../dist/decentralized-browser-v0.1.0.rpm)
+- **Linux (AppImage)**: [decentralized-browser-v0.1.0.AppImage](../dist/decentralized-browser-v0.1.0.AppImage)
+
+#### Verify Download (Recommended)
+
+```bash
+# Download checksums and signatures
+curl -O https://github.com/advatar/browser/releases/download/v0.1.0/checksums.txt
+curl -O https://github.com/advatar/browser/releases/download/v0.1.0/signatures.asc
+
+# Verify checksum (example for Windows)
+sha256sum -c checksums.txt --ignore-missing
+
+# Verify GPG signature
+gpg --verify signatures.asc decentralized-browser-v0.1.0.msi
+```
 
 4. Install the application:
    - **Windows**: Double-click the `.msi` file and follow the installer
