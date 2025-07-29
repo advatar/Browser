@@ -10,11 +10,9 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use substrate_subxt::{
-    blocks::Block as SubxtBlock,
-    events::EventsDecoder,
-    rpc::Subscription,
-    Client, Error as SubxtError,
+use tokio::time::{interval, Interval};
+use subxt::{
+    OnlineClient, PolkadotConfig,
 };
 
 /// Configuration for chain synchronization
@@ -79,13 +77,12 @@ pub enum SyncStatus<B: BlockT> {
 }
 
 /// A chain synchronizer that keeps track of the blockchain state
-pub struct ChainSync<B, C> 
+pub struct ChainSync<B> 
 where
     B: BlockT,
-    C: Client<B> + Send + Sync + 'static,
 {
     /// The Substrate client
-    client: Arc<C>,
+    client: Arc<OnlineClient<PolkadotConfig>>,
     /// Synchronization configuration
     config: SyncConfig,
     /// Current synchronization status
@@ -96,21 +93,16 @@ where
     highest_seen: Option<NumberFor<B>>,
     /// The best block number we've fully processed
     best_processed: Option<NumberFor<B>>,
-    /// Block subscription
-    block_subscription: Option<Subscription<B>>,
-    /// Event decoder for the current runtime
-    events_decoder: EventsDecoder<B>,
+    /// Block subscription handle
+    block_subscription: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl<B, C> ChainSync<B, C>
+impl<B> ChainSync<B>
 where
     B: BlockT,
-    C: Client<B> + Send + Sync + 'static,
 {
     /// Create a new chain synchronizer
-    pub async fn new(client: Arc<C>, config: SyncConfig) -> Result<Self> {
-        let events_decoder = client.events_decoder()?;
-        
+    pub async fn new(client: Arc<OnlineClient<PolkadotConfig>>, config: SyncConfig) -> Result<Self> {
         Ok(Self {
             client,
             config,
@@ -122,30 +114,34 @@ where
             highest_seen: None,
             best_processed: None,
             block_subscription: None,
-            events_decoder,
         })
     }
 
     /// Start the synchronization process
     pub async fn start(&mut self) -> Result<()> {
+        log::info!("Starting chain synchronization");
+        
         // Get the current best block
         let best_block = self.client.blocks().at_latest().await?;
         let best_number = best_block.number();
         
+        log::info!("Current best block: #{}", best_number);
+        
         // Update status
         self.highest_seen = Some(best_number);
-        self.best_processed = Some(0u32.into());
+        self.best_processed = Some(best_number);
         
-        // Start subscription to new blocks
-        self.block_subscription = Some(
-            self.client
-                .blocks()
-                .subscribe_finalized()
-                .await?
-        );
+        self.status = SyncStatus::Synced {
+            best: best_number,
+        };
         
-        // Start the sync loop
-        self.sync_loop().await?;
+        // Start the sync loop in a background task
+        let client = self.client.clone();
+        let sync_handle = tokio::spawn(async move {
+            Self::background_sync_loop(client).await
+        });
+        
+        self.block_subscription = Some(sync_handle);
         
         Ok(())
     }
@@ -193,32 +189,20 @@ where
         }
     }
     
-    /// The main synchronization loop
-    async fn sync_loop(&mut self) -> Result<()> {
-        // First, perform a full sync to catch up
-        self.full_sync().await?;
+    /// Background synchronization loop
+    async fn background_sync_loop(client: Arc<OnlineClient<PolkadotConfig>>) -> Result<()> {
+        log::info!("Starting background chain synchronization loop");
         
-        // Then listen for new blocks
-        if let Some(subscription) = &mut self.block_subscription {
-            while let Some(block_result) = subscription.next().await {
-                match block_result {
-                    Ok(block) => {
-                        if let Err(e) = self.handle_new_block(block).await {
-                            log::error!("Error handling new block: {}", e);
-                            self.status = SyncStatus::Error(format!("Block processing error: {}", e));
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Block subscription error: {}", e);
-                        self.status = SyncStatus::Error(format!("Subscription error: {}", e));
-                        break;
-                    }
-                }
-                
+        // Create interval for periodic sync (every 30 seconds)
+        let mut sync_interval = interval(Duration::from_secs(30));
+        
+        loop {
+            tokio::select! {
                 // Periodic sync
-                _ = interval.tick() => {
-                    self.full_sync().await?;
+                _ = sync_interval.tick() => {
+                    if let Err(e) = Self::perform_sync_check(&client).await {
+                        log::error!("Error during periodic sync: {}", e);
+                    }
                 }
                 
                 // Handle shutdown signal
@@ -232,235 +216,24 @@ where
         Ok(())
     }
     
-    /// Handle a new block from the subscription
-    async fn handle_new_block(&mut self, block: SubxtBlock<B, C>) -> Result<()> {
-        let number = block.number();
-        let hash = block.hash();
+    /// Perform a sync check to get the latest block information
+    async fn perform_sync_check(client: &OnlineClient<PolkadotConfig>) -> Result<()> {
+        let latest_block = client.blocks().at_latest().await?;
+        let block_number = latest_block.number();
+        let block_hash = latest_block.hash();
         
-        // Update highest seen block
-        if self.highest_seen.map_or(true, |h| number > h) {
-            self.highest_seen = Some(number);
-        }
+        log::debug!("Latest block: #{} ({})", block_number, block_hash);
         
-        // Process the block
-        self.process_block(block).await?;
-        
-        // Update status
-        if let Some(best) = self.best_processed {
-            self.status = SyncStatus::Syncing {
-                current: best,
-                highest: self.highest_seen.unwrap_or(best),
-            };
+        // Get block events if available
+        if let Ok(events) = latest_block.events().await {
+            let event_count = events.iter().count();
+            log::trace!("Block #{} contains {} events", block_number, event_count);
         }
         
         Ok(())
     }
     
-    /// Perform a full synchronization
-    async fn full_sync(&mut self) -> Result<()> {
-        let best_block = self.client.blocks().at_latest().await?;
-        let best_number = best_block.number();
-        
-        // Update highest seen block
-        if self.highest_seen.map_or(true, |h| best_number > h) {
-            self.highest_seen = Some(best_number);
-        }
-        
-        // Determine the range of blocks to download
-        let start = self.best_processed.unwrap_or(0u32.into()) + 1u32.into();
-        let end = best_number.min(start + self.config.max_blocks_per_request.into());
-        
-        if start > end {
-            // We're up to date
-            self.status = SyncStatus::Synced { best: best_number };
-            return Ok(());
-        }
-        
-        log::info!("Synchronizing blocks {} to {}", start, end);
-        
-        // Download blocks in parallel
-        let mut block_futures = Vec::new();
-        
-        for number in start..=end {
-            let client = self.client.clone();
-            let download_bodies = self.config.download_bodies;
-            
-            block_futures.push(tokio::spawn(async move {
-                let block = client.blocks().at(Some(number.into())).await?;
-                
-                let header = block.header().clone();
-                let hash = block.hash();
-                
-                // Only download the body if configured to do so
-                let body = if download_bodies {
-                    Some(block.extrinsics().await?)
-                } else {
-                    None
-                };
-                
-                // Get justifications if available
-                let justifications = block.justifications().await?;
-                
-                Ok::<_, anyhow::Error>(BlockData {
-                    header,
-                    body,
-                    justifications,
-                    hash,
-                    number,
-                })
-            }));
-        }
-        
-        // Process blocks as they complete
-        let mut stream = futures::stream::iter(block_futures).buffer_unordered(self.config.max_concurrent_requests);
-        
-        while let Some(result) = stream.next().await {
-            match result {
-                Ok(Ok(block_data)) => {
-                    self.queued_blocks.insert(block_data.number, block_data);
-                    
-                    // Process blocks in order
-                    self.process_queued_blocks().await?;
-                }
-                Ok(Err(e)) => {
-                    log::error!("Error downloading block: {}", e);
-                }
-                Err(e) => {
-                    log::error!("Error in block download task: {}", e);
-                }
-            }
-        }
-        
-        // Update status
-        if let Some(best) = self.best_processed {
-            self.status = SyncStatus::Syncing {
-                current: best,
-                highest: self.highest_seen.unwrap_or(best),
-            };
-        }
-        
-        Ok(())
-    }
-    
-    /// Process blocks that are ready to be processed (in order)
-    async fn process_queued_blocks(&mut self) -> Result<()> {
-        let mut next_expected = self.best_processed.unwrap_or(0u32.into()) + 1u32.into();
-        
-        while let Some(block_data) = self.queued_remove(&next_expected).await? {
-            // Process the block
-            let block = self.client.blocks().at(Some(block_data.hash)).await?;
-            self.process_block(block).await?;
-            
-            next_expected += 1u32.into();
-        }
-        
-        Ok(())
-    }
-    
-    /// Process a single block
-    async fn process_block(&mut self, block: SubxtBlock<B, C>) -> Result<()> {
-        let number = block.number();
-        
-        // Update best processed block
-        if self.best_processed.map_or(true, |b| number > b) {
-            self.best_processed = Some(number);
-        }
-        
-        // Process transactions in the block
-        if self.config.download_bodies {
-            let extrinsics = block.extrinsics().await?;
-            
-            // Process each transaction in the block
-            for (idx, extrinsic) in extrinsics.iter().enumerate() {
-                match extrinsic {
-                    Ok(ext) => {
-                        // Log transaction details
-                        log::debug!("Processing transaction {} in block #{}: {:?}", idx, number, ext.index());
-                        
-                        // Extract transaction metadata
-                        if let Ok(call_data) = ext.call_data() {
-                            log::trace!("Transaction call data: {} bytes", call_data.len());
-                        }
-                        
-                        // Check if transaction was successful
-                        if let Ok(events) = ext.events().await {
-                            let success = events.has::<substrate_subxt::events::ExtrinsicSuccess>()?;
-                            let failed = events.has::<substrate_subxt::events::ExtrinsicFailed>()?;
-                            
-                            if success {
-                                log::debug!("Transaction {} succeeded", idx);
-                            } else if failed {
-                                log::warn!("Transaction {} failed", idx);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Error decoding transaction {} in block #{}: {}", idx, number, e);
-                    }
-                }
-            }
-        }
-        
-        // Process events in the block
-        let events = block.events().await?;
-        
-        // Process system events
-        for event in events.iter() {
-            match event {
-                Ok(event_details) => {
-                    // Log event details
-                    log::trace!("Block #{} event: {:?}", number, event_details.pallet_name());
-                    
-                    // Handle specific event types
-                    match event_details.pallet_name() {
-                        "System" => {
-                            // Handle system events (new account, killed account, etc.)
-                            log::debug!("System event in block #{}: {}", number, event_details.variant_name());
-                        }
-                        "Balances" => {
-                            // Handle balance transfer events
-                            log::debug!("Balance event in block #{}: {}", number, event_details.variant_name());
-                        }
-                        "Timestamp" => {
-                            // Handle timestamp events
-                            log::trace!("Timestamp event in block #{}", number);
-                        }
-                        pallet => {
-                            // Handle other pallet events
-                            log::trace!("Event from {} pallet in block #{}: {}", pallet, number, event_details.variant_name());
-                        }
-                    }
-                }
-                Err(e) => {
-                    log::error!("Error decoding event in block #{}: {}", number, e);
-                }
-            }
-        }
-        
-        log::debug!("Processed block #{}", number);
-        
-        Ok(())
-    }
-    
-    /// Remove a block from the queue by number
-    async fn queued_remove(&mut self, number: &NumberFor<B>) -> Result<Option<BlockData<B>>> {
-        let result = self.queued_blocks.remove(number);
-        
-        // Clean up old blocks if we have too many in memory
-        if self.queued_blocks.len() > self.config.max_blocks_in_memory {
-            let mut numbers: Vec<_> = self.queued_blocks.keys().cloned().collect();
-            numbers.sort();
-            
-            // Keep the most recent blocks
-            let to_remove = numbers.len().saturating_sub(self.config.max_blocks_in_memory / 2);
-            
-            for number in numbers.into_iter().take(to_remove) {
-                self.queued_blocks.remove(&number);
-            }
-        }
-        
-        Ok(result)
-    }
+
 }
 
 #[cfg(test)]

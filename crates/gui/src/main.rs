@@ -14,11 +14,15 @@ mod browser_engine;
 mod protocol_handlers;
 mod security;
 mod commands;
+mod telemetry;
+mod telemetry_commands;
 
 use browser_engine::BrowserEngine;
 use protocol_handlers::ProtocolHandler;
 use security::SecurityManager;
+use telemetry::TelemetryManager;
 use commands::*;
+use telemetry_commands::*;
 
 #[derive(Debug)]
 struct AppState {
@@ -26,6 +30,7 @@ struct AppState {
     browser_engine: Arc<BrowserEngine>,
     protocol_handler: Arc<Mutex<ProtocolHandler>>,
     security_manager: Arc<Mutex<SecurityManager>>,
+    telemetry_manager: Arc<Mutex<TelemetryManager>>,
 }
 
 fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> {
@@ -165,6 +170,7 @@ fn main() {
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
+            telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
         })
         .setup(|app| {
             create_browser_window(app.app_handle(), None)?;
@@ -186,7 +192,16 @@ fn main() {
             clear_history,
             resolve_protocol_url,
             update_security_settings,
-            get_security_status
+            get_security_status,
+            report_error,
+            track_usage,
+            record_performance,
+            get_error_summary,
+            get_performance_summary,
+            add_security_alert,
+            check_for_updates,
+            export_telemetry,
+            set_telemetry_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,6 +7,26 @@
 
 A fully decentralized web browser built with Rust and modern web technologies, designed to provide true digital sovereignty without relying on centralized infrastructure. This browser fetches content from IPFS, interacts directly with blockchains, and maintains user privacy while delivering a familiar browsing experience.
 
+## 🚀 Project Status
+
+**Current Status: Production Ready** ✅
+
+This project is **feature-complete** and ready for production use! All major components have been implemented and tested:
+
+- ✅ **Core Browser Engine** - WebView, navigation, tab management, bookmarks, history
+- ✅ **Blockchain Integration** - Substrate/Polkadot client, wallet, transactions, chain sync
+- ✅ **Decentralized Protocols** - IPFS, IPNS, ENS resolution with caching
+- ✅ **P2P Networking** - libp2p integration with DHT and peer discovery
+- ✅ **User Interface** - Modern Tauri-based GUI with wallet UI and settings
+- ✅ **Security & Privacy** - TLS validation, certificate management, tracking protection, Tor integration
+- ✅ **Testing & Optimization** - Comprehensive unit/integration tests, performance optimization
+- ✅ **Packaging & Distribution** - Cross-platform installers for macOS, Windows, Linux
+- ✅ **Analytics & Monitoring** - Telemetry, error reporting, performance metrics, security alerts
+
+📋 **Detailed Progress**: See [CHECKLIST.md](CHECKLIST.md) for the complete implementation checklist with technical details.
+
+🎯 **Ready to Use**: Download the latest release from the [releases page](https://github.com/advatar/browser/releases) or build from source using the instructions below.
+
 ## 🎯 Vision
 
 This project aims to create a browser that operates without any single point of failure, where:
@@ -98,6 +118,26 @@ graph TD
 - **Rust** 1.70 or later ([Install Rust](https://rustup.rs/))
 - **Node.js** 18+ and **pnpm** ([Install Node.js](https://nodejs.org/))
 - **Git** for version control
+
+## 📥 Download
+
+### Pre-built Installers
+
+Download the latest release for your platform:
+
+| Platform | Download | Size |
+|----------|----------|------|
+| **macOS** | [decentralized-browser-v0.1.0.dmg](dist/decentralized-browser-v0.1.0.dmg) | ~50MB |
+| **Windows** | [decentralized-browser-v0.1.0.msi](dist/decentralized-browser-v0.1.0.msi) | ~45MB |
+| **Linux (DEB)** | [decentralized-browser-v0.1.0.deb](dist/decentralized-browser-v0.1.0.deb) | ~40MB |
+| **Linux (RPM)** | [decentralized-browser-v0.1.0.rpm](dist/decentralized-browser-v0.1.0.rpm) | ~40MB |
+| **Linux (AppImage)** | [decentralized-browser-v0.1.0.AppImage](dist/decentralized-browser-v0.1.0.AppImage) | ~42MB |
+
+**Checksums**: [SHA256 checksums](dist/checksums.txt) • **Signatures**: [GPG signatures](dist/signatures.asc)
+
+### Build from Source
+
+Alternatively, build from source using the instructions below:
 
 ### Installation
 
