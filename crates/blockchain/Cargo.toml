@@ -19,13 +19,13 @@ std = [
 ]
 
 [dependencies]
-# Substrate
-frame-support = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-frame-system = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-sp-core = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-sp-runtime = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-sp-std = { version = "4.0.0-dev", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
-sp-io = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+# Polkadot SDK - using stable release
+frame-support = { version = "37.0.0", default-features = false }
+frame-system = { version = "37.0.0", default-features = false }
+sp-core = { version = "21.0.0", default-features = false }
+sp-runtime = { version = "24.0.0", default-features = false }
+sp-std = { version = "8.0.0", default-features = false }
+sp-io = { version = "23.0.0", default-features = false }
 
 # Crypto and serialization
 parity-scale-codec = { version = "3.0.0", default-features = false, features = ["derive"] }
@@ -45,30 +45,13 @@ thiserror = "1.0"
 web3 = { version = "0.18", optional = true, features = ["signing"] }
 
 [dev-dependencies]
-sp-core = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0", features = ["full"] }
-sp-io = { version = "7.0.0", default-features = false, git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0", features = ["full"] }
-sp_keyring = { version = "7.0.0", git = "https://github.com/paritytech/substrate.git", branch = "polkadot-v1.0.0" }
+sp-core = { version = "21.0.0", default-features = false }
+sp-io = { version = "23.0.0", default-features = false }
+sp-keyring = { version = "24.0.0" }
 tempfile = "3.3"
 tokio = { version = "1.0", features = ["full"] }
 futures = "0.3"
 hex = "0.4"
-substrate-subxt = { version = "0.28", default-features = false, features = ["system"] }
-substrate-subxt-build = "0.28"
-substrate-subxt-proc-macros = "0.28"
-substrate-subxt-cli = "0.28"
-substrate-subxt-client = "0.28"
-substrate-subxt-codec = "0.28"
-substrate-subxt-core = "0.28"
-substrate-subxt-lightclient = "0.28"
-substrate-subxt-ws = "0.28"
-substrate-subxt-metadata = "0.28"
-substrate-subxt-rpc = "0.28"
-substrate-subxt-runtime = "0.28"
-substrate-subxt-signer = "0.28"
-substrate-subxt-test = { version = "0.28", features = ["test-runtime"] }
-substrate-subxt-wasm = "0.28"
-substrate-subxt-wasm-light = "0.28"
-substrate-subxt-wasm-runtime = "0.28"
-substrate-subxt-wasm-runtime-light = "0.28"
-substrate-subxt-wasm-test = "0.28"
-substrate-subxt-wasm-test-light = "0.28"
+# Modern subxt for Substrate interaction
+subxt = { version = "0.35", features = ["substrate-compat"] }
+subxt-signer = "0.35"

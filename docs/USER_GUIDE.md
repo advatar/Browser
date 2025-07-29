@@ -32,7 +32,7 @@ flowchart TD
     Launch --> Setup[Initial Setup]
 ```
 
-1. Visit the [Releases page](https://github.com/yourusername/browser/releases)
+1. Visit the [Releases page](https://github.com/advatar/browser/releases)
 2. Download the appropriate installer for your platform:
    - **Windows**: `browser-setup-x64.msi`
    - **macOS**: `browser-x64.dmg`
@@ -41,7 +41,7 @@ flowchart TD
 3. Verify the download signature (recommended):
    ```bash
    # Download the signature file
-   curl -O https://github.com/yourusername/browser/releases/download/v0.1.0/browser-setup-x64.msi.sig
+   curl -O https://github.com/advatar/browser/releases/download/v0.1.0/browser-setup-x64.msi.sig
    
    # Verify with GPG
    gpg --verify browser-setup-x64.msi.sig browser-setup-x64.msi
@@ -56,7 +56,7 @@ flowchart TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/browser.git
+git clone https://github.com/advatar/browser.git
 cd browser
 
 # Install dependencies

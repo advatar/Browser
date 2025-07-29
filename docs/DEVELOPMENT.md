@@ -62,7 +62,7 @@ pnpm --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/browser.git
+git clone https://github.com/advatar/browser.git
 cd browser
 
 # Install dependencies
