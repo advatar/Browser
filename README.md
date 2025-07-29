@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org)
-[![Build Status](https://github.com/yourusername/browser/workflows/CI/badge.svg)](https://github.com/yourusername/browser/actions)
+[![Build Status](https://github.com/advatar/browser/workflows/CI/badge.svg)](https://github.com/advatar/browser/actions)
 
 A fully decentralized web browser built with Rust and modern web technologies, designed to provide true digital sovereignty without relying on centralized infrastructure. This browser fetches content from IPFS, interacts directly with blockchains, and maintains user privacy while delivering a familiar browsing experience.
 
@@ -103,7 +103,7 @@ graph TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/browser.git
+git clone https://github.com/advatar/browser.git
 cd browser
 
 # Install Rust dependencies
@@ -258,7 +258,7 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ## 🐛 Bug Reports & Feature Requests
 
-Please use [GitHub Issues](https://github.com/yourusername/browser/issues) to:
+Please use [GitHub Issues](https://github.com/advatar/browser/issues) to:
 - Report bugs with detailed reproduction steps
 - Request new features with clear use cases
 - Ask questions about usage or development

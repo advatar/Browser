@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "IPFS implementation with enhanced P2P capabilities"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/browser"
+repository = "https://github.com/advatar/browser"
 
 [features]
 default = ["kad", "mdns"]
