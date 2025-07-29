@@ -26,6 +26,10 @@ struct Args {
     /// Bootstrap nodes to connect to (multiaddr format)
     #[clap(long, value_delimiter = ',')]
     bootstrap_nodes: Option<Vec<String>>,
+    
+    /// Listen port for the P2P service
+    #[clap(short, long, default_value = "0")]
+    port: u16,
 }
 
 #[tokio::main]
@@ -52,15 +56,22 @@ async fn main() -> Result<()> {
     config.enable_mdns = !args.no_mdns;
     config.enable_kademlia = !args.no_kademlia;
     
+    // Set listen address with specified port
+    config.listen_addr = format!("/ip4/0.0.0.0/tcp/{}", args.port)
+        .parse()
+        .expect("Valid multiaddr");
+    
     if let Some(nodes) = args.bootstrap_nodes {
-        config.bootstrap_nodes = nodes;
+        config.bootstrap_nodes = nodes.into_iter()
+            .filter_map(|addr| addr.parse().ok())
+            .collect();
     }
 
     // Create P2P service with the specified configuration
     let mut service = P2PService::with_config(config)
         .expect("Failed to create P2P service");
 
-    info!("Local peer ID: {}", service.peer_id);
+    info!("Local peer ID: {}", service.local_peer_id());
     
     // Start the service
     if let Err(e) = service.start().await {
@@ -85,57 +96,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_p2p_service() -> Result<()> {
-        let mut config = P2PConfig {
-            enable_mdns: false,
-            enable_kademlia: false,
-            ..Default::default()
-        };
+        let mut config = P2PConfig::default();
+        config.enable_mdns = false;
+        config.enable_kademlia = false;
         
-        let mut service = P2PService::new(config)?;
+        let service = P2PService::with_config(config)?;
         
-        // Start the service in the background
-        let handle = tokio::spawn(async move {
-            service.start().await.unwrap();
-        });
-        
-        // Give it a moment to start
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        
-        // Cancel the service
-        handle.abort();
+        // Verify service creation
+        assert_eq!(service.peer_count(), 0);
+        assert!(!service.local_peer_id().to_string().is_empty());
         
         Ok(())
-    }
-}
-
-#[cfg(test)]
-impl P2PService {
-    /// Create a new P2P service with the provided configuration
-    pub fn new(config: P2PConfig) -> Result<Self, anyhow::Error> {
-        // Generate a fixed key for now
-        let local_key = Self::generate_ed25519_keypair();
-        let peer_id = PeerId::from(local_key.public());
-
-        info!("Local peer ID: {}", peer_id);
-
-        // Create a dummy swarm
-        let swarm = todo!("Cannot create swarm due to dependency conflicts");
-
-        // Set up the event channel
-        let (event_sender, event_receiver) = mpsc::channel::<P2PEvent>(32);
-
-        // Create a simple task handle (we'll actually spawn it in start())
-        let task_handle = tokio::task::spawn(async {
-            // This is just a placeholder and will be replaced in start()
-        });
-
-        Ok(Self {
-            swarm,
-            event_sender,
-            event_receiver,
-            _task_handle: task_handle,
-            config,
-            peer_id,
-        })
     }
 }

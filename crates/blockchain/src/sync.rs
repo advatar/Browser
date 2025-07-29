@@ -140,12 +140,14 @@ where
         self.block_subscription = Some(
             self.client
                 .blocks()
-                .subscribe_blocks()
-                .await?,
+                .subscribe_finalized()
+                .await?
         );
         
-        // Start the synchronization loop
-        self.sync_loop().await
+        // Start the sync loop
+        self.sync_loop().await?;
+        
+        Ok(())
     }
     
     /// Get the current synchronization status
@@ -155,62 +157,62 @@ where
     
     /// Get a block by number
     pub async fn get_block(&self, number: NumberFor<B>) -> Result<Option<BlockData<B>>> {
-        // Check if the block is in the queue
-        if let Some(block) = self.queued_blocks.get(&number) {
-            return Ok(Some(block.clone()));
+        // First check if we have it in our queue
+        if let Some(block_data) = self.queued_blocks.get(&number) {
+            return Ok(Some(block_data.clone()));
         }
         
-        // Otherwise, fetch it from the node
-        let block = match self.client.blocks().at(Some(number.into())).await? {
-            Some(block) => block,
-            None => return Ok(None),
-        };
-        
-        let header = block.header().clone();
-        let hash = block.hash();
-        let number = block.number();
-        
-        // Only download the body if configured to do so
-        let body = if self.config.download_bodies {
-            Some(block.extrinsics().await?)
-        } else {
-            None
-        };
-        
-        // Get justifications if available
-        let justifications = block.justifications().await?;
-        
-        Ok(Some(BlockData {
-            header,
-            body,
-            justifications,
-            hash,
-            number,
-        }))
+        // Try to get it from the client
+        match self.client.blocks().at_latest().await {
+            Ok(block) if block.number() >= number => {
+                let target_block = self.client.blocks().at_latest().await?;
+                if target_block.number() == number {
+                    let header = target_block.header().clone();
+                    let hash = target_block.hash();
+                    
+                    // Get block body if configured
+                    let body = if self.config.download_bodies {
+                        let extrinsics: Result<Vec<_>, _> = target_block.extrinsics().await?.collect();
+                        Some(extrinsics?)
+                    } else {
+                        None
+                    };
+                    
+                    Ok(Some(BlockData {
+                        header,
+                        body,
+                        justifications: None, // TODO: Get justifications from runtime
+                        hash,
+                        number,
+                    }))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
+        }
     }
     
     /// The main synchronization loop
     async fn sync_loop(&mut self) -> Result<()> {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        // First, perform a full sync to catch up
+        self.full_sync().await?;
         
-        loop {
-            tokio::select! {
-                // Handle new blocks from the subscription
-                Some(block_result) = self.block_subscription.as_mut().unwrap().next() => {
-                    match block_result {
-                        Ok(block) => {
-                            self.handle_new_block(block).await?;
+        // Then listen for new blocks
+        if let Some(subscription) = &mut self.block_subscription {
+            while let Some(block_result) = subscription.next().await {
+                match block_result {
+                    Ok(block) => {
+                        if let Err(e) = self.handle_new_block(block).await {
+                            log::error!("Error handling new block: {}", e);
+                            self.status = SyncStatus::Error(format!("Block processing error: {}", e));
+                            break;
                         }
-                        Err(e) => {
-                            log::error!("Error in block subscription: {}", e);
-                            // Try to resubscribe
-                            self.block_subscription = Some(
-                                self.client
-                                    .blocks()
-                                    .subscribe_blocks()
-                                    .await?,
-                            );
-                        }
+                    }
+                    Err(e) => {
+                        log::error!("Block subscription error: {}", e);
+                        self.status = SyncStatus::Error(format!("Subscription error: {}", e));
+                        break;
                     }
                 }
                 
@@ -366,13 +368,74 @@ where
         
         // Process transactions in the block
         if self.config.download_bodies {
-            let _extrinsics = block.extrinsics().await?;
-            // TODO: Process transactions
+            let extrinsics = block.extrinsics().await?;
+            
+            // Process each transaction in the block
+            for (idx, extrinsic) in extrinsics.iter().enumerate() {
+                match extrinsic {
+                    Ok(ext) => {
+                        // Log transaction details
+                        log::debug!("Processing transaction {} in block #{}: {:?}", idx, number, ext.index());
+                        
+                        // Extract transaction metadata
+                        if let Ok(call_data) = ext.call_data() {
+                            log::trace!("Transaction call data: {} bytes", call_data.len());
+                        }
+                        
+                        // Check if transaction was successful
+                        if let Ok(events) = ext.events().await {
+                            let success = events.has::<substrate_subxt::events::ExtrinsicSuccess>()?;
+                            let failed = events.has::<substrate_subxt::events::ExtrinsicFailed>()?;
+                            
+                            if success {
+                                log::debug!("Transaction {} succeeded", idx);
+                            } else if failed {
+                                log::warn!("Transaction {} failed", idx);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Error decoding transaction {} in block #{}: {}", idx, number, e);
+                    }
+                }
+            }
         }
         
         // Process events in the block
-        let _events = block.events().await?;
-        // TODO: Process events
+        let events = block.events().await?;
+        
+        // Process system events
+        for event in events.iter() {
+            match event {
+                Ok(event_details) => {
+                    // Log event details
+                    log::trace!("Block #{} event: {:?}", number, event_details.pallet_name());
+                    
+                    // Handle specific event types
+                    match event_details.pallet_name() {
+                        "System" => {
+                            // Handle system events (new account, killed account, etc.)
+                            log::debug!("System event in block #{}: {}", number, event_details.variant_name());
+                        }
+                        "Balances" => {
+                            // Handle balance transfer events
+                            log::debug!("Balance event in block #{}: {}", number, event_details.variant_name());
+                        }
+                        "Timestamp" => {
+                            // Handle timestamp events
+                            log::trace!("Timestamp event in block #{}", number);
+                        }
+                        pallet => {
+                            // Handle other pallet events
+                            log::trace!("Event from {} pallet in block #{}: {}", pallet, number, event_details.variant_name());
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Error decoding event in block #{}: {}", number, e);
+                }
+            }
+        }
         
         log::debug!("Processed block #{}", number);
         
@@ -413,11 +476,75 @@ mod tests {
     
     #[tokio::test]
     async fn test_chain_sync_initialization() {
-        // This is a basic test to verify the chain sync initializes correctly
-        // In a real test, we would mock the Substrate client
+        // Test sync configuration creation
+        let config = SyncConfig::default();
+        assert!(config.download_bodies);
+        assert_eq!(config.max_concurrent_requests, 10);
+        assert_eq!(config.max_blocks_per_request, 128);
+        assert_eq!(config.request_timeout_secs, 30);
+        assert_eq!(config.max_blocks_in_memory, 1000);
+    }
+    
+    #[tokio::test]
+    async fn test_sync_status() {
+        // Test sync status variants
+        let syncing_status: SyncStatus<TestBlock> = SyncStatus::Syncing {
+            current: 100u32.into(),
+            highest: 200u32.into(),
+        };
         
-        // The actual test would require a running node or a mock client
-        // This is just a placeholder to show the structure
-        assert!(true);
+        let synced_status: SyncStatus<TestBlock> = SyncStatus::Synced {
+            best: 200u32.into(),
+        };
+        
+        let error_status: SyncStatus<TestBlock> = SyncStatus::Error("Test error".to_string());
+        
+        // Verify status variants work correctly
+        match syncing_status {
+            SyncStatus::Syncing { current, highest } => {
+                assert_eq!(current, 100u32.into());
+                assert_eq!(highest, 200u32.into());
+            }
+            _ => panic!("Expected syncing status"),
+        }
+        
+        match synced_status {
+            SyncStatus::Synced { best } => {
+                assert_eq!(best, 200u32.into());
+            }
+            _ => panic!("Expected synced status"),
+        }
+        
+        match error_status {
+            SyncStatus::Error(msg) => {
+                assert_eq!(msg, "Test error");
+            }
+            _ => panic!("Expected error status"),
+        }
+    }
+    
+    #[test]
+    fn test_block_data_creation() {
+        // Create a test block data structure
+        let header = TestHeader {
+            parent_hash: H256::zero(),
+            number: 1u32.into(),
+            state_root: H256::zero(),
+            extrinsics_root: H256::zero(),
+            digest: sp_runtime::generic::Digest::default(),
+        };
+        
+        let block_data: BlockData<TestBlock> = BlockData {
+            header: header.clone(),
+            body: None,
+            justifications: None,
+            hash: header.hash(),
+            number: header.number,
+        };
+        
+        assert_eq!(block_data.number, 1u32.into());
+        assert_eq!(block_data.hash, header.hash());
+        assert!(block_data.body.is_none());
+        assert!(block_data.justifications.is_none());
     }
 }

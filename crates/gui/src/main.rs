@@ -5,14 +5,27 @@
 
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem, Submenu, IsMenuItem},
-    webview::WebviewWindowBuilder,
-    Manager, Runtime
+    menu::{IsMenuItem, Menu, MenuItem, Submenu},
+    AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
 };
+use std::sync::{Arc, Mutex};
 
-// Store application state
+mod browser_engine;
+mod protocol_handlers;
+mod security;
+mod commands;
+
+use browser_engine::BrowserEngine;
+use protocol_handlers::ProtocolHandler;
+use security::SecurityManager;
+use commands::*;
+
+#[derive(Debug)]
 struct AppState {
     current_url: Mutex<String>,
+    browser_engine: Arc<BrowserEngine>,
+    protocol_handler: Arc<Mutex<ProtocolHandler>>,
+    security_manager: Arc<Mutex<SecurityManager>>,
 }
 
 fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> {
@@ -149,6 +162,9 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState {
             current_url: Mutex::new("about:blank".to_string()),
+            browser_engine: Arc::new(BrowserEngine::new()),
+            protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
+            security_manager: Arc::new(Mutex::new(SecurityManager::new())),
         })
         .setup(|app| {
             create_browser_window(app.app_handle(), None)?;
@@ -158,7 +174,19 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             navigate_to,
             get_current_url,
-            execute_script
+            execute_script,
+            create_tab,
+            close_tab,
+            switch_tab,
+            get_tabs,
+            add_bookmark,
+            get_bookmarks,
+            remove_bookmark,
+            get_history,
+            clear_history,
+            resolve_protocol_url,
+            update_security_settings,
+            get_security_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

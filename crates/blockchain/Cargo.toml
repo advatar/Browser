@@ -10,7 +10,7 @@ repository = "https://github.com/yourusername/browser"
 [features]
 default = ["std"]
 std = [
-    "codec/std",
+    "parity-scale-codec/std",
     "frame-support/std",
     "frame-system/std",
     "sp-io/std",
@@ -59,16 +59,16 @@ substrate-subxt-cli = "0.28"
 substrate-subxt-client = "0.28"
 substrate-subxt-codec = "0.28"
 substrate-subxt-core = "0.28"
-substrate-subxt-lightclient = { version = "0.28", optional = true }
+substrate-subxt-lightclient = "0.28"
 substrate-subxt-ws = "0.28"
 substrate-subxt-metadata = "0.28"
 substrate-subxt-rpc = "0.28"
 substrate-subxt-runtime = "0.28"
 substrate-subxt-signer = "0.28"
 substrate-subxt-test = { version = "0.28", features = ["test-runtime"] }
-substrate-subxt-wasm = { version = "0.28", optional = true }
-substrate-subxt-wasm-light = { version = "0.28", optional = true }
-substrate-subxt-wasm-runtime = { version = "0.28", optional = true }
-substrate-subxt-wasm-runtime-light = { version = "0.28", optional = true }
-substrate-subxt-wasm-test = { version = "0.28", optional = true }
-substrate-subxt-wasm-test-light = { version = "0.28", optional = true }
+substrate-subxt-wasm = "0.28"
+substrate-subxt-wasm-light = "0.28"
+substrate-subxt-wasm-runtime = "0.28"
+substrate-subxt-wasm-runtime-light = "0.28"
+substrate-subxt-wasm-test = "0.28"
+substrate-subxt-wasm-test-light = "0.28"
