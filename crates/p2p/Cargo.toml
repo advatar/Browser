@@ -34,13 +34,25 @@ tracing-subscriber = { workspace = true, optional = true }
 log = "0.4"
 
 # Core libp2p dependencies - using workspace versions
-libp2p.workspace = true
+libp2p = { workspace = true, default-features = false, features = [
+    "tcp",
+    "tls",
+    "dns",
+    "yamux",
+    "noise",
+    "ping",
+    "identify",
+    "kad",
+    "mdns",
+    "floodsub",
+    "gossipsub"
+]}
 libp2p-core.workspace = true
 libp2p-identity.workspace = true
 libp2p-swarm.workspace = true
 libp2p-identify = { workspace = true, optional = true }
 libp2p-ping.workspace = true
-libp2p-tcp.workspace = true
+libp2p-tcp = { workspace = true, default-features = false, features = ["async-io"] }
 libp2p-yamux.workspace = true
 libp2p-noise.workspace = true
 

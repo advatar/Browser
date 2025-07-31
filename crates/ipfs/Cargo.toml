@@ -8,7 +8,16 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/advatar/browser"
 
 [features]
-default = ["kad", "mdns"]
+# Default features for the IPFS crate
+default = ["rust-ipfs"]
+
+# Enable the legacy ipfs-embed based implementation
+legacy = ["dep:ipfs-embed"]
+
+# Enable the new rust-ipfs based implementation (default)
+rust-ipfs = ["dep:rust-ipfs"]
+
+# Optional features for both implementations
 kad = ["dep:libp2p-kad"]
 mdns = ["dep:libp2p-mdns"]
 
@@ -19,10 +28,13 @@ thiserror.workspace = true
 async-trait = "0.1.77"
 bytes = "1.5.0"
 
-# IPFS and IPLD
+# IPFS implementations
+rust-ipfs = { workspace = true, optional = true }
+ipfs-embed = { version = "0.26.1", default-features = false, optional = true }
+
+# IPLD
 cid = { version = "0.8.6", features = ["std"] }
-ipld-core = { version = "0.4.2", features = ["codec", "std"] }
-ipfs-embed = { version = "0.26.1", default-features = false }
+libipld = { version = "0.14.0", features = ["dag-cbor", "dag-json"] }
 
 # File system and paths
 dirs = "5.0.1"
@@ -45,7 +57,7 @@ libp2p-mdns = { workspace = true, optional = true }
 libp2p-dns = { workspace = true, default-features = false, features = ["tokio"] }
 
 # Async runtime
-tokio = { workspace = true, features = ["net", "io-util"] }
+tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread"] }
 futures = { workspace = true, features = ["std", "async-await"] }
 
 # Logging and diagnostics

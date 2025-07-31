@@ -3,22 +3,33 @@
 //! This crate provides IPFS functionality including block storage,
 //! content addressing, and peer-to-peer networking with enhanced
 //! features like Kademlia DHT and mDNS for peer discovery.
+//!
+//! # Features
+//! - `legacy`: Enable the legacy ipfs-embed based implementation
+//! - `rust-ipfs`: Enable the new rust-ipfs based implementation (default)
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 #![feature(type_alias_impl_trait)]
 
 pub mod blockstore;
+pub mod ipfs_node;
+
+#[cfg(feature = "legacy")]
 pub mod node;
+#[cfg(feature = "legacy")]
 pub mod node_new;
 
 /// Re-export commonly used types.
 pub use blockstore::SledStore;
-pub use node_new::Node;
 pub use cid::Cid;
 pub use libp2p::PeerId;
 use libp2p_identity as identity;
 use std::path::PathBuf;
+
+// Re-export the appropriate node implementation based on feature flags
+#[cfg(feature = "rust-ipfs")]
+pub use ipfs_node::{Config, Node, NodeEvent};
 
 /// Configuration for the IPFS node
 #[derive(Debug, Clone)]

@@ -213,45 +213,149 @@ impl PerformanceMonitor {
 
     /// Collect memory metrics
     async fn collect_memory_metrics(&self) -> Result<MemoryMetrics> {
-        // In a real implementation, this would use system APIs to get actual memory usage
-        // For now, we'll simulate with reasonable values
-        
+        let mut metrics = MemoryMetrics {
+            used_mb: 0.0,
+            total_mb: 0.0,
+            process_usage_mb: 0.0,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)?
+                .as_secs() as u64,
+        };
+
+        // Get process memory usage
         #[cfg(target_os = "macos")]
         {
-            use std::process::Command;
+            use libc::{getpid, proc_pidinfo, proc_taskinfo, PROC_PIDTASKINFO, PROC_PIDTASKINFO_SIZE};
+            use std::mem;
+            use std::ptr;
             
-            let output = Command::new("ps")
-                .args(&["-o", "rss,vsz", "-p", &std::process::id().to_string()])
-                .output()?;
+            let pid = unsafe { getpid() };
+            let mut task_info: proc_taskinfo = unsafe { mem::zeroed() };
+            let task_info_size = mem::size_of_val(&task_info) as i32;
             
-            let output_str = String::from_utf8_lossy(&output.stdout);
-            let lines: Vec<&str> = output_str.lines().collect();
+            // Get process memory info using libc
+            let result = unsafe {
+                proc_pidinfo(
+                    pid,
+                    PROC_PIDTASKINFO,
+                    0,
+                    &mut task_info as *mut _ as *mut libc::c_void,
+                    task_info_size,
+                )
+            };
             
-            if lines.len() >= 2 {
-                let parts: Vec<&str> = lines[1].split_whitespace().collect();
+            if result == task_info_size {
+                // Convert from bytes to MB
+                metrics.process_usage_mb = (task_info.phys_footprint as f64) / 1024.0 / 1024.0;
+            }
+            
+            // Get system memory info using sysctl
+            let mut mib: [libc::c_int; 2] = [libc::CTL_HW, libc::HW_MEMSIZE];
+            let mut memsize: u64 = 0;
+            let mut size = std::mem::size_of::<u64>();
+            
+            if unsafe {
+                libc::sysctl(
+                    mib.as_mut_ptr(),
+                    2,
+                    &mut memsize as *mut _ as *mut libc::c_void,
+                    &mut size,
+                    ptr::null_mut(),
+                    0,
+                )
+            } == 0 {
+                metrics.total_mb = (memsize as f64) / 1024.0 / 1024.0;
+                metrics.used_mb = metrics.total_mb - ((task_info.resident_size as f64) / 1024.0 / 1024.0);
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+            
+            // Get system memory info from /proc/meminfo
+            if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+                let mut total_mem = 0;
+                let mut available_mem = 0;
+                
+                for line in meminfo.lines() {
+                    if line.starts_with("MemTotal:") {
+                        if let Some((_, value)) = line.split_once(':') {
+                            total_mem = value.trim_end_matches(" kB").trim().parse::<u64>().unwrap_or(0);
+                        }
+                    } else if line.starts_with("MemAvailable:") {
+                        if let Some((_, value)) = line.split_once(':') {
+                            available_mem = value.trim_end_matches(" kB").trim().parse::<u64>().unwrap_or(0);
+                        }
+                    }
+                }
+                
+                metrics.total_mb = (total_mem as f64) / 1024.0;
+                metrics.used_mb = ((total_mem - available_mem) as f64) / 1024.0;
+            }
+            
+            // Get process memory info from /proc/self/statm
+            if let Ok(statm) = fs::read_to_string("/proc/self/statm") {
+                let parts: Vec<&str> = statm.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let rss = parts[0].parse::<u64>().unwrap_or(0) * 1024; // Convert KB to bytes
-                    let vsz = parts[1].parse::<u64>().unwrap_or(0) * 1024; // Convert KB to bytes
-                    
-                    return Ok(MemoryMetrics {
-                        heap_used: rss / 2, // Estimate
-                        heap_total: vsz,
-                        external: rss / 4, // Estimate
-                        rss,
-                        array_buffers: rss / 8, // Estimate
-                    });
+                    if let Ok(pages) = parts[1].parse::<u64>() {
+                        // Page size is typically 4KB on most systems
+                        let page_size = 4096;
+                        metrics.process_usage_mb = (pages * page_size) as f64 / 1024.0 / 1024.0;
+                    }
                 }
             }
         }
         
-        // Fallback simulation
-        Ok(MemoryMetrics {
-            heap_used: 50_000_000,  // 50MB
-            heap_total: 100_000_000, // 100MB
-            external: 10_000_000,   // 10MB
-            rss: 80_000_000,        // 80MB
-            array_buffers: 5_000_000, // 5MB
-        })
+        #[cfg(target_os = "windows")]
+        {
+            use winapi::um::psapi;
+            use winapi::um::sysinfoapi;
+            use winapi::shared::minwindef::DWORD;
+            use winapi::um::processthreadsapi::GetCurrentProcess;
+            use winapi::um::handleapi::CloseHandle;
+            use std::ptr;
+            
+            // Get system memory info
+            let mut memory_status: sysinfoapi::MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+            memory_status.dwLength = std::mem::size_of::<sysinfoapi::MEMORYSTATUSEX>() as u32;
+            
+            if unsafe { sysinfoapi::GlobalMemoryStatusEx(&mut memory_status) } != 0 {
+                metrics.total_mb = (memory_status.ullTotalPhys as f64) / 1024.0 / 1024.0;
+                metrics.used_mb = ((memory_status.ullTotalPhys - memory_status.ullAvailPhys) as f64) / 1024.0 / 1024.0;
+            }
+            
+            // Get process memory info
+            let process = unsafe { GetCurrentProcess() };
+            let mut process_memory_counters: psapi::PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
+            
+            if unsafe {
+                psapi::GetProcessMemoryInfo(
+                    process,
+                    &mut process_memory_counters as *mut _ as *mut psapi::PROCESS_MEMORY_COUNTERS,
+                    std::mem::size_of::<psapi::PROCESS_MEMORY_COUNTERS_EX>() as DWORD,
+                )
+            } != 0 {
+                metrics.process_usage_mb = (process_memory_counters.WorkingSetSize as f64) / 1024.0 / 1024.0;
+            }
+            
+            unsafe { CloseHandle(process) };
+        }
+        
+        // Fallback for other platforms or if specific implementation fails
+        if metrics.total_mb == 0.0 {
+            // Try to use the `sysinfo` crate as a fallback
+            if let Some(sys) = sysinfo::System::new_all() {
+                metrics.total_mb = (sys.total_memory() as f64) / 1024.0 / 1024.0;
+                metrics.used_mb = ((sys.total_memory() - sys.available_memory()) as f64) / 1024.0 / 1024.0;
+                metrics.process_usage_mb = sys.get_current_pid()
+                    .and_then(|pid| sys.process(pid))
+                    .map(|p| p.memory() as f64 / 1024.0 / 1024.0)
+                    .unwrap_or(0.0);
+            }
+        }
+        
+        Ok(metrics)
     }
 
     /// Collect CPU metrics
