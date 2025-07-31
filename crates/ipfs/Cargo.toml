@@ -9,20 +9,20 @@ repository = "https://github.com/advatar/browser"
 
 [features]
 default = ["kad", "mdns"]
-kad = ["libp2p/kad"]
-mdns = ["libp2p/mdns"]
+kad = ["dep:libp2p-kad"]
+mdns = ["dep:libp2p-mdns"]
 
 [dependencies]
 # Core dependencies
-anyhow = "1.0.75"
-thiserror = "1.0.52"
+anyhow.workspace = true
+thiserror.workspace = true
 async-trait = "0.1.77"
 bytes = "1.5.0"
 
 # IPFS and IPLD
 cid = { version = "0.8.6", features = ["std"] }
 ipld-core = { version = "0.4.2", features = ["codec", "std"] }
-ipfs-embed = "0.26.1"
+ipfs-embed = { version = "0.26.1", default-features = false }
 
 # File system and paths
 dirs = "5.0.1"
@@ -30,22 +30,23 @@ dirs = "5.0.1"
 # Local P2P crate with Kademlia and mDNS support
 p2p = { path = "../p2p", features = ["kad", "mdns"], default-features = false }
 
-# Libp2p stack
-libp2p = { version = "0.47.0", default-features = false, features = [
-    "tcp-tokio",
-    "dns-tokio",
-    "identify",
-    "ping",
-    "kad",
-    "mdns",
-    "noise",
-    "yamux",
-    "mplex"
-]}
+# Libp2p stack - using workspace versions
+libp2p.workspace = true
+libp2p-core.workspace = true
+libp2p-identity.workspace = true
+libp2p-swarm.workspace = true
+libp2p-identify.workspace = true
+libp2p-ping.workspace = true
+libp2p-tcp.workspace = true
+libp2p-yamux.workspace = true
+libp2p-noise.workspace = true
+libp2p-kad = { workspace = true, optional = true }
+libp2p-mdns = { workspace = true, optional = true }
+libp2p-dns = { workspace = true, default-features = false, features = ["tokio"] }
 
 # Async runtime
-tokio = { version = "1.35.1", features = ["rt-multi-thread", "net", "time", "io-util"] }
-futures = { version = "0.3.30", default-features = false, features = ["std", "async-await"] }
+tokio = { workspace = true, features = ["net", "io-util"] }
+futures = { workspace = true, features = ["std", "async-await"] }
 
 # Logging and diagnostics
 log = "0.4.20"

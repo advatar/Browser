@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decentralized Browser</title>
+  <style>
+    :root {
+      --toolbar-bg: #f0f0f0;
+      --tab-bg: #e0e0e0;
+      --tab-active-bg: #ffffff;
+      --tab-hover-bg: #e8e8e8;
+      --border-color: #ccc;
+      --button-hover: #e0e0e0;
+      --text-color: #333;
+      --text-muted: #666;
+      --close-button-hover: #ff6b6b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      color: var(--text-color);
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* Tab bar styles */
+    #tabs-container {
+      display: flex;
+      background: var(--tab-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 8px;
+      height: 36px;
+      align-items: center;
+      -webkit-app-region: drag;
+      user-select: none;
+    }
+
+    #tabs {
+      display: flex;
+      flex: 1;
+      height: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+
+    #tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .tab {
+      position: relative;
+      padding: 8px 32px 8px 12px;
+      background: var(--tab-bg);
+      border: 1px solid var(--border-color);
+      border-bottom: none;
+      border-radius: 4px 4px 0 0;
+      margin-right: 4px;
+      min-width: 120px;
+      max-width: 200px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      -webkit-app-region: no-drag;
+    }
+
+    .tab.active {
+      background: var(--tab-active-bg);
+      border-bottom: 1px solid var(--tab-active-bg);
+      margin-bottom: -1px;
+    }
+
+    .tab:hover {
+      background: var(--tab-hover-bg);
+    }
+
+    .tab-close {
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .tab-close:hover {
+      background: var(--close-button-hover);
+      color: white;
+    }
+
+    .new-tab {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 4px;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+
+    .new-tab:hover {
+      background: var(--button-hover);
+    }
+
+    /* Toolbar styles */
+    #toolbar {
+      padding: 8px;
+      background: var(--toolbar-bg);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #address-bar {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      outline: none;
+      font-size: 14px;
+      background: white;
+    }
+
+    /* WebView container */
+    .webview-container {
+      flex: 1;
+      position: relative;
+      display: none;
+    }
+
+    .webview-container.active {
+      display: block;
+    }
+
+    webview {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    /* Button styles */
+    button {
+      padding: 4px 8px;
+      background: none;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 32px;
+    }
+    
+    .toolbar-button {
+      background: none;
+      border: none;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      padding: 4px;
+      margin: 0 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+    
+    .toolbar-button:hover {
+      background: rgba(0, 0, 0, 0.1);
+    }
+    
+    .toolbar-button svg {
+      width: 16px;
+      height: 16px;
+    }
+    
+    .toolbar-button.active {
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--button-hover);
+    }
+
+    /* Tab favicon */
+    .tab-favicon {
+      width: 16px;
+      height: 16px;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+  </style>
+  <script type="module" crossorigin src="/assets/main-DggsBRVM.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/main-CUARUM25.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Tab Bar -->
+    <div id="tabs-container">
+      <div id="tab-groups" class="tab-groups">
+        <!-- Tab groups will be inserted here -->
+      </div>
+      <div id="tabs" class="tabs">
+        <!-- Tabs without a group will be shown here -->
+      </div>
+      <div class="tab-actions">
+        <button id="new-tab" class="tab-action" title="New Tab">+</button>
+        <button id="new-group" class="tab-action" title="New Group">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Navigation Toolbar -->
+    <div id="toolbar">
+      <div class="toolbar-section">
+        <div id="bookmarks-container"></div>
+      </div>
+      <div class="toolbar-section">
+        <button id="back" title="Go Back" disabled>←</button>
+        <button id="forward" title="Go Forward" disabled>→</button>
+        <button id="reload" title="Reload">↻</button>
+        <button id="home" title="Home">⌂</button>
+        <input type="text" id="address-bar" placeholder="Enter URL or search term">
+        <button id="history-button" title="History" class="toolbar-button">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.04,19 9.19,18.27 7.86,17H6.42A9,9 0 0,0 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3" />
+          </svg>
+        </button>
+        <button id="bookmarks-button" title="Bookmarks" class="toolbar-button">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5C19,3.89 18.1,3 17,3Z" />
+          </svg>
+        </button>
+        <button id="go">Go</button>
+      </div>
+    </div>
+    
+    <!-- WebView containers will be added here dynamically -->
+  </div>
+  
+  <!-- Tab template (hidden) -->
+  <template id="tab-template">
+    <div class="tab">
+      <img class="tab-favicon" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0iIzQyODVGNCIgZD0iTTEyLDBDNS4zNzMsMCwwLDUuMzczLDAsMTJzNS4zNzMsMTIsMTIsMTJzMTItNS4zNzMsMTItMTJTMTguNjI3LDAsMTIsMHoiLz48L3N2Zz4=">
+      <span class="tab-title">New Tab</span>
+      <div class="tab-close">&times;</div>
+    </div>
+  </template>
+</body>
+</html>

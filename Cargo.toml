@@ -8,6 +8,7 @@ description = "Workspace for the Browser project"
 name = "browser"
 path = "src/main.rs"
 
+
 [workspace]
 members = [
     "crates/p2p",
@@ -38,42 +39,38 @@ codegen-units = 1
 # Workspace dependencies - all versions must be consistent
 [workspace.dependencies]
 # Core dependencies
-anyhow = "1.0"
-thiserror = "1.0"
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0.97"
+async-trait = "0.1.85"
+bytes = "1.6.0"
 futures = { version = "0.3.31", features = ["thread-pool"] }
+log = "0.4.21"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.108"
+thiserror = "1.0.61"
+tokio = { version = "1.37.0", features = ["full"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
-# Shared dependencies that might cause conflicts
-multihash = "=0.19.3"
-multiaddr = "=0.18.2"
-unsigned-varint = "=0.7.2"
+# Network and crypto
+ed25519-dalek = { version = "2.1.1", features = ["serde"] }
+libsecp256k1 = { version = "0.10.0", features = ["recovery"] }
+multihash = { version = "0.19.3", features = ["serde"] }
+multistream-select = { version = "0.10.0", features = ["tokio-util"] }
 
-# Core libp2p crates with exact versions and features
-libp2p-core = { version = "=0.43.0", default-features = false }
-libp2p-identity = { version = "=0.2.11", features = ["rand"] }
-libp2p-identify = { version = "=0.43.0", default-features = false }
-libp2p-ping = { version = "=0.43.0", default-features = false }
-libp2p-noise = { version = "=0.43.0", default-features = false }
-libp2p-tcp = { version = "=0.43.0", default-features = false, features = ["tokio"] }
-libp2p-yamux = { version = "=0.43.0", default-features = false }
-libp2p-swarm = { version = "=0.43.0", default-features = false, features = ["tokio", "macros"] }
-
-# Optional libp2p features
-libp2p-kad = { version = "=0.43.0", default-features = false }
-libp2p-mdns = { version = "=0.43.0", default-features = false }
-libp2p-floodsub = { version = "=0.43.0", default-features = false }
-libp2p-gossipsub = { version = "=0.43.0", default-features = false }
-
-# Override all dependencies to use consistent versions
-[package.metadata.cargo-workspace-dependency.overrides]
-libp2p-core = { version = "=0.43.0" }
-libp2p-swarm = { version = "=0.43.0" }
-libp2p-identify = { version = "=0.43.0" }
-libp2p-ping = { version = "=0.43.0" }
-libp2p-noise = { version = "=0.43.0" }
-libp2p-yamux = { version = "=0.43.0" }
-
-# Patch section removed to avoid git revision errors with the stub implementation
-# Once we implement real networking functionality, we can revisit dependency unification
+# Libp2p dependencies - using the 0.56 release set
+# See: https://github.com/libp2p/rust-libp2p/blob/master/RELEASE_WINDOW_DEV.md
+libp2p = { version = "0.56.0", default-features = false, features = ["tcp"] }
+libp2p-core = { version = "0.43.1", default-features = false }
+libp2p-identity = { version = "0.2.4", default-features = false }
+libp2p-swarm = { version = "0.47.0", default-features = false }
+libp2p-identify = { version = "0.47.0", default-features = false }
+libp2p-ping = { version = "0.43.0", default-features = false }
+libp2p-tcp = { version = "0.40.0", default-features = false, features = ["async-io"] }
+libp2p-yamux = { version = "0.47.0", default-features = false }
+libp2p-noise = { version = "0.44.0", default-features = false }
+libp2p-kad = { version = "0.48.0", default-features = false }
+libp2p-mdns = { version = "0.48.0", default-features = false }
+libp2p-floodsub = { version = "0.46.0", default-features = false }
+libp2p-gossipsub = { version = "0.48.0", default-features = false }
+libp2p-dns = { version = "0.44.0", default-features = false, features = ["tokio"] }
+libp2p-websocket = { version = "0.45.1", default-features = false }

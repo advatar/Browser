@@ -344,17 +344,15 @@ impl ProtocolHandler {
                 "e3010170" => {
                     // IPFS hash
                     if let Ok(decoded) = hex::decode(hash_data) {
-                        if let Ok(hash) = bs58::encode(decoded).into_string() {
-                            return format!("ipfs://{}", hash);
-                        }
+                        let hash = bs58::encode(decoded).into_string();
+                        return format!("ipfs://{}", hash);
                     }
                 }
                 "e5010172" => {
                     // IPNS hash
                     if let Ok(decoded) = hex::decode(hash_data) {
-                        if let Ok(hash) = bs58::encode(decoded).into_string() {
-                            return format!("ipns://{}", hash);
-                        }
+                        let hash = bs58::encode(decoded).into_string();
+                        return format!("ipns://{}", hash);
                     }
                 }
                 _ => {}

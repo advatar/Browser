@@ -1,6 +1,7 @@
-import { invoke } from '@tauri-apps/api/tauri';
-import { listen } from '@tauri-apps/api/event';
-import { appWindow } from '@tauri-apps/api/window';
+// Tauri v2 API imports
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const { WebviewWindow } = window.__TAURI__.window;
 
 // Type definitions for our Rust backend
 interface Tab {
@@ -67,7 +68,7 @@ interface BrowserSettings {
 
 // Browser Engine Manager
 class BrowserEngine {
-  private tabs: Map<string, Tab> = new Map();
+  tabs: Map<string, Tab> = new Map();
   private activeTabId: string | null = null;
   private history: HistoryEntry[] = [];
   private bookmarks: Bookmark[] = [];
@@ -90,10 +91,10 @@ class BrowserEngine {
   }
 
   async refreshTabs(): Promise<void> {
-    const tabs = await invoke<Tab[]>('get_tabs');
-    this.tabs.clear();
-    tabs.forEach(tab => this.tabs.set(tab.id, tab));
-    this.updateTabBar();
+    return invoke('get_tabs').then((tabs: unknown) => {
+      (tabs as Tab[]).forEach((tab: Tab) => this.tabs.set(tab.id, tab));
+      this.updateTabBar();
+    });
   }
 
   async addBookmark(title: string, url: string, folder?: string, tags: string[] = []): Promise<string> {
@@ -110,21 +111,23 @@ class BrowserEngine {
     return this.history;
   }
 
+  async addToHistory(url: string, title: string): Promise<void> {
+    const entry = await invoke('add_to_history', { url, title });
+    this.history.unshift(entry as HistoryEntry);
+    this.updateHistoryUI();
+  }
+
   private updateTabBar(): void {
     const tabBar = document.getElementById('tab-bar');
     if (!tabBar) return;
 
     tabBar.innerHTML = '';
     
-    this.tabs.forEach(tab => {
+    this.tabs.forEach((tab, id) => {
       const tabElement = document.createElement('div');
-      tabElement.className = `tab ${tab.id === this.activeTabId ? 'active' : ''}`;
-      tabElement.innerHTML = `
-        <div class="tab-favicon">${tab.favicon ? `<img src="${tab.favicon}" alt="">` : '🌐'}</div>
-        <div class="tab-title">${tab.title}</div>
-        <div class="tab-close" onclick="browserEngine.closeTab('${tab.id}')">×</div>
-      `;
-      tabElement.onclick = () => this.switchTab(tab.id);
+      tabElement.className = `tab ${id === this.activeTabId ? 'active' : ''}`;
+      tabElement.textContent = tab.title || 'New Tab';
+      tabElement.onclick = () => this.switchTab(id);
       tabBar.appendChild(tabElement);
     });
 
@@ -134,6 +137,25 @@ class BrowserEngine {
     newTabButton.innerHTML = '+';
     newTabButton.onclick = () => this.createTab('about:blank');
     tabBar.appendChild(newTabButton);
+  }
+
+  private updateHistoryUI(): void {
+    const historyList = document.getElementById('history-list');
+    if (!historyList) return;
+
+    historyList.innerHTML = '';
+    this.history.slice(0, 50).forEach(entry => {
+      const li = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = '#';
+      link.textContent = entry.title || entry.url;
+      link.onclick = (e) => {
+        e.preventDefault();
+        this.createTab(entry.url);
+      };
+      li.appendChild(link);
+      historyList.appendChild(li);
+    });
   }
 
   private updateUI(): void {
@@ -203,9 +225,9 @@ class SecurityManager {
   private securityStatus: SecurityStatus | null = null;
 
   async getSecurityStatus(url: string): Promise<SecurityStatus> {
-    this.securityStatus = await invoke<SecurityStatus>('get_security_status', { url });
+    this.securityStatus = await invoke('get_security_status', { url }) as SecurityStatus;
     this.updateSecurityIndicator();
-    return this.securityStatus;
+    return this.securityStatus!;
   }
 
   async updatePrivacySettings(settings: PrivacySettings): Promise<void> {
@@ -241,15 +263,15 @@ class WalletManager {
   private walletInfo: WalletInfo | null = null;
 
   async getWalletInfo(): Promise<WalletInfo> {
-    this.walletInfo = await invoke<WalletInfo>('get_wallet_info');
+    this.walletInfo = await invoke('get_wallet_info') as WalletInfo;
     this.updateWalletUI();
-    return this.walletInfo;
+    return this.walletInfo!;
   }
 
   async connectWallet(): Promise<WalletInfo> {
     this.walletInfo = await invoke<WalletInfo>('connect_wallet');
     this.updateWalletUI();
-    return this.walletInfo;
+    return this.walletInfo!;
   }
 
   async disconnectWallet(): Promise<void> {
@@ -289,8 +311,8 @@ class SettingsManager {
   private settings: BrowserSettings | null = null;
 
   async getSettings(): Promise<BrowserSettings> {
-    this.settings = await invoke<BrowserSettings>('get_settings');
-    return this.settings;
+    this.settings = await invoke('get_settings') as BrowserSettings;
+    return this.settings!;
   }
 
   async updateSettings(settings: BrowserSettings): Promise<void> {

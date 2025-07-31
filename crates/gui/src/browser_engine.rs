@@ -210,8 +210,9 @@ impl BrowserEngine {
             }
             
             // Keep only last 1000 entries
-            if history.len() > 1000 {
-                history.drain(0..history.len() - 1000);
+            let history_len = history.len();
+            if history_len > 1000 {
+                history.drain(0..history_len - 1000);
             }
         }
         

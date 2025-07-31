@@ -154,7 +154,7 @@ impl P2PService {
         
         // Generate or use provided keypair for the peer ID
         let local_key = config.keypair.clone().unwrap_or_else(|| Self::generate_keypair());
-        let peer_id = PeerId::from(local_key.public());
+        let peer_id = local_key.public().to_peer_id();
         
         // Create the P2P behaviour with all protocols
         let behaviour = P2PBehaviour::new(&local_key);
@@ -163,14 +163,16 @@ impl P2PService {
         let transport = Self::build_transport(&local_key)?;
         
         // Create the swarm with the transport and behaviour
-        let swarm = libp2p_swarm::SwarmBuilder::with_existing_identity(local_key)
-            .with_tokio()
-            .with_other_transport(|_| transport)?
-            .with_behaviour(|_| behaviour)?
-            .with_swarm_config(|cfg| {
-                cfg.with_idle_connection_timeout(config.connection_timeout)
-            })
-            .build();
+        let swarm = libp2p_swarm::SwarmBuilder::with_executor(
+            transport,
+            behaviour,
+            peer_id,
+            |fut| {
+                tokio::spawn(fut);
+            }
+        )
+        .idle_connection_timeout(config.connection_timeout)
+        .build();
         
         info!("Creating P2P service with peer ID: {}", peer_id);
         
@@ -188,26 +190,30 @@ impl P2PService {
         })
     }
 
-    /// Build a proper transport stack with TCP, noise encryption, and yamux multiplexing
+    /// Build a transport stack with TCP, noise encryption, and yamux multiplexing
     fn build_transport(keypair: &Keypair) -> anyhow::Result<libp2p_core::transport::Boxed<(PeerId, libp2p_core::muxing::StreamMuxerBox)>> {
         use libp2p_tcp as tcp;
         use libp2p_noise as noise;
         use libp2p_yamux as yamux;
+        use libp2p_core::transport::upgrade;
+        use libp2p_core::Transport;
+        use libp2p_core::muxing::StreamMuxerBox;
         
-        let tcp_transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
+        // Create TCP transport with default configuration
+        let tcp = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
         
-        let noise_config = noise::Config::new(keypair)
-            .map_err(|e| anyhow::anyhow!("Failed to create noise config: {}", e))?;
-        
-        let yamux_config = yamux::Config::default();
-        
-        let transport = tcp_transport
-            .upgrade(libp2p_core::upgrade::Version::V1)
-            .authenticate(noise_config)
-            .multiplex(yamux_config)
-            .timeout(std::time::Duration::from_secs(20))
+        // Create authenticated transport with noise
+        let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
+            .into_authentic(keypair)
+            .map_err(|e| anyhow::anyhow!("Signing libp2p-noise static DH keypair failed: {}", e))?;
+            
+        // Build the transport stack
+        let transport = tcp
+            .upgrade(upgrade::Version::V1)
+            .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
+            .multiplex(yamux::Config::default())
             .boxed();
-        
+            
         Ok(transport)
     }
     
@@ -379,11 +385,9 @@ impl P2PService {
     }
     
     /// Generate a keypair for testing
-    fn generate_keypair() -> Keypair {
-        let mut bytes = [0u8; 32];
-        bytes[0] = 42; // Fixed seed for testing
-        Keypair::ed25519_from_bytes(&mut bytes)
-            .expect("Failed to generate Ed25519 key")
+    pub fn generate_keypair() -> libp2p_identity::Keypair {
+        // Generate a new Ed25519 keypair
+        libp2p_identity::ed25519::Keypair::generate().into()
     }
 
     /// Get the peer ID from the swarm
@@ -497,18 +501,6 @@ mod tests {
         
         Ok(())
     }
-        let config = P2PConfig {
-            enable_mdns: false,
-            enable_kademlia: false,
-            ..Default::default()
-        };
-        
-        let (peer_id, _swarm) = P2PService::build::<Ping>(config)?;
-        // Verify peer_id is not the default (which would be all zeros)
-        assert_ne!(peer_id, PeerId::from_public_key(&Keypair::generate_ed25519().public()));
-        
-        Ok(())
-    }
     
     #[tokio::test]
     async fn test_p2p_service_transport() -> Result<(), Box<dyn StdErrorTrait>> {
@@ -520,11 +512,11 @@ mod tests {
             ..Default::default()
         };
         
-        let service = P2PService::with_config(config);
-        let transport = service.build_test_transport();
+        let service = P2PService::with_config(config)?;
         
-        // Test that the transport can be created
-        assert!(transport.is_ok());
+        // Test that the service can be created
+        let peer_id = service.local_peer_id();
+        assert_ne!(peer_id.to_string().len(), 0);
         
         Ok(())
     }

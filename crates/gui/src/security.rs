@@ -119,7 +119,7 @@ impl SecurityManager {
         // Check if domain is blocked
         if let Some(domain) = parsed_url.host_str() {
             if let Ok(blocked_domains) = self.blocked_domains.lock() {
-                if blocked_domains.contains(domain) {
+                if blocked_domains.contains::<str>(domain) {
                     return Ok(false);
                 }
             }

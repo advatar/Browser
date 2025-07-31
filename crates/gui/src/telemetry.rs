@@ -183,8 +183,9 @@ impl TelemetryManager {
             reports.push(report);
             
             // Keep only the last 1000 error reports
-            if reports.len() > 1000 {
-                reports.drain(0..reports.len() - 1000);
+            let reports_len = reports.len();
+            if reports_len > 1000 {
+                reports.drain(0..reports_len - 1000);
             }
         }
 
@@ -209,8 +210,9 @@ impl TelemetryManager {
             usage_stats.push(stats);
             
             // Keep only the last 5000 usage events
-            if usage_stats.len() > 5000 {
-                usage_stats.drain(0..usage_stats.len() - 5000);
+            let usage_stats_len = usage_stats.len();
+            if usage_stats_len > 5000 {
+                usage_stats.drain(0..usage_stats_len - 5000);
             }
         }
 
@@ -236,8 +238,9 @@ impl TelemetryManager {
             performance_metrics.push(metrics);
             
             // Keep only the last 1000 performance metrics
-            if performance_metrics.len() > 1000 {
-                performance_metrics.drain(0..performance_metrics.len() - 1000);
+            let metrics_len = performance_metrics.len();
+            if metrics_len > 1000 {
+                performance_metrics.drain(0..metrics_len - 1000);
             }
         }
 
@@ -336,8 +339,9 @@ impl TelemetryManager {
             security_alerts.push(alert);
             
             // Keep only the last 100 security alerts
-            if security_alerts.len() > 100 {
-                security_alerts.drain(0..security_alerts.len() - 100);
+            let len = security_alerts.len();
+            if len > 100 {
+                security_alerts.drain(0..len - 100);
             }
         }
 

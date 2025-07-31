@@ -1,4 +1,4 @@
-import { EventBus, EventCallback, Bookmark, BookmarkFolder } from '@/types';
+import { EventBus, EventCallback, Bookmark, BookmarkFolder, EventType } from '@/types';
 import { debounce } from '@/utils';
 
 export class BookmarkManager {
@@ -97,7 +97,7 @@ export class BookmarkManager {
       parent.children = parent.children.filter(child => 
         !('id' in child) || child.id !== bookmarkId
       );
-      this.updateFolder(parent);
+      this.updateFolder(parent.id, { dateModified: Date.now() });
     }
 
     this.bookmarks.delete(bookmarkId);
@@ -164,7 +164,7 @@ export class BookmarkManager {
       parent.children = parent.children.filter(child => 
         !('id' in child) || child.id !== folderId
       );
-      this.updateFolder(parent);
+      this.updateFolder(parent.id, { dateModified: Date.now() });
     }
 
     this.folders.delete(folderId);
@@ -206,28 +206,23 @@ export class BookmarkManager {
   }
 
   searchBookmarks(query: string): (Bookmark | BookmarkFolder)[] {
-    const searchLower = query.toLowerCase();
     const results: (Bookmark | BookmarkFolder)[] = [];
+    const lowerQuery = query.toLowerCase();
 
     // Search in bookmarks
-    this.bookmarks.forEach(bookmark => {
-      if (
-        bookmark.title.toLowerCase().includes(searchLower) ||
-        bookmark.url.toLowerCase().includes(searchLower) ||
-        (bookmark.tags && bookmark.tags.some(tag => 
-          tag.toLowerCase().includes(searchLower)
-        ))
-      ) {
+    for (const bookmark of this.bookmarks.values()) {
+      if (bookmark.title.toLowerCase().includes(lowerQuery) || 
+          bookmark.url.toLowerCase().includes(lowerQuery)) {
         results.push(bookmark);
       }
-    });
+    }
 
     // Search in folder names
-    this.folders.forEach(folder => {
-      if (folder.name.toLowerCase().includes(searchLower)) {
+    for (const folder of this.folders.values()) {
+      if (folder.name.toLowerCase().includes(lowerQuery)) {
         results.push(folder);
       }
-    });
+    }
 
     return results;
   }
@@ -241,7 +236,7 @@ export class BookmarkManager {
 
     // Check if item is already in the folder
     const exists = folder.children.some(child => 
-      ('id' in child ? child.id : child.id) === itemId
+      (child as { id: string }).id === itemId
     );
 
     if (!exists) {
@@ -251,13 +246,25 @@ export class BookmarkManager {
     }
   }
 
+  private findItemInFolder(folder: BookmarkFolder, itemId: string): Bookmark | BookmarkFolder | null {
+    for (const child of folder.children) {
+      const childId = 'id' in child ? child.id : (child as Bookmark).id;
+      if (childId === itemId) {
+        return child;
+      }
+      
+      if ('children' in child) {
+        const found = this.findItemInFolder(child, itemId);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
   private findParent(itemId: string): BookmarkFolder | null {
     for (const folder of this.folders.values()) {
-      if (folder.children.some(child => 
-        ('id' in child ? child.id : child.id) === itemId
-      )) {
-        return folder;
-      }
+      const found = this.findItemInFolder(folder, itemId);
+      if (found) return folder;
     }
     return null;
   }
@@ -302,15 +309,15 @@ export class BookmarkManager {
       data.folders.forEach((folder: BookmarkFolder) => {
         const currentFolder = this.folders.get(folder.id);
         if (currentFolder && folder.children) {
-          currentFolder.children = folder.children.map(child => 
-            this.bookmarks.get(('id' in child ? child.id : child.id)) || 
-            this.folders.get(('id' in child ? child.id : child.id))
-          ).filter(Boolean) as (Bookmark | BookmarkFolder)[];
+          currentFolder.children = folder.children.map(child => {
+            const childId = 'id' in child ? child.id : (child as Bookmark).id;
+            return this.bookmarks.get(childId) || this.folders.get(childId) || null;
+          }).filter((item): item is Bookmark | BookmarkFolder => item !== null);
         }
       });
 
       this.saveToStorage();
-      this.eventBus.publish('bookmarksImported', {});
+      this.eventBus.publish('bookmarkAdded' as EventType, {});
     } catch (error) {
       console.error('Error importing bookmarks:', error);
       throw new Error('Failed to import bookmarks');

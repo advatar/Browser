@@ -8,6 +8,7 @@ use tauri::{
     menu::{IsMenuItem, Menu, MenuItem, Submenu},
     AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
 };
+use tauri_plugin_dialog;
 use std::sync::{Arc, Mutex};
 
 mod browser_engine;
@@ -165,6 +166,7 @@ fn create_browser_window<R: Runtime>(
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             current_url: Mutex::new("about:blank".to_string()),
             browser_engine: Arc::new(BrowserEngine::new()),
