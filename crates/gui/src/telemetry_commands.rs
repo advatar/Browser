@@ -125,12 +125,13 @@ pub fn add_security_alert<R: Runtime>(
 
 /// Check for updates
 #[tauri::command]
-pub fn check_for_updates<R: Runtime>(
+pub async fn check_for_updates<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<(), String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
             telemetry.check_for_updates()
+                .await
                 .map_err(|e| e.to_string())?;
         }
     }

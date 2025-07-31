@@ -3,13 +3,12 @@
     windows_subsystem = "windows"
 )]
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{IsMenuItem, Menu, MenuItem, Submenu},
-    AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
+    Runtime, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog;
-use std::sync::{Arc, Mutex};
 
 mod browser_engine;
 mod protocol_handlers;
