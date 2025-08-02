@@ -37,13 +37,17 @@ impl Transport for DummyTransport {
         false
     }
     
-    fn dial(&mut self, _addr: libp2p_core::Multiaddr, _opts: DialOpts) -> Result<Self::Dial, TransportError<Self::Error>> {
+    fn dial(&mut self, _addr: libp2p_core::Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
         Ok(future::ready(Err(IoError::new(ErrorKind::Other, "Dummy transport does not support dialing"))))
     }
     
-    // dial_as_listener method removed as it's not part of the Transport trait in this version
+    fn dial_as_listener(&mut self, _addr: libp2p_core::Multiaddr) -> Result<Self::Dial, TransportError<Self::Error>> {
+        Ok(future::ready(Err(IoError::new(ErrorKind::Other, "Dummy transport does not support dialing as listener"))))
+    }
     
-    // address_translation method removed as it's not part of the Transport trait in this version
+    fn address_translation(&self, _listen_addr: &libp2p_core::Multiaddr, _observed_addr: &libp2p_core::Multiaddr) -> Option<libp2p_core::Multiaddr> {
+        None
+    }
     
     fn poll(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<TransportEvent<Self::ListenerUpgrade, Self::Error>> {
         Poll::Pending

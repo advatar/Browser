@@ -12,11 +12,7 @@ name = "p2p-node"
 path = "src/bin/main.rs"
 
 [features]
-default = ["kad", "mdns"]
-kad = ["dep:libp2p-kad"]
-mdns = ["dep:libp2p-mdns"]
-floodsub = ["dep:libp2p-floodsub"]
-gossipsub = ["dep:libp2p-gossipsub"]
+default = []
 
 [dependencies]
 # Core dependencies
@@ -48,34 +44,31 @@ libp2p = { workspace = true, default-features = false, features = [
     "gossipsub"
 ]}
 libp2p-core.workspace = true
-libp2p-identity.workspace = true
 libp2p-swarm.workspace = true
-libp2p-identify = { workspace = true, optional = true }
+libp2p-identify.workspace = true
 libp2p-ping.workspace = true
-libp2p-tcp = { workspace = true, default-features = false, features = ["async-io"] }
+libp2p-kad.workspace = true
+libp2p-mdns.workspace = true
+libp2p-floodsub.workspace = true
+libp2p-gossipsub.workspace = true
+libp2p-tcp.workspace = true
 libp2p-yamux.workspace = true
 libp2p-noise.workspace = true
-
-# Optional libp2p features - using workspace versions
-libp2p-kad = { workspace = true, optional = true }
-libp2p-mdns = { workspace = true, optional = true }
-libp2p-floodsub = { workspace = true, optional = true }
-libp2p-gossipsub = { workspace = true, optional = true }
-libp2p-websocket = { workspace = true, optional = true }
-
-# Explicit dependencies for the problematic crates with compatible versions
-# These are included in the workspace dependencies
+libp2p-dns.workspace = true
+libp2p-identity.workspace = true
 
 # Utilities
-tokio-util = { version = "0.7", features = ["compat"] }
+bytes.workspace = true
+async-stream = "0.3"
+tokio-util = { version = "0.7", features = ["codec", "compat"] }
 clap = { version = "4.0", features = ["derive"], optional = true }
-bytes = "1.5"
 void = "1.0"
 fastrand = "2.0.0"
 
+# Development and testing
 [dev-dependencies]
-tempfile = "3.10.0"
-tokio-test = "0.4.3"
-env_logger = "0.10.1"
+tokio-test = "0.4"
+tempfile = "3.3"
+env_logger = "0.11"
 
 # No need for patch section - using workspace dependencies

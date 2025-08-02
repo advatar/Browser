@@ -2,91 +2,71 @@
 name = "ipfs"
 version = "0.1.0"
 edition = "2021"
+description = "IPFS implementation for the decentralized browser"
 authors = ["Your Name <your.email@example.com>"]
-description = "IPFS implementation with enhanced P2P capabilities"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/advatar/browser"
+repository = "https://github.com/yourusername/ipfs-rs"
+keywords = ["ipfs", "libp2p", "p2p", "decentralized"]
+categories = ["network-programming", "cryptography", "filesystem"]
 
 [features]
-# Default features for the IPFS crate
-default = ["rust-ipfs"]
+# Enable metrics collection
+metrics = ["libp2p/metrics"]
+# Enable WebRTC transport (experimental)
+webrtc = []  # Removed until we have a working implementation
+# Enable WebTransport (experimental)
+webtransport = []  # Removed until we have a working implementation
 
-# Enable the legacy ipfs-embed based implementation
-legacy = ["dep:ipfs-embed"]
+[lib]
+# Set the library target name
+name = "ipfs"
+path = "src/lib.rs"
 
-# Enable the new rust-ipfs based implementation (default)
-rust-ipfs = ["dep:rust-ipfs"]
-
-# Optional features for both implementations
-kad = ["dep:libp2p-kad"]
-mdns = ["dep:libp2p-mdns"]
+[[bin]]
+# Set the binary target name
+name = "ipfs-node"
+path = "src/bin/node.rs"
 
 [dependencies]
 # Core dependencies
-anyhow.workspace = true
-thiserror.workspace = true
-async-trait = "0.1.77"
-bytes = "1.5.0"
-
-# IPFS implementations
-rust-ipfs = { workspace = true, optional = true }
-ipfs-embed = { version = "0.26.1", default-features = false, optional = true }
-
-# IPLD
-cid = { version = "0.8.6", features = ["std"] }
-libipld = { version = "0.14.0", features = ["dag-cbor", "dag-json"] }
-
-# File system and paths
+async-trait = { workspace = true }
+bytes = { workspace = true }
+cid = { version = "0.11.1", features = ["std"] }
 dirs = "5.0.1"
+futures = { workspace = true }
+libipld = { version = "0.14.0", features = ["dag-cbor", "dag-json", "dag-pb"] }
+libp2p = { workspace = true }
+libp2p-core = { workspace = true }
+libp2p-identity = { workspace = true }
+libp2p-swarm = { workspace = true }
+libp2p-identify = { workspace = true }
+libp2p-kad = { workspace = true }
+libp2p-mdns = { workspace = true }
+libp2p-noise = { workspace = true }
+libp2p-yamux = { workspace = true }
+libp2p-dns = { workspace = true }
+libp2p-tcp = { workspace = true }
+libp2p-ping = { workspace = true }
+libp2p-relay = { workspace = true }
+libp2p-autonat = { workspace = true }
+libp2p-upnp = { workspace = true }
+libp2p-metrics = { workspace = true }
+libp2p-quic = { workspace = true }
+libp2p-websocket = { workspace = true }
+log = { workspace = true }
+multihash = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = "0.10.8"
+thiserror = { workspace = true }
+tokio = { version = "1.30.0", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+tokio-util = { version = "0.7.8", features = ["codec", "io"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rust-ipfs = "0.3.0"
 
-# Local P2P crate with Kademlia and mDNS support
-p2p = { path = "../p2p", features = ["kad", "mdns"], default-features = false }
-
-# Libp2p stack - using workspace versions
-libp2p.workspace = true
-libp2p-core.workspace = true
-libp2p-identity.workspace = true
-libp2p-swarm.workspace = true
-libp2p-identify.workspace = true
-libp2p-ping.workspace = true
-libp2p-tcp.workspace = true
-libp2p-yamux.workspace = true
-libp2p-noise.workspace = true
-libp2p-kad = { workspace = true, optional = true }
-libp2p-mdns = { workspace = true, optional = true }
-libp2p-dns = { workspace = true, default-features = false, features = ["tokio"] }
-
-# Async runtime
-tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread"] }
-futures = { workspace = true, features = ["std", "async-await"] }
-
-# Logging and diagnostics
-log = "0.4.20"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-
-# Serialization
-serde = { version = "1.0.192", features = ["derive"] }
-serde_json = "1.0.108"
-prost = "0.12.1"
-prost-types = "0.12.1"
-
-# Utilities
-parking_lot = "0.12.1"
-rand = "0.8.5"
-hex = "0.4.3"
-multihash = "0.19.3"
-multibase = "0.9.1"
-multistream-select = "0.13.0"
-
-# Metrics (optional)
-prometheus = { version = "0.13.3", optional = true }
-
-# Testing (dev-only)
 [dev-dependencies]
-tempfile = "3.8.1"
-criterion = { version = "0.5.1", features = ["html_reports"] }
-libp2p-identity = { version = "0.2.0" }
+tempfile = "3.5.0"
 
 # Benchmarks
 [[bench]]
