@@ -195,22 +195,21 @@ impl P2PService {
         use libp2p_tcp as tcp;
         use libp2p_noise as noise;
         use libp2p_yamux as yamux;
-        use libp2p_core::transport::upgrade;
-        use libp2p_core::Transport;
-        use libp2p_core::muxing::StreamMuxerBox;
+        use libp2p_core::upgrade;
+        use libp2p_core::transport::{Boxed, Transport};
         
         // Create TCP transport with default configuration
         let tcp = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
         
-        // Create authenticated transport with noise
-        let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
-            .into_authentic(keypair)
-            .map_err(|e| anyhow::anyhow!("Signing libp2p-noise static DH keypair failed: {}", e))?;
+        // Create authenticated transport with noise using the updated API
+        // The new API uses the identity keypair directly without the need for into_authentic
+        let noise_config = noise::Config::new(keypair)
+            .map_err(|e| anyhow::anyhow!("Failed to create noise config: {}", e))?;
             
         // Build the transport stack
         let transport = tcp
             .upgrade(upgrade::Version::V1)
-            .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
+            .authenticate(noise_config)
             .multiplex(yamux::Config::default())
             .boxed();
             

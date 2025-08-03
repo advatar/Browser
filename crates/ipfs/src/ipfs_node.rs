@@ -665,19 +665,19 @@ impl Node {
     
     /// List the contents of a directory in IPFS
     pub async fn list_directory(&self, cid: &Cid) -> Result<Vec<rust_ipfs::Node>> {
-        self.ipfs.ls(cid).await
+        self.ipfs.list(cid).await
             .context("Failed to list directory")
     }
     
     /// Get information about the local node
     pub async fn node_info(&self) -> Result<rust_ipfs::NodeInfo> {
-        self.ipfs.node_info().await
+        self.ipfs.identity().await
             .context("Failed to get node info")
     }
     
     /// Get the current bandwidth usage statistics
-    pub async fn bandwidth_stats(&self) -> Result<rust_ipfs::BandwidthStats> {
-        self.ipfs.bandwidth_stats().await
+    pub async fn bandwidth_stats(&self) -> Result<rust_ipfs::Stats> {
+        self.ipfs.stats().await
             .context("Failed to get bandwidth stats")
     }
     
@@ -689,7 +689,7 @@ impl Node {
     
     /// Get the current list of listening addresses
     pub async fn listen_addresses(&self) -> Result<Vec<Multiaddr>> {
-        self.ipfs.listen_addresses().await
+        self.ipfs.listening_addresses().await
             .context("Failed to get listen addresses")
     }
     

@@ -954,16 +954,35 @@ impl BitswapService {
                 let mut message = BitswapMessage::new();
                 message.add_block(block);
                 
-                // Note: We need to handle the swarm in a way that's compatible with the async context
-                // This is a simplified version - in a real implementation, you'd need to ensure
-                // proper synchronization of the swarm instance
-                // TODO: Implement proper swarm synchronization for async operations
-                
-                // For now, we'll just log that we would send the block
-                log::debug!("Would send block to peer: {}", peer_id);
-                
-                // In a real implementation, you would do something like:
-                // swarm.behaviour_mut().send_message(&peer_id, message);
+                // Acquire a lock on the swarm to send the message
+                if let Some(swarm) = self.swarm.upgrade() {
+                    // Create a command to send to the swarm's event loop
+                    let command = BitswapCommand::SendMessage {
+                        peer_id: peer_id.clone(),
+                        message: message.clone(),
+                    };
+                    
+                    // Send the command through the command channel
+                    match self.command_sender.send(command).await {
+                        Ok(_) => {
+                            log::debug!("Successfully queued block send to peer: {}", peer_id);
+                            
+                            // Update metrics
+                            if let Ok(mut metrics) = self.metrics.lock() {
+                                metrics.blocks_sent += 1;
+                                metrics.bytes_sent += message.serialized_size() as u64;
+                                metrics.last_send_time = std::time::Instant::now();
+                            }
+                        },
+                        Err(e) => {
+                            log::error!("Failed to send block to peer {}: {}", peer_id, e);
+                            return Err(anyhow!("Failed to send command: {}", e));
+                        }
+                    }
+                } else {
+                    log::warn!("Cannot send block to peer {}: swarm reference is no longer valid", peer_id);
+                    return Err(anyhow!("Swarm reference is no longer valid"));
+                }
             }
         }).await;
         

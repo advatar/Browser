@@ -159,33 +159,69 @@ where
         }
         
         // Try to get it from the client
-        match self.client.blocks().at_latest().await {
-            Ok(block) if block.number() >= number => {
-                let target_block = self.client.blocks().at_latest().await?;
-                if target_block.number() == number {
-                    let header = target_block.header().clone();
-                    let hash = target_block.hash();
-                    
-                    // Get block body if configured
-                    let body = if self.config.download_bodies {
-                        let extrinsics: Result<Vec<_>, _> = target_block.extrinsics().await?.collect();
-                        Some(extrinsics?)
-                    } else {
-                        None
-                    };
-                    
-                    Ok(Some(BlockData {
-                        header,
-                        body,
-                        justifications: None, // TODO: Get justifications from runtime
-                        hash,
-                        number,
-                    }))
+        // First check if the requested block number is within range
+        let latest_block = self.client.blocks().at_latest().await?;
+        let latest_number = latest_block.number();
+        
+        if number > latest_number {
+            // Block number is in the future, doesn't exist yet
+            return Ok(None);
+        }
+        
+        // Get the block at the specific number
+        let block_result = self.client.blocks().at_height(number).await;
+        
+        match block_result {
+            Ok(target_block) => {
+                let header = target_block.header().clone();
+                let hash = target_block.hash();
+                
+                // Get block body if configured
+                let body = if self.config.download_bodies {
+                    let extrinsics_result = target_block.extrinsics().await;
+                    match extrinsics_result {
+                        Ok(extrinsics) => {
+                            let collected: Result<Vec<_>, _> = extrinsics.collect();
+                            match collected {
+                                Ok(ext_vec) => Some(ext_vec),
+                                Err(e) => {
+                                    log::warn!("Failed to collect extrinsics for block #{}: {}", number, e);
+                                    None
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            log::warn!("Failed to get extrinsics for block #{}: {}", number, e);
+                            None
+                        }
+                    }
                 } else {
-                    Ok(None)
-                }
+                    None
+                };
+                
+                // Get justifications if available
+                // In production code, we need to query the runtime API for justifications
+                let justifications = match target_block.justifications().await {
+                    Ok(Some(j)) => Some(j),
+                    Ok(None) => None,
+                    Err(e) => {
+                        log::debug!("No justifications available for block #{}: {}", number, e);
+                        None
+                    }
+                };
+                
+                Ok(Some(BlockData {
+                    header,
+                    body,
+                    justifications,
+                    hash,
+                    number,
+                }))
+            },
+            Err(e) => {
+                log::debug!("Failed to get block #{}: {}", number, e);
+                Ok(None)
             }
-            _ => Ok(None),
         }
     }
     
@@ -193,23 +229,151 @@ where
     async fn background_sync_loop(client: Arc<OnlineClient<PolkadotConfig>>) -> Result<()> {
         log::info!("Starting background chain synchronization loop");
         
-        // Create interval for periodic sync (every 30 seconds)
-        let mut sync_interval = interval(Duration::from_secs(30));
+        // Create intervals for different sync operations
+        let mut fast_sync_interval = interval(Duration::from_secs(5));  // Quick checks for new blocks
+        let mut full_sync_interval = interval(Duration::from_secs(30)); // Full sync checks
+        let mut health_check_interval = interval(Duration::from_secs(60)); // Network health checks
+        
+        // Track metrics for sync performance
+        let mut last_sync_time = Instant::now();
+        let mut blocks_processed = 0;
+        let mut consecutive_errors = 0;
+        
+        // Subscribe to new block notifications
+        let mut blocks_sub = match client.blocks().subscribe_finalized().await {
+            Ok(sub) => {
+                log::info!("Successfully subscribed to finalized blocks");
+                Some(sub)
+            },
+            Err(e) => {
+                log::warn!("Failed to subscribe to finalized blocks: {}", e);
+                None
+            }
+        };
         
         loop {
             tokio::select! {
-                // Periodic sync
-                _ = sync_interval.tick() => {
-                    if let Err(e) = Self::perform_sync_check(&client).await {
-                        log::error!("Error during periodic sync: {}", e);
+                // Process new blocks from subscription
+                maybe_block = async {
+                    if let Some(sub) = &mut blocks_sub {
+                        sub.next().await
+                    } else {
+                        // If subscription is not available, never select this branch
+                        futures::future::pending().await
                     }
-                }
+                } => {
+                    match maybe_block {
+                        Some(Ok(block)) => {
+                            let number = block.number();
+                            let hash = block.hash();
+                            log::info!("New finalized block: #{} ({})", number, hash);
+                            
+                            // Process the new block
+                            blocks_processed += 1;
+                            consecutive_errors = 0;
+                        },
+                        Some(Err(e)) => {
+                            log::error!("Error in block subscription: {}", e);
+                            consecutive_errors += 1;
+                            
+                            // Attempt to resubscribe if we get too many errors
+                            if consecutive_errors > 3 {
+                                log::warn!("Too many subscription errors, attempting to resubscribe");
+                                blocks_sub = match client.blocks().subscribe_finalized().await {
+                                    Ok(sub) => {
+                                        log::info!("Successfully resubscribed to finalized blocks");
+                                        consecutive_errors = 0;
+                                        Some(sub)
+                                    },
+                                    Err(e) => {
+                                        log::error!("Failed to resubscribe to finalized blocks: {}", e);
+                                        None
+                                    }
+                                };
+                            }
+                        },
+                        None => {
+                            log::warn!("Block subscription ended, attempting to resubscribe");
+                            blocks_sub = match client.blocks().subscribe_finalized().await {
+                                Ok(sub) => {
+                                    log::info!("Successfully resubscribed to finalized blocks");
+                                    Some(sub)
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to resubscribe to finalized blocks: {}", e);
+                                    None
+                                }
+                            };
+                        }
+                    }
+                },
+                
+                // Fast sync check for new blocks
+                _ = fast_sync_interval.tick() => {
+                    if let Err(e) = Self::perform_sync_check(&client).await {
+                        log::debug!("Error during fast sync check: {}", e);
+                        consecutive_errors += 1;
+                    }
+                },
+                
+                // Full sync check
+                _ = full_sync_interval.tick() => {
+                    // Calculate sync metrics
+                    let elapsed = last_sync_time.elapsed();
+                    let blocks_per_minute = if elapsed.as_secs() > 0 {
+                        (blocks_processed as f64 / elapsed.as_secs() as f64) * 60.0
+                    } else {
+                        0.0
+                    };
+                    
+                    log::info!("Sync metrics: {} blocks processed in the last {} seconds ({:.2} blocks/minute)", 
+                        blocks_processed, elapsed.as_secs(), blocks_per_minute);
+                    
+                    // Reset metrics
+                    last_sync_time = Instant::now();
+                    blocks_processed = 0;
+                    
+                    // Perform a full sync check
+                    if let Err(e) = Self::perform_sync_check(&client).await {
+                        log::error!("Error during full sync check: {}", e);
+                        consecutive_errors += 1;
+                    } else {
+                        consecutive_errors = 0;
+                    }
+                },
+                
+                // Network health check
+                _ = health_check_interval.tick() => {
+                    // Check node health and connection status
+                    match client.rpc().system_health().await {
+                        Ok(health) => {
+                            log::info!("Node health: peers={}, syncing={}, should_have_peers={}", 
+                                health.peers, health.is_syncing, health.should_have_peers);
+                            
+                            // If we're not connected to any peers but should be, log a warning
+                            if health.peers == 0 && health.should_have_peers {
+                                log::warn!("Node has no peers but should have peers");
+                            }
+                        },
+                        Err(e) => {
+                            log::error!("Failed to check node health: {}", e);
+                            consecutive_errors += 1;
+                        }
+                    }
+                },
                 
                 // Handle shutdown signal
                 _ = tokio::signal::ctrl_c() => {
                     log::info!("Shutting down chain synchronization");
                     break;
                 }
+            }
+            
+            // If we have too many consecutive errors, delay before continuing
+            if consecutive_errors > 5 {
+                log::warn!("Too many consecutive errors ({}), pausing sync for recovery", consecutive_errors);
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                consecutive_errors = 0;
             }
         }
         

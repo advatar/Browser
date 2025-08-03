@@ -533,12 +533,53 @@ pub async fn start(&mut self) -> Result<()> {
             .await
             .expect("Failed to put DHT record");
         
-        // Note: In a real test, we would need to wait for the DHT operation to complete
-        // and verify the record was stored. This is simplified for the example.
-        // In a real implementation, you would use the event system to wait for the operation to complete.
+        // Wait for the DHT operation to complete using the event system
+        let timeout = std::time::Duration::from_secs(5);
+        let start_time = std::time::Instant::now();
+        let mut success = false;
         
-        // For now, just verify the node is still running
-        assert!(!node.local_peer_id().to_string().is_empty());
+        // Create a channel to receive events
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let mut event_subscription = node.event_subscription().await;
+        
+        // Spawn a task to forward events to our channel
+        tokio::spawn(async move {
+            while let Some(event) = event_subscription.next().await {
+                if tx.send(event).await.is_err() {
+                    break;
+                }
+            }
+        });
+        
+        // Wait for a DHT record published event or timeout
+        while start_time.elapsed() < timeout {
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    match event {
+                        IpfsEvent::DhtRecordPublished { key: published_key, .. } if published_key == key => {
+                            success = true;
+                            break;
+                        },
+                        _ => continue,
+                    }
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {},
+            }
+        }
+        
+        // Verify the record was stored by trying to get it
+        if !success {
+            // If we didn't get an event confirmation, try to get the record directly
+            match node.get_dht_record(&key).await {
+                Ok(Some(retrieved_value)) => {
+                    assert_eq!(retrieved_value, value, "Retrieved value doesn't match the stored value");
+                    success = true;
+                },
+                _ => {}
+            }
+        }
+        
+        assert!(success, "Failed to confirm DHT record was published within timeout period");
     }
     
     #[tokio::test]

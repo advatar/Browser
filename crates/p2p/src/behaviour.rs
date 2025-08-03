@@ -6,8 +6,8 @@ use libp2p::{
     PeerId,
     swarm::NetworkBehaviour,
 };
-use libp2p_identify as identify;
-use libp2p_ping as ping;
+use libp2p::identify;
+use libp2p::ping;
 
 /// Network events emitted by the P2P behaviour
 #[derive(Debug)]

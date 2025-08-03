@@ -28,11 +28,6 @@
 
 use anyhow::{Context, Result};
 use cid::{Cid, multihash::{Code, MultihashDigest}};
-use ipld_core::{
-    codec::Codec,
-    ipld::{Ipld, IpldCodec},
-    raw::RawCodec,
-};
 use std::path::Path;
 
 /// A persistent block storage implementation using Sled.
@@ -174,9 +169,9 @@ impl SledStore {
     }
 }
 
-// Implement ipfs_embed::BlockStore for SledStore
-impl ipfs_embed::BlockStore for SledStore {
-    fn get(&self, cid: &Cid) -> Result<Option<Vec<u8>>> {
+// Implement basic block store functionality for SledStore
+impl SledStore {
+    pub fn get(&self, cid: &Cid) -> Result<Option<Vec<u8>>> {
         match self.db.get(cid.to_bytes()) {
             Ok(Some(data)) => Ok(Some(data.to_vec())),
             Ok(None) => Ok(None),
@@ -184,21 +179,21 @@ impl ipfs_embed::BlockStore for SledStore {
         }
     }
 
-    fn insert(&self, cid: &Cid, data: &[u8]) -> Result<()> {
+    pub fn insert(&self, cid: &Cid, data: &[u8]) -> Result<()> {
         self.db
             .insert(cid.to_bytes(), data)
             .context("failed to insert block")?;
         Ok(())
     }
 
-    fn remove(&self, cid: &Cid) -> Result<()> {
+    pub fn remove(&self, cid: &Cid) -> Result<()> {
         self.db
             .remove(cid.to_bytes())
             .context("failed to remove block")?;
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<Cid>> {
+    pub fn list(&self) -> Result<Vec<Cid>> {
         self.db
             .iter()
             .map(|item| {
@@ -208,7 +203,7 @@ impl ipfs_embed::BlockStore for SledStore {
             .collect()
     }
     
-    fn contains(&self, cid: &Cid) -> Result<bool> {
+    pub fn contains(&self, cid: &Cid) -> Result<bool> {
         self.db
             .contains_key(cid.to_bytes())
             .context("failed to check if block exists")
