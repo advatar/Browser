@@ -390,7 +390,9 @@ where
         
         // Get block events if available
         if let Ok(events) = latest_block.events().await {
-            let event_count = events.iter().count();
+            // Collect events into a vector to properly handle the async stream
+            let event_vec = events.collect::<Result<Vec<_>, _>>().await?;
+            let event_count = event_vec.len();
             log::trace!("Block #{} contains {} events", block_number, event_count);
         }
         

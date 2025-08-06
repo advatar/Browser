@@ -192,25 +192,18 @@ impl P2PService {
 
     /// Build a transport stack with TCP, noise encryption, and yamux multiplexing
     fn build_transport(keypair: &Keypair) -> anyhow::Result<libp2p_core::transport::Boxed<(PeerId, libp2p_core::muxing::StreamMuxerBox)>> {
-        use libp2p_tcp as tcp;
-        use libp2p_noise as noise;
-        use libp2p_yamux as yamux;
-        use libp2p_core::upgrade;
-        use libp2p_core::transport::{Boxed, Transport};
-        
-        // Create TCP transport with default configuration
-        let tcp = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true));
-        
-        // Create authenticated transport with noise using the updated API
-        // The new API uses the identity keypair directly without the need for into_authentic
-        let noise_config = noise::Config::new(keypair)
-            .map_err(|e| anyhow::anyhow!("Failed to create noise config: {}", e))?;
-            
-        // Build the transport stack
-        let transport = tcp
-            .upgrade(upgrade::Version::V1)
-            .authenticate(noise_config)
-            .multiplex(yamux::Config::default())
+        // Create a noise key pair for authenticated encryption
+        let noise_keys = noise::Config::new(keypair)
+            .map_err(|err| anyhow::anyhow!("Signing libp2p-noise static DH keypair failed: {}", err))?;
+
+        // Create a TCP transport using tokio
+        let tcp_transport = libp2p_tcp::tokio::Transport::new(libp2p_tcp::Config::default().nodelay(true));
+
+        // Upgrade the transport with noise for encryption and yamux for multiplexing
+        let transport = tcp_transport
+            .upgrade(libp2p_core::upgrade::Version::V1)
+            .authenticate(noise_keys)
+            .multiplex(libp2p_yamux::YamuxConfig::default())
             .boxed();
             
         Ok(transport)

@@ -728,9 +728,8 @@ impl Node {
 
 /// Build the libp2p transport with support for multiple protocols
 fn build_transport(keypair: &Keypair, config: &Config) -> Result<Boxed<(PeerId, StreamMuxerBox)>> {
-    // Create noise keys for secure communication
-    let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
-        .into_authentic(keypair)
+    // Create noise keys for secure communication using the updated API
+    let noise_keys = noise::Config::new(keypair)
         .context("Failed to create noise keys")?;
 
     // Start with TCP transport
@@ -759,7 +758,7 @@ fn build_transport(keypair: &Keypair, config: &Config) -> Result<Boxed<(PeerId, 
     // Finalize the transport with noise and yamux
     let transport = transport
         .upgrade(upgrade::Version::V1)
-        .authenticate(noise::NoiseConfig::xx(noise_keys).into_authenticated())
+        .authenticate(noise_keys)
         .multiplex(yamux::YamuxConfig::default())
         .boxed();
 
