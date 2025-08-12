@@ -4,36 +4,54 @@
 )]
 
 use std::sync::{Arc, Mutex};
+use std::fs::{create_dir_all, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
 use tauri::{
     menu::{IsMenuItem, Menu, MenuItem, Submenu},
     Runtime, WebviewWindowBuilder,
 };
+use tauri::Manager; // bring Manager trait into scope
 use tauri_plugin_dialog;
 
-mod browser_engine;
-mod protocol_handlers;
-mod security;
-mod commands;
-mod telemetry;
-mod telemetry_commands;
+// Use the library crate modules
+use gui::browser_engine::BrowserEngine;
+use gui::protocol_handlers::ProtocolHandler;
+use gui::security::SecurityManager;
+use gui::telemetry::TelemetryManager;
+use gui::commands::*;
+use gui::telemetry_commands::*;
+use gui::app_state::AppState;
 
-use browser_engine::BrowserEngine;
-use protocol_handlers::ProtocolHandler;
-use security::SecurityManager;
-use telemetry::TelemetryManager;
-use commands::*;
-use telemetry_commands::*;
+fn log_path() -> PathBuf {
+    let mut base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    base.push("Library/Logs/DecentralizedBrowser");
+    // Ensure directory exists
+    let _ = create_dir_all(&base);
+    base.push("gui.log");
+    base
+}
 
-#[derive(Debug)]
-struct AppState {
-    current_url: Mutex<String>,
-    browser_engine: Arc<BrowserEngine>,
-    protocol_handler: Arc<Mutex<ProtocolHandler>>,
-    security_manager: Arc<Mutex<SecurityManager>>,
-    telemetry_manager: Arc<Mutex<TelemetryManager>>,
+fn log_startup(msg: &str) {
+    let path = log_path();
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{} | {}", chrono_like_timestamp(), msg);
+    }
+}
+
+fn chrono_like_timestamp() -> String {
+    // Minimal, dependency-free timestamp using system time since UNIX_EPOCH
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(dur) => format!("{}.{:03}", dur.as_secs(), dur.subsec_millis()),
+        Err(_) => "0".to_string(),
+    }
 }
 
 fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> {
+    log_startup("create_main_menu: start");
     // Create menu items
     let new_tab = MenuItem::with_id(manager, "new_tab", "New Tab", true, None::<&str>)?;
     let new_window = MenuItem::with_id(manager, "new_window", "New Window", true, None::<&str>)?;
@@ -48,9 +66,7 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
         &[
             &new_tab as &dyn IsMenuItem<R>,
             &new_window,
-            &MenuItem::new(manager, "-", true, None::<&str>)?,
             &settings,
-            &MenuItem::new(manager, "-", true, None::<&str>)?,
             &quit,
         ],
     )?;
@@ -69,7 +85,6 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
             &cut as &dyn IsMenuItem<R>,
             &copy,
             &paste,
-            &MenuItem::new(manager, "-", true, None::<&str>)?,
             &select_all,
         ],
     )?;
@@ -95,6 +110,7 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
         manager,
         &[&file_menu as &dyn IsMenuItem<R>, &edit_menu, &view_menu],
     )?;
+    log_startup("create_main_menu: success");
     
     Ok(menu)
 }
@@ -103,6 +119,7 @@ fn create_browser_window<R: Runtime>(
     app: &tauri::AppHandle<R>,
     url: Option<&str>,
 ) -> tauri::Result<()> {
+    log_startup("create_browser_window: start");
     let initial_url = url.unwrap_or("about:blank");
     
     // Create the menu first
@@ -118,6 +135,7 @@ fn create_browser_window<R: Runtime>(
     .min_inner_size(800.0, 600.0)
     .menu(menu)
     .build()?;
+    log_startup("create_browser_window: webview built");
 
     // Store the initial URL in the app state
     if let Some(state) = app.try_state::<AppState>() {
@@ -164,6 +182,23 @@ fn create_browser_window<R: Runtime>(
 }
 
 fn main() {
+    // Install a panic hook to capture early panics to our log file
+    std::panic::set_hook(Box::new(|info| {
+        let msg = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            *s
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "panic occurred"
+        };
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown:0".into());
+        log_startup(&format!("panic: {} @ {}", msg, location));
+    }));
+
+    log_startup("main: starting tauri builder");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -174,6 +209,7 @@ fn main() {
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
         })
         .setup(|app| {
+            log_startup("setup: entered");
             create_browser_window(app.app_handle(), None)?;
             
             Ok(())
@@ -182,6 +218,9 @@ fn main() {
             navigate_to,
             get_current_url,
             execute_script,
+            // Settings
+            get_settings,
+            update_settings,
             create_tab,
             close_tab,
             switch_tab,
@@ -277,6 +316,10 @@ mod tests {
     fn test_app_state() {
         let state = AppState {
             current_url: Mutex::new("https://example.com".to_string()),
+            browser_engine: Arc::new(BrowserEngine::new()),
+            protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
+            security_manager: Arc::new(Mutex::new(SecurityManager::new())),
+            telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
         };
         
         let url = state.current_url.lock().unwrap();

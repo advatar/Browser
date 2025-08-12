@@ -9,13 +9,13 @@ This checklist tracks the implementation status of all features and components i
 - [x] Install Rust toolchain - Confirmed by Cargo.toml and build files
 - [x] Install Node.js and pnpm - Confirmed by package.json and lock files
 - [x] Configure Git - Confirmed by .git directory and config
-- [x] Set up development environment (VS Code with extensions) - Confirmed by .vscode directory
+- [ ] Set up development environment (VS Code with extensions) - .vscode directory not present in repo (developer-local)
 - [x] Configure shell profile with useful aliases - Assumed complete
 
 ### Monorepo Bootstrap
 - [x] Initialize workspace with Cargo.toml - Confirmed by root Cargo.toml
 - [x] Set up CI workflow - Confirmed by .github/workflows
-- [x] Configure pre-commit hooks - Confirmed by .pre-commit-config.yaml
+- [x] Configure pre-commit hooks - Configured via Husky and lint-staged in root package.json (no .pre-commit-config.yaml)
 - [x] Add basic project structure - Confirmed by directory structure
 
 ## 🔌 Phase 1: Core Components
@@ -34,7 +34,7 @@ This checklist tracks the implementation status of all features and components i
   - [x] Peer discovery - Implemented with list-peers command
 
 ### IPFS Integration
-- [x] Add IPFS implementation using ipfs-embed - Completed
+- [x] Add IPFS implementation using rust-ipfs + libp2p (no ipfs-embed) - Completed
 - [x] Create Node struct with Swarm integration - Completed
 - [x] Implement Bitswap protocol - Complete (with documentation in BITSWAP.md)
 - [x] Handle block storage - Implemented with SledStore
@@ -107,7 +107,7 @@ This checklist tracks the implementation status of all features and components i
 ## 📦 Phase 6: Packaging & Distribution
 
 ### Packaging
-- [x] Create installer packages - Complete with Tauri bundling configuration in tauri.conf.json
+- [x] Create installer packages - Complete with Tauri bundling configuration in crates/gui/tauri.conf.json
   - [x] macOS .dmg - Complete with Tauri's native macOS bundling
   - [x] Windows .msi - Complete with Tauri's native Windows bundling
   - [x] Linux .deb/.rpm - Complete with Tauri's native Linux bundling

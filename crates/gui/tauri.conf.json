@@ -1,31 +1,17 @@
 {
   "build": {
-    "beforeDevCommand": "cargo build --workspace",
-    "beforeBuildCommand": "cargo build --release --workspace",
-    "devUrl": "file:///Volumes/Transcend/Projects/Apps/Browser/crates/gui/src/index.html"
+    "beforeDevCommand": "npm --prefix ../../orbit-shell-ui run dev",
+    "beforeBuildCommand": "npm --prefix ../../orbit-shell-ui ci && npm --prefix ../../orbit-shell-ui run build",
+    "devUrl": "http://localhost:5174",
+    "frontendDist": "../../orbit-shell-ui/dist"
   },
   "productName": "Decentralized Browser",
   "version": "0.1.0",
   "identifier": "com.decentralized.browser",
-  "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Decentralized Browser",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "resizable": true,
-        "fullscreen": false,
-        "decorations": true,
-        "url": "tauri://localhost/index.html"
-      }
-    ]
-  },
+  "app": {},
   "bundle": {
     "active": true,
     "category": "public.app-category.developer-tools",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
   }
 }

@@ -1168,11 +1168,11 @@ feat(p2p): prometheus metrics exporter
 
 2. **Integration Testing**
    ```bash
-   # Test ENS resolution
-   curl http://localhost:8080/resolve/ens/vitalik.eth
+   # Test ENS resolution (dev server)
+   curl http://localhost:5174/resolve/ens/vitalik.eth
    
-   # Test IPNS resolution
-   curl http://localhost:8080/resolve/ipns/Qm...
+   # Test IPNS resolution (dev server)
+   curl http://localhost:5174/resolve/ipns/Qm...
    ```
 
 ---

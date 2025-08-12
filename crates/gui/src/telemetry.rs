@@ -518,7 +518,7 @@ mod tests {
         if let Ok(usage_stats) = manager.usage_stats.lock() {
             assert_eq!(usage_stats.len(), 1);
             assert_eq!(usage_stats[0].event_type, "page_visit");
-        }
+        };
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
         if let Ok(alerts) = manager.security_alerts.lock() {
             assert_eq!(alerts.len(), 1);
             assert_eq!(alerts[0].alert_type, "certificate_error");
-        }
+        };
     }
 
     #[tokio::test]
@@ -558,6 +558,6 @@ mod tests {
         
         if let Ok(update_info) = manager.update_info.lock() {
             assert!(update_info.is_some());
-        }
+        };
     }
 }

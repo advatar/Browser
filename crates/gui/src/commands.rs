@@ -318,10 +318,10 @@ impl Default for BrowserSettings {
     fn default() -> Self {
         Self {
             default_search_engine: "duckduckgo".to_string(),
-            homepage: "about:blank".to_string(),
+            homepage: "https://vitalik.eth.limo/".to_string(),
             privacy_settings: PrivacySettings::default(),
-            ipfs_gateway: "https://ipfs.io".to_string(),
-            ens_resolver: Some("https://cloudflare-eth.com".to_string()),
+            ipfs_gateway: "https://dweb.link".to_string(),
+            ens_resolver: Some("https://eth.limo".to_string()),
         }
     }
 }

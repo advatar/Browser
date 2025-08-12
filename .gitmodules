@@ -1,0 +1,3 @@
+[submodule "orbit-shell-ui"]
+	path = orbit-shell-ui
+	url = git@github.com:advatar/orbit-shell-ui.git

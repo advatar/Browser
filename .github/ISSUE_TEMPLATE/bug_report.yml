@@ -1,0 +1,77 @@
+name: Bug report
+description: Create a report to help us improve
+labels: [bug]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out a bug report!
+        Please search existing issues before filing a new one.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: A short summary of the problem
+      placeholder: e.g., Crash when opening IPFS URL
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide clear steps so we can reproduce the issue
+      placeholder: |
+        1. Go to ...
+        2. Click on ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      placeholder: What actually happened? Include logs or stack traces if possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain your problem
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: e.g., v0.1.0 (commit abcdef)
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS
+        - Linux
+        - Windows
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment details
+      description: Rust, Node, Tauri versions; custom config; network info
+      placeholder: |
+        rustc 1.73.0, Node 20.x, Tauri 2.x
+        Using Tor proxy? Custom IPFS gateway?
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here

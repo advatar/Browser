@@ -84,13 +84,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Check if we have a built executable
-if [[ -f "${APP_DIR}/../../target/release/decentralized-browser" ]]; then
+if [[ -f "${APP_DIR}/../../target/release/gui" ]]; then
+    exec "${APP_DIR}/../../target/release/gui"
+elif [[ -f "${APP_DIR}/../../target/debug/gui" ]]; then
+    exec "${APP_DIR}/../../target/debug/gui"
+elif [[ -f "${APP_DIR}/../../target/release/decentralized-browser" ]]; then
     exec "${APP_DIR}/../../target/release/decentralized-browser"
 elif [[ -f "${APP_DIR}/../../target/debug/decentralized-browser" ]]; then
     exec "${APP_DIR}/../../target/debug/decentralized-browser"
+elif [[ -f "${APP_DIR}/../../target/release/browser" ]]; then
+    exec "${APP_DIR}/../../target/release/browser"
+elif [[ -f "${APP_DIR}/../../target/debug/browser" ]]; then
+    exec "${APP_DIR}/../../target/debug/browser"
 else
     # Fallback: open the web interface
-    open "https://localhost:8080"
+    open "http://localhost:5174"
 fi
 EOF
 
