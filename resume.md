@@ -1,72 +1,54 @@
 # Decentralized Browser: Resume Plan
 
-Updated: 2025-08-12T17:06:21+02:00
+Updated: 2025-08-13T00:39:45+02:00
 
 ## Objective
-- Fix Rust GUI tests and build the macOS DMG installer.
-- Ensure frontend tests pass and avoid macOS port conflicts (no 8080; use repo-configured port).
+
+- Finalize internal homepage integration at `about:home` across React UI, GUI, and Tauri.
+- Ensure navigation defaults, normalize blanks to `about:home`, and exclude all `about:*` from history.
+- Update tests and docs; surface Light Clients help in the app.
 
 ## Current Status
-- Shared library refactor done in `crates/gui/`:
-  - `src/app_state.rs` introduced and re-exported via `src/lib.rs`.
-  - `src/main.rs` now imports from the library crate modules.
-- Remaining Rust failures are focused in `crates/gui/src/performance.rs`:
-  - `MemoryMetrics` defines: `heap_used`, `heap_total`, `external`, `rss`, `array_buffers` (bytes).
-  - `collect_memory_metrics()` incorrectly uses fields `used_mb`, `total_mb`, `process_usage_mb` and depends on `libc` (not in `Cargo.toml`).
-- Frontend is in `orbit-shell-ui/`; Tauri v2 devUrl is configured; avoid port 8080 (repo currently uses 5173).
-- DMG script `scripts/create-dmg.sh` expects binary `gui` and has been updated accordingly.
+
+- React: `ContentArea.tsx` renders `HomePage` for `about:home`; normalization returns `about:home` for blank input.
+- Store: default homepage set to `about:home`.
+- Tauri: defaults use `about:home` for initial/current URL.
+- GUI:
+  - `crates/gui/src/index.html` new-tab defaults to `about:home`.
+  - `crates/gui/src/js/navigation-manager.js` `goHome()` → `about:home`; handles all `about:*`.
+  - `crates/gui/src/js/history-manager.js` ignores all `about:*` (done).
+  - `crates/gui/src/js/tab.js` default URL updated to `about:home` (done).
+  - `crates/gui/src/js/tab-manager.js` still defaults to `about:blank` (pending).
+- Tests: `crates/gui/tests/integration_tests.rs` still uses `about:blank` in places (pending update).
+- Docs: `docs/LIGHT_CLIENTS.md` exists; not yet surfaced in UI.
 
 ## Next Actions (today)
-1. Fix memory metrics implementation
-   - Replace platform-specific `libc` code in `crates/gui/src/performance.rs` with a cross‑platform `sysinfo`-based implementation.
-   - Populate `MemoryMetrics` (bytes):
-     - `rss` = process RSS bytes.
-     - `heap_used` and `heap_total` = approximate using RSS (ensures tests see `heap_used > 0`).
-     - `external` and `array_buffers` = 0 for now.
-   - Clean up fallback code (no `if let Some(System::new_all())`).
-   - Add dependency in `crates/gui/Cargo.toml`:
-     - `sysinfo = "0.30"` (or latest compatible in workspace).
-
-2. Re-run Rust tests
-   - From repo root:
-     - `cargo test -p gui`
-
-3. Frontend dependencies and tests
-   - From `orbit-shell-ui/`:
-     - `pnpm install`
-     - `pnpm test`
-
-4. Build release app
-   - From repo root or `crates/gui/`:
-     - `cargo tauri build`
-     - If not using the Tauri bundler: `cargo build --release -p gui`
-
-5. Create DMG
-   - From repo root:
-     - `bash scripts/create-dmg.sh`
-   - Verify the script bundles the built app/binary named `gui`.
-
-6. Smoke test DMG
-   - Install and launch the app.
-   - Verify navigation, settings, and a few Tauri commands.
-   - Confirm dev server port is not 8080.
+1. GUI defaults
+   - Update `crates/gui/src/js/tab-manager.js` to default new tabs to `about:home`.
+   - Verify all new-tab entry points (`index.html`, shortcuts) use `about:home`.
+2. History hygiene
+   - Ensure update pathways also ignore `about:*` (e.g., `updateHistoryItem()` behavior).
+3. Navigation and rendering
+   - Verify `goHome` and blank input normalization land on `about:home`.
+   - Confirm `about:home` uses React `HomePage` (no iframe) and commands handle missing iframe.
+4. Tests
+   - Replace `about:blank` with `about:home` in `crates/gui/tests/integration_tests.rs` and any remaining references.
+5. Help docs
+   - Add an in‑app Help (dialog or route) to render `docs/LIGHT_CLIENTS.md`.
+6. Docs
+   - Update user docs to reflect `about:home`, defaults, and embedded light clients.
+7. QA
+   - Manual pass on tab creation, Home, back/forward, history, bookmarks.
 
 ## Validation Checklist
-- [ ] All `cargo test -p gui` pass.
-- [ ] `pnpm test` in `orbit-shell-ui/` pass.
-- [ ] Release build completes.
-- [ ] DMG generated and opens successfully.
-- [ ] No references to port 8080 in active configs/docs.
+- [ ] New tabs open to `about:home` (all paths).
+- [ ] `about:*` never recorded in history.
+- [ ] `goHome` and blank inputs route to `about:home`.
+- [ ] `integration_tests.rs` updated and pass.
+- [ ] Help shows Light Clients doc in-app.
+- [ ] No regressions in navigation/iframe handling.
 
 ## Notes
-- Prefer port 5173 for dev; avoid 8080 on macOS.
-- Integration tests assert `memory_usage.heap_used > 0`; ensure implementation satisfies this.
-- If retaining platform APIs, add `libc = "0.2"` to `gui/Cargo.toml`, but a `sysinfo`-only path is preferred.
+- Keep `about:blank` backward-compatible but deprecated; normalize to `about:home` in UX where applicable.
+- Use `normalizeForGateway()` to preserve `about:*` URLs as-is.
 
-## Useful commands
-```sh
-cargo test -p gui -q
-pnpm -C orbit-shell-ui i && pnpm -C orbit-shell-ui test
-cargo tauri build
-bash scripts/create-dmg.sh
-```

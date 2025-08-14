@@ -120,7 +120,7 @@ fn create_browser_window<R: Runtime>(
     url: Option<&str>,
 ) -> tauri::Result<()> {
     log_startup("create_browser_window: start");
-    let initial_url = url.unwrap_or("about:blank");
+    let initial_url = url.unwrap_or("about:home");
     
     // Create the menu first
     let menu = create_main_menu(app)?;
@@ -202,7 +202,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            current_url: Mutex::new("about:blank".to_string()),
+            current_url: Mutex::new("about:home".to_string()),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
@@ -267,7 +267,12 @@ async fn navigate_to<R: Runtime>(
     }
     
     // Execute navigation in the webview
-    let script = format!("document.getElementById('webview').src = '{}';", url);
+    // The React UI may render certain about:* pages natively and not include the iframe.
+    // Guard against missing element to avoid console errors.
+    let script = format!(
+        "(function() {{ var el = document.getElementById('webview'); if (el) {{ el.src = '{}'; }} }})();",
+        url
+    );
     if let Err(e) = webview.eval(&script) {
         return Err(format!("Failed to navigate: {}", e));
     }
@@ -286,7 +291,7 @@ async fn get_current_url<R: Runtime>(
             return Ok(current_url.clone());
         }
     }
-    Ok("about:blank".to_string())
+    Ok("about:home".to_string())
 }
 
 // Tauri command to execute JavaScript in the webview

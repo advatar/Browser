@@ -121,7 +121,7 @@ export const STORAGE_KEYS = {
 
 export const DEFAULT_SETTINGS = {
   theme: 'system',
-  homepage: 'about:blank',
+  homepage: 'about:home',
   searchEngine: 'https://duckduckgo.com/?q=',
   enableTrackingProtection: true,
   showBookmarksBar: true,

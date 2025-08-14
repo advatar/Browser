@@ -1,6 +1,6 @@
 // Tab class represents a single browser tab
 export class Tab {
-  constructor(id, url = 'about:blank', groupId = '') {
+  constructor(id, url = 'about:home', groupId = '') {
     this.id = id;
     this.webviewId = `webview-${id}`;
     this.title = 'New Tab';

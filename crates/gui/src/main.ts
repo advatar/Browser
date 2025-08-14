@@ -135,7 +135,7 @@ class BrowserEngine {
     const newTabButton = document.createElement('div');
     newTabButton.className = 'new-tab-button';
     newTabButton.innerHTML = '+';
-    newTabButton.onclick = () => this.createTab('about:blank');
+    newTabButton.onclick = () => this.createTab('about:home');
     tabBar.appendChild(newTabButton);
   }
 
@@ -570,7 +570,7 @@ async function initializeApp(): Promise<void> {
 
   // Create initial tab if none exist
   if (browserEngine.tabs.size === 0) {
-    await browserEngine.createTab('about:blank');
+    await browserEngine.createTab('about:home');
   }
 
   // Listen for window events

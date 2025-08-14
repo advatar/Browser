@@ -290,18 +290,25 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 - Minimum 80% code coverage
 
 ## 📖 Documentation
-
+  
 - **[API Documentation](https://docs.rs/browser)** - Rust API docs
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - Detailed system design
 - **[Development Guide](docs/DEVELOPMENT.md)** - Setup and contribution guide
 - **[User Manual](docs/USER_GUIDE.md)** - End-user documentation
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and fixes
 
 ## 🐛 Bug Reports & Feature Requests
-
+  
 Please use [GitHub Issues](https://github.com/advatar/browser/issues) to:
 - Report bugs with detailed reproduction steps
 - Request new features with clear use cases
 - Ask questions about usage or development
+
+## 🤝 Support & Community
+  
+- Read our [Support Guide](SUPPORT.md) for help options
+- Use [GitHub Discussions](https://github.com/advatar/browser/discussions) for Q&A and ideas
+- See our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## 🔒 Security
 

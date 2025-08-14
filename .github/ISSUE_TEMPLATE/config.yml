@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support and Community
+    url: https://github.com/advatar/browser/discussions
+    about: Ask questions and get help
+  - name: Troubleshooting Guide
+    url: https://github.com/advatar/browser/blob/main/docs/TROUBLESHOOTING.md
+    about: Common issues and fixes

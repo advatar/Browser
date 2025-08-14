@@ -64,8 +64,13 @@ export class NavigationManager {
     if (!targetUrl) return;
     
     // Handle special URLs
-    if (targetUrl === 'about:blank' || targetUrl === '') {
-      tab.webview.src = 'about:blank';
+    if (targetUrl === '' || targetUrl === 'about:home') {
+      tab.webview.src = 'about:home';
+      this.updateNavigationState(tab);
+      return;
+    }
+    if (targetUrl.startsWith('about:')) {
+      tab.webview.src = targetUrl;
       this.updateNavigationState(tab);
       return;
     }
@@ -233,7 +238,7 @@ export class NavigationManager {
   async goHome() {
     // Use fromHistory flag to avoid duplicate history entries
     // since we're just navigating to a URL
-    await this.navigateTo('https://www.google.com', { fromHistory: true });
+    await this.navigateTo('about:home', { fromHistory: true });
   }
   
   // Update navigation buttons and address bar

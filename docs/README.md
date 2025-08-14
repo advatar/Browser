@@ -20,6 +20,7 @@ This directory contains comprehensive documentation for the Decentralized Web Br
 - [Installation Guide](USER_GUIDE.md#installation)
 - [Basic Usage](USER_GUIDE.md#basic-usage)
 - [Configuration](USER_GUIDE.md#configuration)
+- [Troubleshooting](TROUBLESHOOTING.md)
 
 ### For Contributors
 - [Development Setup](DEVELOPMENT.md#development-setup)

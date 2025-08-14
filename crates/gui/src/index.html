@@ -317,7 +317,7 @@
     
     // Initialize the browser with a default tab
     document.addEventListener('DOMContentLoaded', async () => {
-      await tabManager.createTab('about:blank');
+      await tabManager.createTab('about:home');
       uiManager.initializeEventListeners();
       
       // Set up keyboard shortcuts
@@ -325,7 +325,7 @@
         // Ctrl+T or Cmd+T to open new tab
         if ((e.ctrlKey || e.metaKey) && e.key === 't') {
           e.preventDefault();
-          tabManager.createTab('about:blank');
+          tabManager.createTab('about:home');
         }
         
         // Ctrl+W or Cmd+W to close current tab

@@ -58,7 +58,7 @@ export class HistoryManager {
    * @param {string} favicon - Page favicon URL
    */
   addHistoryItem(url, title = '', transitionType = TRANSITION_TYPES.TYPED, favicon = '') {
-    if (!url || url === 'about:blank') return;
+    if (!url || url.startsWith('about:')) return;
     
     const now = Date.now();
     let historyItem;
