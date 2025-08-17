@@ -8,24 +8,30 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/advatar/browser"
 
 [features]
-default = ["std"]
+default = ["std", "wallet"]
 std = [
     "parity-scale-codec/std",
-    "frame-support/std",
-    "frame-system/std",
     "sp-io/std",
     "sp-runtime/std",
     "sp-std/std",
 ]
+wallet = []
+substrate = [
+    "dep:frame-support",
+    "dep:frame-system",
+    "frame-support/std",
+    "frame-system/std",
+]
 
 [dependencies]
 # Polkadot SDK - using stable release
-frame-support = { version = "37.0.0", default-features = false }
-frame-system = { version = "37.0.0", default-features = false }
+frame-support = { version = "37.1.0", default-features = false, optional = true }
+frame-system = { version = "37.1.0", default-features = false, optional = true }
 sp-core = { version = "21.0.0", default-features = false }
 sp-runtime = { version = "24.0.0", default-features = false }
 sp-std = { version = "8.0.0", default-features = false }
 sp-io = { version = "23.0.0", default-features = false }
+anyhow = { workspace = true }
 
 # Crypto and serialization
 parity-scale-codec = { version = "3.0.0", default-features = false, features = ["derive"] }

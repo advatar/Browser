@@ -34,7 +34,7 @@ When these are set, the browser may use them as a fallback transport for develop
 
 ### Home page and gateways
 - Default homepage: `about:home` (curated IPFS/ENS links and frequent sites)
-- Default IPFS gateway: `https://dweb.link`
+- Default IPFS gateway: `https://ipfs.io`
 - Default ENS resolver host: `https://eth.limo`
 
 You can change these in Settings → Network and Appearance (if present) or via future configuration options.

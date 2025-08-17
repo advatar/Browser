@@ -13,24 +13,33 @@
 #![warn(unused_extern_crates)]
 #![forbid(unsafe_code)]
 
+use sp_runtime::codec;
+
+#[cfg(feature = "substrate")]
 mod client;
+#[cfg(feature = "substrate")]
 mod transaction;
 mod wallet;
+#[cfg(feature = "substrate")]
 mod sync;
 
 // Re-export the most commonly used types
+#[cfg(feature = "substrate")]
 pub use client::{Client, SubstrateClient, SubstrateConfig};
 pub use sp_core::{
     crypto::{Pair, Ss58Codec},
     sr25519,
 };
+#[cfg(feature = "substrate")]
 pub use sp_runtime::{
     generic::Era,
     traits::{Block as BlockT, Header as HeaderT},
     MultiSignature, Justifications,
 };
+#[cfg(feature = "substrate")]
 pub use transaction::{Transaction, TransactionBuilder, TransactionReceipt};
 pub use wallet::{KeyPair, KeyType, Wallet, WalletError};
+#[cfg(feature = "substrate")]
 pub use sync::{ChainSync, SyncConfig, SyncStatus, BlockData};
 
 /// Error type for the blockchain crate
@@ -60,7 +69,7 @@ pub enum Error {
 /// Result type for the blockchain crate
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "substrate"))]
 mod tests {
     use super::*;
     use sp_keyring::AccountKeyring;
@@ -70,7 +79,7 @@ mod tests {
         let alice = AccountKeyring::Alice.to_account_id();
         let encoded = hex::encode(alice.as_ref());
         let decoded = hex::decode(encoded).unwrap();
-        let account_id = AccountId32::try_from(decoded.as_slice()).unwrap();
+        let account_id = sp_core::crypto::AccountId32::try_from(decoded.as_slice()).unwrap();
         assert_eq!(alice, account_id);
     }
 }

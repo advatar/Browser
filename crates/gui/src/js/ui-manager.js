@@ -15,6 +15,11 @@ export class UIManager {
     this.historyButton = document.getElementById('history-button');
     this.downloadsButton = document.getElementById('downloads-button');
     this.settingsButton = document.getElementById('settings-button');
+    this.walletButton = document.getElementById('wallet-button');
+    
+    // Wallet state
+    this.walletInfo = null;
+    this.invoke = (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) ? window.__TAURI__.core.invoke : null;
     
     // Initialize history management
     this.eventBus = this.createEventBus();
@@ -24,6 +29,9 @@ export class UIManager {
     this.setupEventListeners();
     this.setupContextMenu();
     this.setupHistoryIntegration();
+
+    // Initialize wallet UI if available
+    this.initializeWalletUI();
   }
   
   setupEventListeners() {
@@ -82,6 +90,85 @@ export class UIManager {
     
     // Keyboard shortcuts
     document.addEventListener('keydown', this.handleKeyboardShortcuts.bind(this));
+  }
+
+  async initializeWalletUI() {
+    if (!this.walletButton || !this.invoke) return;
+    try {
+      await this.refreshWalletInfo();
+    } catch (e) {
+      console.error('Failed to get initial wallet info:', e);
+    }
+    this.walletButton.addEventListener('click', async () => {
+      try {
+        // Refresh state before deciding action
+        await this.refreshWalletInfo();
+        if (this.walletInfo && this.walletInfo.is_connected) {
+          await this.disconnectWallet();
+        } else {
+          await this.connectWallet();
+        }
+      } catch (err) {
+        console.error('Wallet action failed:', err);
+      }
+    });
+  }
+
+  async refreshWalletInfo() {
+    if (!this.invoke) return;
+    try {
+      this.walletInfo = await this.invoke('get_wallet_info');
+    } catch (e) {
+      console.error('get_wallet_info failed:', e);
+    }
+    this.updateWalletUI();
+  }
+
+  async connectWallet() {
+    if (!this.invoke) return;
+    try {
+      this.walletInfo = await this.invoke('connect_wallet');
+    } catch (e) {
+      console.error('connect_wallet failed:', e);
+    }
+    this.updateWalletUI();
+  }
+
+  async disconnectWallet() {
+    if (!this.invoke) return;
+    try {
+      await this.invoke('disconnect_wallet');
+      this.walletInfo = null;
+    } catch (e) {
+      console.error('disconnect_wallet failed:', e);
+    }
+    this.updateWalletUI();
+  }
+
+  updateWalletUI() {
+    if (!this.walletButton) return;
+    const info = this.walletInfo;
+    if (info && info.is_connected) {
+      const addr = this.formatAddress(info.address || '');
+      const bal = info.balance || '';
+      this.walletButton.innerHTML = `
+        <div class="wallet-connected">
+          <div class="wallet-address">${addr}</div>
+          <div class="wallet-balance">${bal}</div>
+        </div>
+      `;
+      this.walletButton.className = 'wallet-button connected';
+      this.walletButton.title = `Connected: ${addr}`;
+    } else {
+      this.walletButton.innerHTML = 'Connect Wallet';
+      this.walletButton.className = 'wallet-button disconnected';
+      this.walletButton.title = 'Wallet';
+    }
+  }
+
+  formatAddress(address) {
+    if (!address) return '';
+    return address.length > 10 ? `${address.slice(0, 6)}...${address.slice(-4)}` : address;
   }
   
   setupContextMenu() {

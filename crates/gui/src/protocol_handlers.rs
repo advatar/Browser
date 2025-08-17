@@ -4,11 +4,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use url::Url;
+use std::time::Duration;
 
 /// Protocol handler for decentralized protocols
 #[derive(Debug)]
 pub struct ProtocolHandler {
     ipfs_gateway: String,
+    ipfs_gateways: Vec<String>,
     ens_resolver: Option<String>,
     ipns_cache: Arc<RwLock<HashMap<String, String>>>,
     ens_cache: Arc<RwLock<HashMap<String, String>>>,
@@ -36,6 +38,11 @@ impl ProtocolHandler {
     pub fn new() -> Self {
         Self {
             ipfs_gateway: "https://ipfs.io".to_string(),
+            ipfs_gateways: vec![
+                "https://ipfs.io".to_string(),
+                "https://cloudflare-ipfs.com".to_string(),
+                "https://gateway.pinata.cloud".to_string(),
+            ],
             ens_resolver: Some("https://cloudflare-eth.com".to_string()),
             ipns_cache: Arc::new(RwLock::new(HashMap::new())),
             ens_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -45,6 +52,14 @@ impl ProtocolHandler {
     /// Set IPFS gateway
     pub fn set_ipfs_gateway(&mut self, gateway: String) {
         self.ipfs_gateway = gateway;
+        // Ensure primary gateway is first in the fallback list
+        if let Some(pos) = self.ipfs_gateways.iter().position(|g| g == &self.ipfs_gateway) {
+            // Move to front
+            let gw = self.ipfs_gateways.remove(pos);
+            self.ipfs_gateways.insert(0, gw);
+        } else {
+            self.ipfs_gateways.insert(0, self.ipfs_gateway.clone());
+        }
     }
 
     /// Set ENS resolver
@@ -59,30 +74,52 @@ impl ProtocolHandler {
             return Err(anyhow!("Invalid IPFS hash: {}", hash));
         }
 
-        // Try to fetch from IPFS gateway
-        let url = format!("{}/ipfs/{}", self.ipfs_gateway, hash);
-        
-        match reqwest::get(&url).await {
-            Ok(response) => {
-                let content_type = response
-                    .headers()
-                    .get("content-type")
-                    .and_then(|ct| ct.to_str().ok())
-                    .unwrap_or("application/octet-stream")
-                    .to_string();
-                
-                let content_length = response.content_length();
-                let data = response.bytes().await?.to_vec();
-                
-                Ok(IpfsContent {
-                    hash: hash.to_string(),
-                    content_type,
-                    size: content_length,
-                    data,
-                })
+        // Try to fetch from IPFS gateways with fallback on 5xx/timeout
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        for gw in &self.ipfs_gateways {
+            let url = format!("{}/ipfs/{}", gw, hash);
+            match client.get(&url).send().await {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        let content_type = resp
+                            .headers()
+                            .get("content-type")
+                            .and_then(|ct| ct.to_str().ok())
+                            .unwrap_or("application/octet-stream")
+                            .to_string();
+                        let content_length = resp.content_length();
+                        let data = resp.bytes().await?.to_vec();
+                        return Ok(IpfsContent {
+                            hash: hash.to_string(),
+                            content_type,
+                            size: content_length,
+                            data,
+                        });
+                    } else if resp.status().is_server_error() {
+                        last_err = Some(anyhow!("Gateway {} returned {}", gw, resp.status()));
+                        continue; // try next gateway
+                    } else {
+                        // 4xx and others: do not fallback further
+                        return Err(anyhow!(
+                            "Failed to fetch IPFS content from {}: status {}",
+                            gw,
+                            resp.status()
+                        ));
+                    }
+                }
+                Err(e) => {
+                    // network/timeout errors: try next gateway
+                    last_err = Some(anyhow!("{}", e));
+                    continue;
+                }
             }
-            Err(e) => Err(anyhow!("Failed to fetch IPFS content: {}", e)),
         }
+
+        Err(last_err.unwrap_or_else(|| anyhow!("Failed to fetch IPFS content from all gateways")))
     }
 
     /// Handle IPNS protocol
@@ -207,36 +244,61 @@ impl ProtocolHandler {
 
     /// Resolve IPNS name to IPFS hash
     async fn resolve_ipns(&self, name: &str) -> Result<String> {
-        // Use IPFS gateway to resolve IPNS
-        let url = format!("{}/ipns/{}", self.ipfs_gateway, name);
-        
-        match reqwest::Client::new()
-            .head(&url)
-            .send()
-            .await
-        {
-            Ok(response) => {
-                // Try to get the resolved hash from headers
-                if let Some(location) = response.headers().get("location") {
-                    if let Ok(location_str) = location.to_str() {
-                        if let Some(hash) = location_str.strip_prefix("/ipfs/") {
-                            return Ok(hash.to_string());
+        // Try multiple gateways with fallback on 5xx/timeout
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .timeout(Duration::from_secs(10))
+            .build()?;
+
+        let mut last_err: Option<anyhow::Error> = None;
+        for gw in &self.ipfs_gateways {
+            let url = format!("{}/ipns/{}", gw, name);
+            // Try HEAD first
+            match client.head(&url).send().await {
+                Ok(head_resp) => {
+                    if head_resp.status().is_success() || head_resp.status().is_redirection() {
+                        if let Some(location) = head_resp.headers().get("location") {
+                            if let Ok(location_str) = location.to_str() {
+                                if let Some(hash) = location_str.strip_prefix("/ipfs/") {
+                                    return Ok(hash.to_string());
+                                }
+                            }
                         }
+                        // If location not present, try GET
+                        match client.get(&url).send().await {
+                            Ok(get_resp) => {
+                                if get_resp.status().is_success() || get_resp.status().is_redirection() {
+                                    let final_url = get_resp.url().to_string();
+                                    if let Some(hash) = final_url.strip_prefix(&format!("{}/ipfs/", gw)) {
+                                        return Ok(hash.split('/').next().unwrap_or(hash).to_string());
+                                    }
+                                } else if get_resp.status().is_server_error() {
+                                    last_err = Some(anyhow!("Gateway {} returned {}", gw, get_resp.status()));
+                                    continue;
+                                } else {
+                                    return Err(anyhow!("Failed to resolve IPNS via {}: status {}", gw, get_resp.status()));
+                                }
+                            }
+                            Err(e) => {
+                                last_err = Some(anyhow!("{}", e));
+                                continue;
+                            }
+                        }
+                    } else if head_resp.status().is_server_error() {
+                        last_err = Some(anyhow!("Gateway {} returned {}", gw, head_resp.status()));
+                        continue;
+                    } else {
+                        return Err(anyhow!("Failed to resolve IPNS via {}: status {}", gw, head_resp.status()));
                     }
                 }
-                
-                // Fallback: make a GET request and extract from redirect
-                let get_response = reqwest::get(&url).await?;
-                let final_url = get_response.url().to_string();
-                
-                if let Some(hash) = final_url.strip_prefix(&format!("{}/ipfs/", self.ipfs_gateway)) {
-                    Ok(hash.split('/').next().unwrap_or(hash).to_string())
-                } else {
-                    Err(anyhow!("Could not resolve IPNS name: {}", name))
+                Err(e) => {
+                    last_err = Some(anyhow!("{}", e));
+                    continue;
                 }
             }
-            Err(e) => Err(anyhow!("Failed to resolve IPNS: {}", e)),
         }
+
+        Err(last_err.unwrap_or_else(|| anyhow!("Failed to resolve IPNS from all gateways")))
     }
 
     /// Resolve ENS name

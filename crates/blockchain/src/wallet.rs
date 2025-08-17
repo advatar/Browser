@@ -128,24 +128,24 @@ impl KeyPair {
         match self {
             KeyPair::Sr25519(pair) => {
                 let sig = match sr25519::Signature::from_slice(signature) {
-                    Ok(sig) => sig,
-                    Err(_) => return false,
+                    Some(sig) => sig,
+                    None => return false,
                 };
-                pair.verify(message, &sig)
+                sr25519::Pair::verify(&sig, message, &pair.public())
             }
             KeyPair::Ed25519(pair) => {
                 let sig = match ed25519::Signature::from_slice(signature) {
-                    Ok(sig) => sig,
-                    Err(_) => return false,
+                    Some(sig) => sig,
+                    None => return false,
                 };
-                pair.verify(message, &sig)
+                ed25519::Pair::verify(&sig, message, &pair.public())
             }
             KeyPair::Ecdsa(pair) => {
                 let sig = match ecdsa::Signature::from_slice(signature) {
-                    Ok(sig) => sig,
-                    Err(_) => return false,
+                    Some(sig) => sig,
+                    None => return false,
                 };
-                pair.verify(message, &sig)
+                ecdsa::Pair::verify(&sig, message, &pair.public())
             }
         }
     }

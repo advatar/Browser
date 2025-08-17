@@ -568,6 +568,23 @@ async function initializeApp(): Promise<void> {
   await walletManager.getWalletInfo();
   await settingsManager.getSettings();
 
+  // Wallet button click: toggle connect/disconnect
+  const walletButton = document.getElementById('wallet-button') as HTMLButtonElement | null;
+  if (walletButton) {
+    walletButton.addEventListener('click', async () => {
+      try {
+        const info = await walletManager.getWalletInfo();
+        if (info && info.is_connected) {
+          await walletManager.disconnectWallet();
+        } else {
+          await walletManager.connectWallet();
+        }
+      } catch (err) {
+        console.error('Wallet action failed:', err);
+      }
+    });
+  }
+
   // Create initial tab if none exist
   if (browserEngine.tabs.size === 0) {
     await browserEngine.createTab('about:home');

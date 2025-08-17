@@ -3,7 +3,12 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Runtime, State};
-use tokio::sync::Mutex as AsyncMutex;
+// use tokio::sync::Mutex as AsyncMutex;
+use blockchain::{KeyPair, KeyType, Wallet};
+use blockchain::{Pair, Ss58Codec};
+use k256::elliptic_curve::sec1::ToEncodedPoint;
+use sha3::{Digest, Keccak256};
+use rand::RngCore;
 
 // Tab management commands
 
@@ -274,32 +279,86 @@ pub struct WalletInfo {
     pub is_connected: bool,
 }
 
-#[tauri::command]
-pub async fn get_wallet_info<R: Runtime>(
-    _app_handle: AppHandle<R>,
-) -> Result<WalletInfo, String> {
-    // TODO: Integrate with blockchain crate wallet
-    Ok(WalletInfo {
-        address: "0x...".to_string(),
-        balance: "0.0 ETH".to_string(),
-        network: "Ethereum Mainnet".to_string(),
-        is_connected: false,
-    })
+fn evm_address_from_sp_ecdsa_public(pubkey_compressed: &[u8]) -> Option<String> {
+    // sp_core::ecdsa::Public is SEC1-encoded compressed (33 bytes). Convert to uncompressed and keccak(x||y)
+    let pk = k256::PublicKey::from_sec1_bytes(pubkey_compressed).ok()?;
+    let uncompressed = pk.to_encoded_point(false);
+    let bytes = uncompressed.as_bytes(); // 65 bytes: 0x04 || X(32) || Y(32)
+    let mut hasher = Keccak256::new();
+    hasher.update(&bytes[1..]); // skip 0x04
+    let hash = hasher.finalize();
+    let addr = &hash[12..]; // last 20 bytes
+    Some(format!("0x{}", hex::encode(addr)))
 }
 
 #[tauri::command]
-pub async fn connect_wallet<R: Runtime>(
+pub fn get_wallet_info<R: Runtime>(
+    state: State<'_, AppState>,
     _app_handle: AppHandle<R>,
 ) -> Result<WalletInfo, String> {
-    // TODO: Implement wallet connection
-    Err("Wallet connection not implemented yet".to_string())
+    let wallet = state.wallet.lock().map_err(|e| e.to_string())?;
+    if let Some(key) = wallet.default_key() {
+        match key {
+            KeyPair::Ecdsa(pair) => {
+                let ss58 = pair.public().to_ss58check();
+                let evm = evm_address_from_sp_ecdsa_public(&pair.public().0)
+                    .unwrap_or_else(|| ss58.clone());
+                Ok(WalletInfo {
+                    address: evm,
+                    balance: "0.0 ETH".into(),
+                    network: "Ethereum Mainnet".into(),
+                    is_connected: true,
+                })
+            }
+            _ => {
+                let ss58 = key.to_ss58();
+                Ok(WalletInfo {
+                    address: ss58,
+                    balance: "0".into(),
+                    network: "Substrate".into(),
+                    is_connected: true,
+                })
+            }
+        }
+    } else {
+        Ok(WalletInfo {
+            address: "".into(),
+            balance: "0".into(),
+            network: "".into(),
+            is_connected: false,
+        })
+    }
 }
 
 #[tauri::command]
-pub async fn disconnect_wallet<R: Runtime>(
+pub fn connect_wallet<R: Runtime>(
+    state: State<'_, AppState>,
+    _app_handle: AppHandle<R>,
+) -> Result<WalletInfo, String> {
+    // Generate a fresh ECDSA key for EVM chains
+    let mut seed = [0u8; 32];
+    let mut rng = rand::rngs::OsRng;
+    rng.fill_bytes(&mut seed);
+    let pair = KeyPair::from_seed(&seed, KeyType::Ecdsa).map_err(|e| e.to_string())?;
+
+    let mut wallet = state.wallet.lock().map_err(|e| e.to_string())?;
+    // Replace existing default key if present
+    let _ = wallet.remove_key("default");
+    wallet.add_key("default", pair.clone()).map_err(|e| e.to_string())?;
+    wallet.set_default_key("default").map_err(|e| e.to_string())?;
+
+    // Return info
+    drop(wallet);
+    get_wallet_info(state, _app_handle)
+}
+
+#[tauri::command]
+pub fn disconnect_wallet<R: Runtime>(
+    state: State<'_, AppState>,
     _app_handle: AppHandle<R>,
 ) -> Result<(), String> {
-    // TODO: Implement wallet disconnection
+    let mut wallet = state.wallet.lock().map_err(|e| e.to_string())?;
+    *wallet = Wallet::new();
     Ok(())
 }
 
@@ -320,7 +379,7 @@ impl Default for BrowserSettings {
             default_search_engine: "duckduckgo".to_string(),
             homepage: "https://vitalik.eth.limo/".to_string(),
             privacy_settings: PrivacySettings::default(),
-            ipfs_gateway: "https://dweb.link".to_string(),
+            ipfs_gateway: "https://ipfs.io".to_string(),
             ens_resolver: Some("https://eth.limo".to_string()),
         }
     }

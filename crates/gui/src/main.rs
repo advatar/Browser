@@ -21,6 +21,7 @@ use gui::security::SecurityManager;
 use gui::telemetry::TelemetryManager;
 use gui::commands::*;
 use gui::telemetry_commands::*;
+use blockchain::Wallet;
 use gui::app_state::AppState;
 
 fn log_path() -> PathBuf {
@@ -207,6 +208,7 @@ fn main() {
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
+            wallet: Arc::new(Mutex::new(Wallet::new())),
         })
         .setup(|app| {
             log_startup("setup: entered");
@@ -241,7 +243,11 @@ fn main() {
             add_security_alert,
             check_for_updates,
             export_telemetry,
-            set_telemetry_enabled
+            set_telemetry_enabled,
+            // Wallet
+            get_wallet_info,
+            connect_wallet,
+            disconnect_wallet
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
