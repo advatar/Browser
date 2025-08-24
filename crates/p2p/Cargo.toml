@@ -32,7 +32,6 @@ log = "0.4"
 # Core libp2p dependencies - using workspace versions
 libp2p = { workspace = true, default-features = false, features = [
     "tcp",
-    "tls",
     "dns",
     "yamux",
     "noise",

@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy")] // Retired by default: depends on legacy Node API (start, listen_addrs, DHT ops)
 use anyhow::Result;
 use cid::Cid;
 use ipfs::{Block, Config, Node};

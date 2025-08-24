@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/yourusername/ipfs-rs"
 keywords = ["ipfs", "libp2p", "p2p", "decentralized"]
 categories = ["network-programming", "cryptography", "filesystem"]
+autobins = false
 
 [features]
 # Enable metrics collection
@@ -16,16 +17,14 @@ metrics = ["libp2p/metrics"]
 webrtc = []  # Removed until we have a working implementation
 # Enable WebTransport (experimental)
 webtransport = []  # Removed until we have a working implementation
+# Enable legacy (manual libp2p) node implementation
+legacy = []
 
 [lib]
 # Set the library target name
 name = "ipfs"
 path = "src/lib.rs"
 
-[[bin]]
-# Set the binary target name
-name = "ipfs-node"
-path = "src/bin/node.rs"
 
 [dependencies]
 # Core dependencies
@@ -37,7 +36,6 @@ futures = { workspace = true }
 libipld = { version = "0.14.0", features = ["dag-cbor", "dag-json", "dag-pb"] }
 libp2p = { workspace = true, default-features = false, features = [
     "tcp",
-    "tls",
     "dns",
     "yamux",
     "noise",
@@ -68,18 +66,19 @@ libp2p-quic = { workspace = true }
 libp2p-websocket = { workspace = true }
 log = { workspace = true }
 multihash = { workspace = true }
+multihash-codetable = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = "0.10.8"
 thiserror = { workspace = true }
-tokio = { version = "1.30.0", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+tokio = { workspace = true }
 tokio-util = { version = "0.7.8", features = ["codec", "io"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-rust-ipfs = "0.14.1"
+rust-ipfs = { workspace = true }
 sled = "0.34.7"
 rand = "0.8.5"
-anyhow = "1.0.75"
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.5.0"

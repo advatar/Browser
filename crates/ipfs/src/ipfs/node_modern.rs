@@ -1,29 +1,25 @@
 //! Modern IPFS node implementation using rust-ipfs.
 
-use crate::ipfs::{Block, BlockStore, Config, Error, NodeEvent, Result};
+use crate::ipfs::{Block, BlockStore, Config, Error, NodeEvent, Result, Cid};
 use async_trait::async_trait;
 use futures::{
     channel::{mpsc, oneshot},
-    Stream, StreamExt,
+    StreamExt,
 };
-use libp2p::{
-    core::{muxing::StreamMuxerBox, transport::Boxed, upgrade},
-    identity::Keypair,
-    mplex, noise,
-    swarm::{NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, Transport,
-};
-use rust_ipfs::{Ipfs, IpfsOptions, Node as IpfsNode, TestTypes, UninitializedIpfs};
+use futures::SinkExt;
+use libp2p::{Multiaddr, PeerId};
+use libp2p::swarm::dial_opts::DialOpts;
+use rust_ipfs::{Ipfs, UninitializedIpfsDefault};
+use rust_ipfs::block::Block as IpfsBlock;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
 /// A modern IPFS node implementation using rust-ipfs.
 pub struct Node {
     /// The underlying rust-ipfs node.
-    ipfs: Ipfs<TestTypes>,
+    ipfs: Ipfs,
     /// The node's peer ID.
     peer_id: PeerId,
     /// Channel for sending commands to the node.
@@ -43,7 +39,7 @@ pub enum NodeCommand {
     /// Add a block to the node.
     AddBlock(Block),
     /// Get a block from the node.
-    GetBlock(Cid, oneshot::Sender<Result<Option<Block>>>>,
+    GetBlock(Cid, oneshot::Sender<Result<Option<Block>>>),
     /// Check if a block exists.
     HasBlock(Cid, oneshot::Sender<bool>),
     /// Shut down the node.
@@ -52,13 +48,13 @@ pub enum NodeCommand {
 
 impl Node {
     /// Create a new IPFS node with the given configuration.
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn new(_config: Config) -> Result<Self> {
         // Initialize the rust-ipfs node
-        let options = IpfsOptions::inmemory_with_generated_keys();
-        let (ipfs, fut) = UninitializedIpfs::new(options).start().await?;
-        
-        // Start the node's background task
-        tokio::spawn(fut);
+        let ipfs = UninitializedIpfsDefault::new()
+            .with_default()
+            .start()
+            .await
+            .map_err(|e| Error::Other(format!("ipfs start: {}", e)))?;
         
         // Create channels for commands and events
         let (command_sender, command_receiver) = mpsc::channel(32);
@@ -67,10 +63,17 @@ impl Node {
         // Initialize connected peers set
         let connected_peers = Arc::new(Mutex::new(HashSet::new()));
         
+        // Query local identity to get peer id
+        let local_info = ipfs
+            .identity(None)
+            .await
+            .map_err(|e| Error::Other(format!("identity: {}", e)))?;
+        let peer_id = local_info.peer_id;
+
         // Start the node's background tasks
         let node = Self {
             ipfs: ipfs.clone(),
-            peer_id: ipfs.keypair().public().to_peer_id(),
+            peer_id,
             command_sender,
             event_receiver,
             connected_peers: connected_peers.clone(),
@@ -85,7 +88,7 @@ impl Node {
     /// Start the node's background tasks.
     fn start_background_tasks(
         &self,
-        ipfs: Ipfs<TestTypes>,
+        ipfs: Ipfs,
         mut command_receiver: mpsc::Receiver<NodeCommand>,
         event_sender: mpsc::Sender<NodeEvent>,
         connected_peers: Arc<Mutex<HashSet<PeerId>>>,
@@ -96,7 +99,8 @@ impl Node {
             while let Some(command) = command_receiver.next().await {
                 match command {
                     NodeCommand::Connect(peer_id, addrs) => {
-                        if let Err(e) = ipfs_clone.connect(peer_id, addrs).await {
+                        let dial = DialOpts::peer_id(peer_id).addresses(addrs).build();
+                        if let Err(e) = ipfs_clone.connect(dial).await {
                             let _ = event_sender.clone()
                                 .send(NodeEvent::Error(format!("Failed to connect to peer: {}", e)))
                                 .await;
@@ -122,7 +126,8 @@ impl Node {
                     NodeCommand::AddBlock(block) => {
                         let cid = block.cid().clone();
                         let data = block.into_data();
-                        if let Err(e) = ipfs_clone.put_block(data, cid.to_string()).await {
+                        let ipfs_block = IpfsBlock::new_unchecked(cid.clone(), data);
+                        if let Err(e) = ipfs_clone.put_block(&ipfs_block).await {
                             let _ = event_sender.clone()
                                 .send(NodeEvent::Error(format!("Failed to add block: {}", e)))
                                 .await;
@@ -133,15 +138,18 @@ impl Node {
                         }
                     }
                     NodeCommand::GetBlock(cid, sender) => {
-                        let result = match ipfs_clone.get_block(&cid.to_string()).await {
-                            Ok(data) => Ok(Some(Block::with_cid(cid, data))),
+                        let result = match ipfs_clone.get_block(cid.clone()).await {
+                            Ok(ipfs_block) => {
+                                let (ret_cid, bytes) = ipfs_block.into_inner();
+                                Ok(Some(Block::with_cid(ret_cid, bytes.to_vec())))
+                            }
                             Err(_) => Ok(None),
                         };
                         let _ = sender.send(result);
                     }
                     NodeCommand::HasBlock(cid, sender) => {
-                        let result = ipfs_clone.has_block(&cid.to_string()).await.unwrap_or(false);
-                        let _ = sender.send(result);
+                        let exists = ipfs_clone.get_block(cid.clone()).await.is_ok();
+                        let _ = sender.send(exists);
                     }
                     NodeCommand::Shutdown => {
                         break;
@@ -158,22 +166,20 @@ impl Node {
     
     /// Connect to a peer.
     pub async fn connect(&self, peer_id: PeerId, addrs: Vec<Multiaddr>) -> Result<()> {
-        let (sender, receiver) = oneshot::channel();
         self.command_sender
             .clone()
             .send(NodeCommand::Connect(peer_id, addrs))
             .await?;
-        receiver.await.map_err(|_| Error::ChannelClosed)
+        Ok(())
     }
     
     /// Disconnect from a peer.
     pub async fn disconnect(&self, peer_id: PeerId) -> Result<()> {
-        let (sender, receiver) = oneshot::channel();
         self.command_sender
             .clone()
             .send(NodeCommand::Disconnect(peer_id))
             .await?;
-        receiver.await.map_err(|_| Error::ChannelClosed)
+        Ok(())
     }
     
     /// Get the next event from the node.
@@ -184,6 +190,14 @@ impl Node {
     /// Get the list of connected peers.
     pub async fn connected_peers(&self) -> Vec<PeerId> {
         self.connected_peers.lock().unwrap().iter().cloned().collect()
+    }
+
+    /// Get the current list of listening addresses for this node.
+    pub async fn listen_addrs(&self) -> Result<Vec<Multiaddr>> {
+        self.ipfs
+            .listening_addresses()
+            .await
+            .map_err(|e| Error::Other(format!("listening_addresses: {}", e)))
     }
 }
 
@@ -227,7 +241,6 @@ impl Drop for Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     
     #[tokio::test]
     async fn test_node_creation() -> Result<()> {

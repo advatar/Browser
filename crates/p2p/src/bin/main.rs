@@ -85,11 +85,14 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting P2P daemon...");
     
     // Create P2P configuration
-    let config = P2PConfig {
+    let mut config = P2PConfig {
         enable_mdns: args.mdns,
-        listen_port: args.port,
         ..Default::default()
     };
+    // Set listen address using provided port
+    config.listen_addr = format!("/ip4/0.0.0.0/tcp/{}", args.port)
+        .parse()
+        .expect("Valid multiaddr");
     
     // Create P2P service
     let mut service = P2PService::with_config(config)?;

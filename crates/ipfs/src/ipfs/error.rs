@@ -103,7 +103,8 @@ mod tests {
         let error = Error::Io(io_error);
         assert!(error.to_string().contains("I/O error"));
         
-        let cid_error = cid::Error::InvalidCidV1Base("invalid base".to_string());
+        // Produce a cid::Error by attempting to parse an invalid CID
+        let cid_error = cid::Cid::try_from(&b""[..]).unwrap_err();
         let error = Error::Cid(cid_error);
         assert!(error.to_string().contains("CID error"));
         

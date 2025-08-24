@@ -9,7 +9,9 @@
 mod block;
 mod config;
 mod error;
+#[cfg(feature = "legacy")]
 mod node;
+#[cfg(not(feature = "legacy"))]
 mod node_modern;
 mod repo;
 
@@ -18,10 +20,14 @@ pub use self::{
     block::Block,
     config::Config,
     error::{Error, Result},
-    node_modern::Node as ModernNode,
-    node::Node as LegacyNode,
     repo::Repo,
 };
+
+// Re-export node implementations conditionally
+#[cfg(not(feature = "legacy"))]
+pub use node_modern::Node as ModernNode;
+#[cfg(feature = "legacy")]
+pub use node::Node as LegacyNode;
 
 // Re-export common types
 pub use cid::Cid;
@@ -30,7 +36,7 @@ pub use multihash;
 pub use libipld;
 
 /// The main IPFS node type that switches between implementations based on features.
-#[cfg(all(feature = "rust-ipfs", not(feature = "legacy")))]
+#[cfg(not(feature = "legacy"))]
 pub type Node = ModernNode;
 
 /// The main IPFS node type that switches between implementations based on features.

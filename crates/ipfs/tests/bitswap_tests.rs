@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy")] // Retired by default: depends on legacy Node/Bitswap API
 use anyhow::Result;
 use cid::Cid;
 use futures::future::join_all;
@@ -54,25 +55,6 @@ async fn create_test_node_with_config(config: TestNodeConfig) -> Result<(Node, t
     
     // Create and initialize the node with the config
     let node = Node::new(node_config).await?;
-    
-    Ok((node, temp_dir))
-        data_dir: temp_dir.path().to_path_buf(),
-        enable_dht: config.enable_dht,
-        bootstrap_nodes: config.bootstrap_nodes,
-        ..Default::default()
-    };
-    
-    // Apply Bitswap config if provided
-    if let Some(bitswap_config) = config.bitswap_config {
-        node_config.bitswap = bitswap_config;
-    }
-    
-    // Create a new Sled store
-    let store = ipfs_embed::SledBlockStore::new(temp_dir.path().join("blocks"))?;
-    
-    // Create and start the node
-    let mut node = Node::new(node_config, store).await?;
-    node.start().await?;
     
     Ok((node, temp_dir))
 }

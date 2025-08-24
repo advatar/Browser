@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy")] // Retired by default: depends on internal bitswap modules
 use std::sync::Arc;
 use std::time::Duration;
 use ipfs::bitswap::circuit_breaker::{CircuitBreaker, CircuitState};

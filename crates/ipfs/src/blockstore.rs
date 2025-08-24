@@ -27,7 +27,8 @@
 //! ```
 
 use anyhow::{Context, Result};
-use cid::{Cid, multihash::{Code, MultihashDigest}};
+use cid::Cid;
+use multihash_codetable::{Code, MultihashDigest};
 use std::path::Path;
 
 /// A persistent block storage implementation using Sled.
@@ -171,14 +172,11 @@ impl SledStore {
 
 // Implement basic block store functionality for SledStore
 impl SledStore {
-    pub fn get(&self, cid: &Cid) -> Result<Option<Vec<u8>>> {
-        match self.db.get(cid.to_bytes()) {
-            Ok(Some(data)) => Ok(Some(data.to_vec())),
-            Ok(None) => Ok(None),
-            Err(e) => Err(anyhow::anyhow!("Failed to get block: {}", e)),
-        }
-    }
-
+    /// Inserts a block into the store under the given `cid`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the underlying database fails.
     pub fn insert(&self, cid: &Cid, data: &[u8]) -> Result<()> {
         self.db
             .insert(cid.to_bytes(), data)
@@ -186,6 +184,11 @@ impl SledStore {
         Ok(())
     }
 
+    /// Removes a block identified by `cid` from the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if removal from the underlying database fails.
     pub fn remove(&self, cid: &Cid) -> Result<()> {
         self.db
             .remove(cid.to_bytes())
@@ -193,6 +196,15 @@ impl SledStore {
         Ok(())
     }
 
+    /// Lists all CIDs currently stored.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `Cid` entries present in the store.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading or parsing entries fails.
     pub fn list(&self) -> Result<Vec<Cid>> {
         self.db
             .iter()
@@ -203,6 +215,15 @@ impl SledStore {
             .collect()
     }
     
+    /// Checks whether a block identified by `cid` exists in the store.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the block exists, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the existence check fails.
     pub fn contains(&self, cid: &Cid) -> Result<bool> {
         self.db
             .contains_key(cid.to_bytes())
@@ -215,7 +236,7 @@ mod tests {
     use super::*;
     use rand::RngCore;
     use tempfile::tempdir;
-    use cid::multihash::Code;
+    use multihash_codetable::Code;
 
     fn create_test_store() -> (tempfile::TempDir, SledStore) {
         let dir = tempdir().expect("failed to create temp dir");

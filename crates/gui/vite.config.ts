@@ -23,7 +23,7 @@ export default defineConfig({
     extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
   },
   server: {
-    port: 3000,
+    port: 5173,
     strictPort: true,
   },
   // Enable TypeScript checking during development

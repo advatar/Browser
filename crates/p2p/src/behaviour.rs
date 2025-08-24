@@ -1,9 +1,7 @@
 //! Custom network behaviour combining Identify and Ping protocols.
 
 use libp2p::{
-    core::Multiaddr,
     identity::Keypair,
-    PeerId,
     swarm::NetworkBehaviour,
 };
 use libp2p::identify;
@@ -36,10 +34,6 @@ impl P2PBehaviour {
             identify,
             ping,
         }
-    }
-
-    pub fn local_peer_id(&self) -> PeerId {
-        self.identify.local_peer_id()
     }
 }
 

@@ -1,7 +1,7 @@
 //! Configuration for the IPFS node.
 
 use libp2p::Multiaddr;
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 /// Configuration for the IPFS node.
 #[derive(Debug, Clone)]

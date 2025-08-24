@@ -14,10 +14,11 @@ impl Block {
     /// Create a new block with the given data.
     /// The CID will be automatically generated using SHA-256.
     pub fn new(data: Vec<u8>) -> Self {
-        use cid::multihash::{Code, MultihashDigest};
+        use multihash_codetable::{Code, MultihashDigest};
         
         let hash = Code::Sha2_256.digest(&data);
-        let cid = Cid::new_v1(cid::Codec::Raw, hash);
+        // Use raw codec (0x55) for simple byte blocks
+        let cid = Cid::new_v1(0x55, hash);
         
         Self { cid, data }
     }

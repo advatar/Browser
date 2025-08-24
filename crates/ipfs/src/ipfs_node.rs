@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy")]
 //! # IPFS Node Implementation
 //! 
 //! This module provides a high-level, async IPFS node implementation using the `rust-ipfs` crate.
@@ -53,9 +54,10 @@ use libp2p::{
     swarm::{NetworkBehaviour, Swarm, SwarmBuilder, SwarmEvent},
     tcp, yamux,
 };
+use libp2p_quic as quic;
+use libp2p_websocket as websocket;
 use rust_ipfs::{
-    Block, Config as IpfsConfig, Ipfs, IpfsEvent, IpfsPath, Node as IpfsNode, UninitializedIpfs,
-    p2p::MultiaddrExt,
+    Ipfs, IpfsEvent, IpfsOptions, IpfsPath, UninitializedIpfs,
 };
 use std::{
     collections::HashSet,
@@ -151,6 +153,8 @@ pub struct Node {
     event_receiver: mpsc::Receiver<NodeEvent>,
     /// The local peer ID
     peer_id: PeerId,
+    /// Background future driving the rust-ipfs node (spawned in start())
+    ipfs_task: Option<futures::future::BoxFuture<'static, ()>>,
     /// The configuration for this node
     config: Config,
     /// Active connections

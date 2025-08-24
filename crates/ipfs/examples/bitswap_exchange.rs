@@ -2,6 +2,7 @@
 //! 
 //! This example creates two IPFS nodes, connects them, and demonstrates block exchange.
 
+#![cfg(feature = "legacy")] // Retired by default: example depends on legacy Node API
 use anyhow::Result;
 use cid::Cid;
 use futures::StreamExt;

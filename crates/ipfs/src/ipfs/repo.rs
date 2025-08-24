@@ -1,11 +1,11 @@
 //! IPFS repository management.
 
-use crate::ipfs::{Block, Config, Error, Result};
+use crate::ipfs::{Block, Error, Result};
 use cid::Cid;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::RwLock,
 };
 
 /// In-memory block store implementation.
@@ -75,8 +75,8 @@ impl Repo {
     
     /// Put a block into the repository.
     pub fn put_block(&self, block: Block) -> Result<()> {
-        let data = block.into_data();
         let cid = block.cid().clone();
+        let data = block.into_data();
         self.block_store.put(cid, data)?;
         // TODO: Implement disk persistence
         Ok(())

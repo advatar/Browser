@@ -1,3 +1,4 @@
+#![cfg(feature = "legacy")] // Retired by default: standalone test depends on extra crates
 use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;

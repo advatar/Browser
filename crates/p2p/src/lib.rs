@@ -7,7 +7,6 @@ use thiserror::Error;
 
 // Internal modules
 mod behaviour;
-mod transport;
 
 // Re-exports
 pub use behaviour::P2PBehaviour;
@@ -18,6 +17,10 @@ use anyhow::Result;
 use libp2p_core::Multiaddr;
 use libp2p_identity::{Keypair, PeerId};
 use libp2p_swarm;
+use libp2p::Transport; // Bring Transport trait into scope for .upgrade()
+use libp2p::SwarmBuilder; // SwarmBuilder moved under libp2p
+use futures::StreamExt; // for select_next_some()
+use libp2p_noise as noise; // Alias noise crate for noise::Config
 use tokio::task;
 use tokio::sync::{oneshot, mpsc};
 use tracing::{error, info, warn};
@@ -163,7 +166,7 @@ impl P2PService {
         let transport = Self::build_transport(&local_key)?;
         
         // Create the swarm with the transport and behaviour
-        let swarm = libp2p_swarm::SwarmBuilder::with_executor(
+        let swarm = SwarmBuilder::with_executor(
             transport,
             behaviour,
             peer_id,
@@ -203,7 +206,7 @@ impl P2PService {
         let transport = tcp_transport
             .upgrade(libp2p_core::upgrade::Version::V1)
             .authenticate(noise_keys)
-            .multiplex(libp2p_yamux::YamuxConfig::default())
+            .multiplex(libp2p_yamux::Config::default())
             .boxed();
             
         Ok(transport)
@@ -298,10 +301,10 @@ impl P2PService {
                 info!("No longer listening on: {}", address);
                 self.listening_addresses.retain(|addr| addr != &address);
             }
-            SwarmEvent::IncomingConnection { local_addr, send_back_addr } => {
+            SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
                 info!("Incoming connection from {} to {}", send_back_addr, local_addr);
             }
-            SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error } => {
+            SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
                 warn!("Incoming connection error from {} to {}: {}", send_back_addr, local_addr, error);
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
@@ -361,7 +364,7 @@ impl P2PService {
             }
             P2PCommand::Disconnect(peer_id) => {
                 if let Err(e) = self.swarm.disconnect_peer_id(peer_id) {
-                    warn!("Failed to disconnect from peer {}: {}", peer_id, e);
+                    warn!("Failed to disconnect from peer {}: {:?}", peer_id, e);
                 } else {
                     info!("Disconnected from peer: {}", peer_id);
                 }
