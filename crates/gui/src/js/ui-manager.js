@@ -338,8 +338,11 @@ export class UIManager {
   }
   
   showSettings() {
-    // TODO: Implement settings panel
-    console.log('Show settings');
+    if (window.settingsManager && typeof window.settingsManager.showSettingsPanel === 'function') {
+      window.settingsManager.showSettingsPanel();
+    } else {
+      console.log('Show settings');
+    }
   }
   
   // Create a simple event bus for component communication

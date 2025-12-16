@@ -12,6 +12,10 @@
     "test:coverage": "cd crates/gui && npm run test:coverage",
     "typecheck": "cd crates/gui && npm run typecheck",
     "lint": "cd crates/gui && npm run lint",
+    "dev:router": "pnpm --filter @browser/afm-router dev",
+    "dev:registry": "pnpm --filter @browser/afm-registry dev",
+    "dev:pipelines": "pnpm --filter @browser/afm-pipelines dev",
+    "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
     "prepare": "husky"
   },
   "keywords": ["browser", "decentralized", "web3"],
@@ -19,7 +23,11 @@
   "license": "ISC",
   "description": "Decentralized Browser Application",
   "workspaces": [
-    "crates/gui"
+    "crates/gui",
+    "services/router",
+    "services/registry",
+    "services/pipelines",
+    "apps/afm-marketplace"
   ],
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

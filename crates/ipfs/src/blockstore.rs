@@ -114,7 +114,7 @@ impl SledStore {
     pub fn put(&self, data: &[u8]) -> Result<Cid> {
         // Create a multihash using SHA2-256 (default for IPFS)
         let hash = Code::Sha2_256.digest(data);
-        
+
         // Create a CID v1 with raw binary format (0x55)
         // Note: Cid::new_v1 is infallible, so we don't need to handle Result
         let cid = Cid::new_v1(0x55, hash);
@@ -214,7 +214,7 @@ impl SledStore {
             })
             .collect()
     }
-    
+
     /// Checks whether a block identified by `cid` exists in the store.
     ///
     /// # Returns
@@ -234,9 +234,9 @@ impl SledStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use multihash_codetable::Code;
     use rand::RngCore;
     use tempfile::tempdir;
-    use multihash_codetable::Code;
 
     fn create_test_store() -> (tempfile::TempDir, SledStore) {
         let dir = tempdir().expect("failed to create temp dir");
@@ -247,38 +247,44 @@ mod tests {
     #[test]
     fn test_put_and_get() {
         let (_dir, store) = create_test_store();
-        
+
         // Test with a small piece of data
         let data = b"hello world";
         let cid = store.put(data).expect("failed to put data");
-        
-        let retrieved = store.get(&cid).expect("failed to get data").expect("data not found");
+
+        let retrieved = store
+            .get(&cid)
+            .expect("failed to get data")
+            .expect("data not found");
         assert_eq!(&retrieved, data);
     }
 
     #[test]
     fn test_put_and_get_large_data() {
         let (_dir, store) = create_test_store();
-        
+
         // Test with a larger piece of data (1KB)
         let mut data = vec![0u8; 1024];
         rand::thread_rng().fill_bytes(&mut data);
-        
+
         let cid = store.put(&data).expect("failed to put large data");
-        let retrieved = store.get(&cid).expect("failed to get large data").expect("data not found");
-        
+        let retrieved = store
+            .get(&cid)
+            .expect("failed to get large data")
+            .expect("data not found");
+
         assert_eq!(retrieved, data);
     }
 
     #[test]
     fn test_get_nonexistent() {
         let (_dir, store) = create_test_store();
-        
+
         // Create a random CID that shouldn't exist in the store
         let random_data = rand::thread_rng().next_u64().to_be_bytes();
         let hash = Code::Sha2_256.digest(&random_data);
         let cid = Cid::new_v1(0x55, hash);
-        
+
         let result = store.get(&cid).expect("get should not fail");
         assert!(result.is_none());
     }

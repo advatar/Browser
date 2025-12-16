@@ -57,7 +57,7 @@ pub struct Bookmark {
 }
 
 /// Browser engine state
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BrowserEngine {
     pub tabs: Arc<Mutex<HashMap<String, Tab>>>,
     pub active_tab_id: Arc<Mutex<Option<String>>>,
@@ -101,18 +101,18 @@ impl BrowserEngine {
     pub fn create_tab(&self, url: String) -> Result<String> {
         let tab_id = uuid::Uuid::new_v4().to_string();
         let tab = Tab::new(tab_id.clone(), url);
-        
+
         if let Ok(mut tabs) = self.tabs.lock() {
             tabs.insert(tab_id.clone(), tab);
         }
-        
+
         // Set as active tab if it's the first one
         if let Ok(mut active_id) = self.active_tab_id.lock() {
             if active_id.is_none() {
                 *active_id = Some(tab_id.clone());
             }
         }
-        
+
         Ok(tab_id)
     }
 
@@ -121,7 +121,7 @@ impl BrowserEngine {
         if let Ok(mut tabs) = self.tabs.lock() {
             tabs.remove(tab_id);
         }
-        
+
         // If this was the active tab, switch to another one
         if let Ok(mut active_id) = self.active_tab_id.lock() {
             if active_id.as_ref() == Some(&tab_id.to_string()) {
@@ -130,7 +130,7 @@ impl BrowserEngine {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -169,7 +169,13 @@ impl BrowserEngine {
     }
 
     /// Update tab information
-    pub fn update_tab(&self, tab_id: &str, title: Option<String>, url: Option<String>, is_loading: Option<bool>) -> Result<()> {
+    pub fn update_tab(
+        &self,
+        tab_id: &str,
+        title: Option<String>,
+        url: Option<String>,
+        is_loading: Option<bool>,
+    ) -> Result<()> {
         if let Ok(mut tabs) = self.tabs.lock() {
             if let Some(tab) = tabs.get_mut(tab_id) {
                 if let Some(title) = title {
@@ -199,7 +205,7 @@ impl BrowserEngine {
                 .as_secs(),
             visit_count: 1,
         };
-        
+
         if let Ok(mut history) = self.history.lock() {
             // Check if URL already exists and update visit count
             if let Some(existing) = history.iter_mut().find(|h| h.url == entry.url) {
@@ -208,14 +214,14 @@ impl BrowserEngine {
             } else {
                 history.push(entry);
             }
-            
+
             // Keep only last 1000 entries
             let history_len = history.len();
             if history_len > 1000 {
                 history.drain(0..history_len - 1000);
             }
         }
-        
+
         Ok(())
     }
 
@@ -231,7 +237,13 @@ impl BrowserEngine {
     }
 
     /// Add bookmark
-    pub fn add_bookmark(&self, title: String, url: String, folder: Option<String>, tags: Vec<String>) -> Result<String> {
+    pub fn add_bookmark(
+        &self,
+        title: String,
+        url: String,
+        folder: Option<String>,
+        tags: Vec<String>,
+    ) -> Result<String> {
         let bookmark = Bookmark {
             id: uuid::Uuid::new_v4().to_string(),
             title,
@@ -243,13 +255,13 @@ impl BrowserEngine {
                 .unwrap()
                 .as_secs(),
         };
-        
+
         let bookmark_id = bookmark.id.clone();
-        
+
         if let Ok(mut bookmarks) = self.bookmarks.lock() {
             bookmarks.push(bookmark);
         }
-        
+
         Ok(bookmark_id)
     }
 
@@ -284,25 +296,30 @@ impl BrowserEngine {
                 .unwrap()
                 .as_secs(),
         };
-        
+
         let download_id = download.id.clone();
-        
+
         if let Ok(mut downloads) = self.downloads.lock() {
             downloads.push(download);
         }
-        
+
         Ok(download_id)
     }
 
     /// Update download progress
-    pub fn update_download(&self, download_id: &str, received_bytes: u64, total_bytes: Option<u64>) -> Result<()> {
+    pub fn update_download(
+        &self,
+        download_id: &str,
+        received_bytes: u64,
+        total_bytes: Option<u64>,
+    ) -> Result<()> {
         if let Ok(mut downloads) = self.downloads.lock() {
             if let Some(download) = downloads.iter_mut().find(|d| d.id == download_id) {
                 download.received_bytes = received_bytes;
                 if let Some(total) = total_bytes {
                     download.total_bytes = Some(total);
                 }
-                
+
                 // Check if download is complete
                 if let Some(total) = download.total_bytes {
                     if received_bytes >= total {
@@ -333,7 +350,7 @@ impl Default for BrowserEngine {
 /// Navigation helper functions
 pub mod navigation {
     use super::*;
-    
+
     /// Check if URL is valid
     pub fn is_valid_url(url: &str) -> bool {
         if url.starts_with("http://") || url.starts_with("https://") {
@@ -348,7 +365,7 @@ pub mod navigation {
             false
         }
     }
-    
+
     /// Convert search query to URL
     pub fn search_query_to_url(query: &str, search_engine: &str) -> String {
         let encoded_query = urlencoding::encode(query);
@@ -359,7 +376,7 @@ pub mod navigation {
             _ => format!("https://duckduckgo.com/?q={}", encoded_query),
         }
     }
-    
+
     /// Normalize URL for display
     pub fn normalize_url_for_display(url: &str) -> String {
         if url.starts_with("https://") {
@@ -370,7 +387,7 @@ pub mod navigation {
             url.to_string()
         }
     }
-    
+
     /// Get domain from URL
     pub fn get_domain(url: &str) -> Option<String> {
         if let Ok(parsed) = Url::parse(url) {
@@ -384,59 +401,65 @@ pub mod navigation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_browser_engine_creation() {
         let engine = BrowserEngine::new();
         assert!(engine.get_tabs().unwrap().is_empty());
         assert!(engine.get_active_tab().unwrap().is_none());
     }
-    
+
     #[test]
     fn test_tab_management() {
         let engine = BrowserEngine::new();
-        
+
         // Create a tab
-        let tab_id = engine.create_tab("https://example.com".to_string()).unwrap();
+        let tab_id = engine
+            .create_tab("https://example.com".to_string())
+            .unwrap();
         assert_eq!(engine.get_tabs().unwrap().len(), 1);
-        
+
         // Switch to tab
         engine.switch_tab(&tab_id).unwrap();
         assert!(engine.get_active_tab().unwrap().is_some());
-        
+
         // Close tab
         engine.close_tab(&tab_id).unwrap();
         assert!(engine.get_tabs().unwrap().is_empty());
     }
-    
+
     #[test]
     fn test_history_management() {
         let engine = BrowserEngine::new();
-        
-        engine.add_to_history("https://example.com".to_string(), "Example".to_string()).unwrap();
+
+        engine
+            .add_to_history("https://example.com".to_string(), "Example".to_string())
+            .unwrap();
         let history = engine.get_history().unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].url, "https://example.com");
     }
-    
+
     #[test]
     fn test_bookmark_management() {
         let engine = BrowserEngine::new();
-        
-        let bookmark_id = engine.add_bookmark(
-            "Example".to_string(),
-            "https://example.com".to_string(),
-            None,
-            vec!["test".to_string()]
-        ).unwrap();
-        
+
+        let bookmark_id = engine
+            .add_bookmark(
+                "Example".to_string(),
+                "https://example.com".to_string(),
+                None,
+                vec!["test".to_string()],
+            )
+            .unwrap();
+
         let bookmarks = engine.get_bookmarks().unwrap();
         assert_eq!(bookmarks.len(), 1);
-        
+
         engine.remove_bookmark(&bookmark_id).unwrap();
         assert!(engine.get_bookmarks().unwrap().is_empty());
     }
-    
+
     #[test]
     fn test_url_validation() {
         assert!(navigation::is_valid_url("https://example.com"));

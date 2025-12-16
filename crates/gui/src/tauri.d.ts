@@ -8,6 +8,10 @@ declare global {
       event: {
         listen: (event: string, handler: (event: any) => void) => Promise<() => void>;
       };
+      dialog: {
+        open: (options?: any) => Promise<string | string[] | null>;
+        save: (options?: any) => Promise<string | null>;
+      };
       window: {
         WebviewWindow: any; // We'll type this properly later
       };

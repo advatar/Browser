@@ -1,0 +1,39 @@
+{
+  "apps": [
+    {
+      "id": "research-brief",
+      "name": "Research Brief",
+      "tagline": "Summarize dense topics with cited takeaways",
+      "description": "Feeds the agent a structured brief template so it can scan MCP data sources, summarize what matters, and emit bulletproof talking points.",
+      "categories": ["research", "strategy"],
+      "heroColor": "#5c6ac4",
+      "quickPrompts": [
+        "How are zkML rollups evolving this quarter?",
+        "What are the newest MCP transports shipping soon?"
+      ],
+      "inputHint": "Example: Explain EigenLayer security assumptions",
+      "defaultInput": "Highlight the latest cross-chain MPC breakthroughs",
+      "promptTemplate": "You are drafting a two-page research brief. Use sections: TL;DR, Proof Points, Calls to Action. Cite MCP data or web captures you find. Topic: {{input}}",
+      "instructions": "Stay neutral, cite verifiable data, and prefer bullet lists for readability.",
+      "skillId": null,
+      "noEgress": false
+    },
+    {
+      "id": "workflow-designer",
+      "name": "Workflow Designer",
+      "tagline": "Generate agent + MCP playbooks",
+      "description": "Maps a user intent into sequenced steps, required capabilities, and approval points so teams can roll their own automations inside the browser.",
+      "categories": ["automation", "builder"],
+      "heroColor": "#2d8f83",
+      "quickPrompts": [
+        "Automate an NFT drop launch checklist",
+        "Design a wallet recovery concierge"
+      ],
+      "inputHint": "Describe the outcome you want",
+      "promptTemplate": "You are an Advatar solution engineer. Turn the request into a numbered workflow with: Goal, Preconditions, Steps (include tools/capabilities per step), Approvals, Telemetry hooks. Request: {{input}}",
+      "instructions": "Assume the browser can call MCP servers, AFM nodes, and wallet tools. Always mention data custody expectations.",
+      "skillId": null,
+      "noEgress": true
+    }
+  ]
+}

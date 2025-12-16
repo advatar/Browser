@@ -16,8 +16,15 @@ members = [
     "crates/eth-light",
     "crates/btc-light",
     "crates/walletd",
-    "crates/gui"
-, "crates/blockchain"]
+    "crates/gui",
+    "crates/blockchain",
+    "crates/ai-agent",
+    "crates/agent-core",
+    "crates/updater",
+    "crates/afm-node",
+    "crates/afm-zkvm",
+    "services/llm-router",
+]
 resolver = "2"
 
 # Set up profiles for consistent builds
@@ -62,10 +69,10 @@ multistream-select = { version = "0.10.0", features = ["tokio-util"] }
 rust-ipfs = { version = "0.14.1" }
 
 # Libp2p 0.54.x dependencies - aligned with rust-ipfs 0.14.x
-libp2p = { version = "0.54.1", default-features = false, features = ["tcp", "dns", "yamux", "noise", "ping", "identify", "kad", "mdns", "floodsub", "gossipsub", "quic", "websocket"] }
+libp2p = { version = "0.54.1", default-features = false, features = ["tcp", "dns", "yamux", "noise", "ping", "identify", "kad", "mdns", "floodsub", "gossipsub", "quic", "websocket", "macros"] }
 libp2p-core = { version = "0.42.0", default-features = false }
 libp2p-identity = { version = "0.2.12", default-features = false }
-libp2p-swarm = { version = "0.45.1", default-features = false }
+libp2p-swarm = { version = "0.45.1", default-features = false, features = ["macros"] }
 libp2p-identify = { version = "0.45.0", default-features = false }
 libp2p-ping = { version = "0.45.0", default-features = false }
 libp2p-tcp = { version = "0.42.0", default-features = false, features = ["tokio"] }
@@ -73,7 +80,7 @@ libp2p-yamux = { version = "0.46.0", default-features = false }
 libp2p-noise = { version = "0.45.0", default-features = false }
 libp2p-kad = { version = "0.46.2", default-features = false }
 libp2p-mdns = { version = "0.46.0", default-features = false }
-libp2p-floodsub = { version = "0.43.0", default-features = false }
+libp2p-floodsub = { version = "0.45.0", default-features = false }
 libp2p-gossipsub = { version = "0.47.0", default-features = false }
 libp2p-dns = { version = "0.42.0", default-features = false, features = ["tokio"] }
 libp2p-websocket = { version = "0.44.0", default-features = false }

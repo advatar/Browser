@@ -13,6 +13,7 @@ pub struct WalletUIState {
     pub transactions: Vec<TransactionInfo>,
     pub is_loading: bool,
     pub error_message: Option<String>,
+    pub agent_wallets: Vec<AgentWalletInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,13 @@ pub struct TransactionInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWalletInfo {
+    pub id: String,
+    pub address: Option<String>,
+    pub policy_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransactionStatus {
     Pending,
     Confirmed,
@@ -73,6 +81,7 @@ impl Default for WalletUIState {
             transactions: Vec::new(),
             is_loading: false,
             error_message: None,
+            agent_wallets: Vec::new(),
         }
     }
 }
@@ -169,7 +178,7 @@ impl WalletUIState {
     pub fn add_transaction(&mut self, transaction: TransactionInfo) {
         // Add to the beginning of the list (most recent first)
         self.transactions.insert(0, transaction);
-        
+
         // Keep only the last 100 transactions
         if self.transactions.len() > 100 {
             self.transactions.truncate(100);
@@ -177,7 +186,12 @@ impl WalletUIState {
     }
 
     /// Update transaction status
-    pub fn update_transaction_status(&mut self, hash: &str, status: TransactionStatus, block_number: Option<u64>) {
+    pub fn update_transaction_status(
+        &mut self,
+        hash: &str,
+        status: TransactionStatus,
+        block_number: Option<u64>,
+    ) {
         if let Some(tx) = self.transactions.iter_mut().find(|t| t.hash == hash) {
             tx.status = status;
             tx.block_number = block_number;
@@ -274,6 +288,8 @@ impl WalletUIManager {
         let balance = self.state.get_formatted_balance();
         let pending_count = self.state.get_pending_transactions_count();
 
+        let agent_html = self.generate_agent_wallets_html();
+
         format!(
             r#"
             <div class="wallet-connected">
@@ -298,13 +314,15 @@ impl WalletUIManager {
                     <h4>Recent Transactions</h4>
                     {}
                 </div>
+                {}
             </div>
             "#,
             self.format_address(&account.address),
             balance,
             network.name,
             pending_count,
-            self.generate_transactions_html()
+            self.generate_transactions_html(),
+            agent_html
         )
     }
 
@@ -322,13 +340,14 @@ impl WalletUIManager {
                 </div>
             </div>
         </div>
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     /// Generate transactions HTML
     fn generate_transactions_html(&self) -> String {
         let recent_transactions = self.state.get_recent_transactions();
-        
+
         if recent_transactions.is_empty() {
             return "<div class=\"no-transactions\">No recent transactions</div>".to_string();
         }
@@ -364,10 +383,39 @@ impl WalletUIManager {
         html
     }
 
+    /// Generate agent wallet list HTML
+    fn generate_agent_wallets_html(&self) -> String {
+        if self.state.agent_wallets.is_empty() {
+            return "<div class=\"agent-wallets\"><h4>Agent Wallets</h4><div class=\"no-transactions\">No agent wallets configured</div></div>".to_string();
+        }
+
+        let mut html = String::from("<div class=\"agent-wallets\"><h4>Agent Wallets</h4>");
+        for agent in &self.state.agent_wallets {
+            html.push_str(&format!(
+                r#"
+                <div class="agent-wallet">
+                    <div class="agent-id">{}</div>
+                    <div class="agent-address">{}</div>
+                    <div class="agent-policy">{}</div>
+                </div>
+                "#,
+                agent.id,
+                agent
+                    .address
+                    .as_ref()
+                    .map(|a| self.format_address(a))
+                    .unwrap_or_else(|| "—".to_string()),
+                agent.policy_summary
+            ));
+        }
+        html.push_str("</div>");
+        html
+    }
+
     /// Format address for display
     fn format_address(&self, address: &str) -> String {
         if address.len() > 10 {
-            format!("{}...{}", &address[0..6], &address[address.len()-4..])
+            format!("{}...{}", &address[0..6], &address[address.len() - 4..])
         } else {
             address.to_string()
         }
@@ -376,7 +424,7 @@ impl WalletUIManager {
     /// Format hash for display
     fn format_hash(&self, hash: &str) -> String {
         if hash.len() > 16 {
-            format!("{}...{}", &hash[0..8], &hash[hash.len()-8..])
+            format!("{}...{}", &hash[0..8], &hash[hash.len() - 8..])
         } else {
             hash.to_string()
         }
@@ -497,6 +545,32 @@ impl WalletUIManager {
             text-transform: uppercase;
         }
 
+        .agent-wallets {
+            margin-top: 16px;
+            padding: 12px;
+            background: #eef3ff;
+            border-radius: 6px;
+        }
+
+        .agent-wallet {
+            padding: 8px;
+            border-radius: 4px;
+            background: white;
+            margin-bottom: 8px;
+            border-left: 4px solid #4b6cb7;
+        }
+
+        .agent-id {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .agent-address, .agent-policy {
+            font-family: monospace;
+            font-size: 12px;
+            color: #555;
+        }
+
         .wallet-prompt {
             text-align: center;
             padding: 32px;
@@ -540,7 +614,8 @@ impl WalletUIManager {
             font-style: italic;
             padding: 16px;
         }
-        "#.to_string()
+        "#
+        .to_string()
     }
 }
 
@@ -582,10 +657,10 @@ mod tests {
     #[test]
     fn test_network_switching() {
         let mut state = WalletUIState::new();
-        
+
         state.switch_network("polygon-mainnet").unwrap();
         assert_eq!(state.current_network, Some("polygon-mainnet".to_string()));
-        
+
         let network = state.get_current_network().unwrap();
         assert_eq!(network.name, "Polygon Mainnet");
     }

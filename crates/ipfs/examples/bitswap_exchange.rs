@@ -1,5 +1,5 @@
 //! Example demonstrating block exchange between two nodes using Bitswap.
-//! 
+//!
 //! This example creates two IPFS nodes, connects them, and demonstrates block exchange.
 
 #![cfg(feature = "legacy")] // Retired by default: example depends on legacy Node API
@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     // Create a temporary directory for node1's data
     let temp_dir1 = tempfile::tempdir()?;
     let node1 = create_node("Node 1", temp_dir1.path().to_path_buf()).await?;
-    
+
     // Create a temporary directory for node2's data
     let temp_dir2 = tempfile::tempdir()?;
     let mut node2 = create_node("Node 2", temp_dir2.path().to_path_buf()).await?;
@@ -45,8 +45,11 @@ async fn main() -> Result<()> {
 
     // Create some test data on node1
     let test_data = b"Hello from Node 1 via Bitswap!".to_vec();
-    println!("Storing data on Node 1: {}", String::from_utf8_lossy(&test_data));
-    
+    println!(
+        "Storing data on Node 1: {}",
+        String::from_utf8_lossy(&test_data)
+    );
+
     let cid = node1.put_block(test_data.clone()).await?;
     println!("Stored data with CID: {}", cid);
 
@@ -74,23 +77,23 @@ async fn main() -> Result<()> {
 /// Helper function to create and start a node with the given name and data directory
 async fn create_node(name: &str, data_dir: PathBuf) -> Result<Node> {
     println!("Creating {}...", name);
-    
+
     // Generate a random keypair for the node
     let keypair = Keypair::generate_ed25519();
-    
+
     // Create a config with the data directory
     let config = Config::default()
         .with_keypair(keypair)
         .with_repo_path(data_dir.clone())
         .with_listen_addr("/ip4/0.0.0.0/tcp/0".parse()?);
-    
+
     // Create a new Sled store
     let store = SledStore::open(data_dir.join("blocks"))?;
-    
+
     // Create and start the node
     let mut node = Node::new(config, store).await?;
     node.start().await?;
-    
+
     // Spawn a task to process node events
     let mut events = node.events();
     let node_name = name.to_string();
@@ -107,6 +110,6 @@ async fn create_node(name: &str, data_dir: PathBuf) -> Result<Node> {
             }
         }
     });
-    
+
     Ok(node)
 }

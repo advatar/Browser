@@ -1,0 +1,27 @@
+[package]
+name = "updater"
+version = "0.1.0"
+edition = "2021"
+description = "IPFS-backed signed update mechanism"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+bytes = { workspace = true }
+cid = "0.10"
+ed25519-dalek = { workspace = true }
+hex = "0.4"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+tempfile = "3.10"
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+semver = "1.0"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+serde_json = { workspace = true }

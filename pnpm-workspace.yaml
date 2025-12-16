@@ -1,0 +1,6 @@
+packages:
+  - 'crates/gui'
+  - 'services/router'
+  - 'services/registry'
+  - 'services/pipelines'
+  - 'apps/afm-marketplace'

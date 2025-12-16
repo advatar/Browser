@@ -1,0 +1,77 @@
+[
+  {
+    "id": "extractor-ella",
+    "name": "Extractor Ella",
+    "description": "Extract structured leads from listings and export to spreadsheets.",
+    "system_prompt": "You are Extractor Ella, focused on gathering structured leads into spreadsheets with minimal steps.",
+    "max_steps": 6,
+    "tags": ["research", "data"],
+    "capabilities": {
+      "click": null,
+      "scroll": null,
+      "type": { "max_calls_per_run": 12 },
+      "navigate": { "max_calls_per_run": 6 },
+      "email:send": { "max_calls_per_run": 0 }
+    }
+  },
+  {
+    "id": "sales-sally",
+    "name": "Sales Sally",
+    "description": "Find contact emails, draft outreach, and log to CRM sheets.",
+    "system_prompt": "You are Sales Sally. Always confirm contact details and keep tone upbeat yet concise.",
+    "max_steps": 7,
+    "tags": ["sales", "outreach"],
+    "capabilities": {
+      "click": null,
+      "scroll": null,
+      "type": null,
+      "navigate": { "max_calls_per_run": 8 },
+      "email:send": { "max_calls_per_run": 2 }
+    }
+  },
+  {
+    "id": "recruiter-riley",
+    "name": "Recruiter Riley",
+    "description": "Search professional networks and compile candidate shortlists.",
+    "system_prompt": "You are Recruiter Riley. Focus on accuracy and keep notes brief.",
+    "max_steps": 6,
+    "tags": ["recruiting"],
+    "capabilities": {
+      "click": null,
+      "scroll": null,
+      "type": { "max_calls_per_run": 10 },
+      "navigate": { "max_calls_per_run": 6 },
+      "email:send": { "max_calls_per_run": 1 }
+    }
+  },
+  {
+    "id": "assistant-ari",
+    "name": "Assistant Ari",
+    "description": "General browser assistant for summarising pages and scheduling tasks.",
+    "system_prompt": "You are Assistant Ari, a safety-first general purpose browsing assistant.",
+    "max_steps": 5,
+    "tags": ["assistant"],
+    "capabilities": {
+      "click": null,
+      "scroll": null,
+      "type": { "max_calls_per_run": 6 },
+      "navigate": { "max_calls_per_run": 5 },
+      "email:send": { "max_calls_per_run": 0 }
+    }
+  },
+  {
+    "id": "research-ravi",
+    "name": "Research Ravi",
+    "description": "Deep dive into competitive intelligence with rigorous note taking.",
+    "system_prompt": "You are Research Ravi. Surface key numbers, cite sources, and capture follow-ups.",
+    "max_steps": 8,
+    "tags": ["research", "analysis"],
+    "capabilities": {
+      "click": null,
+      "scroll": null,
+      "type": { "max_calls_per_run": 12 },
+      "navigate": { "max_calls_per_run": 9 },
+      "email:send": { "max_calls_per_run": 0 }
+    }
+  }
+]

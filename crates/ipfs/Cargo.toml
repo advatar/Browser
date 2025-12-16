@@ -9,6 +9,7 @@ repository = "https://github.com/yourusername/ipfs-rs"
 keywords = ["ipfs", "libp2p", "p2p", "decentralized"]
 categories = ["network-programming", "cryptography", "filesystem"]
 autobins = false
+autoexamples = false
 
 [features]
 # Enable metrics collection
@@ -98,3 +99,8 @@ default-features = false
 version = "0.19.3"
 default-features = false
 features = ["std"]
+
+[[example]]
+name = "bitswap_exchange"
+path = "examples/bitswap_exchange.rs"
+required-features = ["legacy"]

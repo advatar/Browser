@@ -1,2 +1,23 @@
-# Dependency overrides removed to resolve version conflicts with libp2p
-# Please manage versions through Cargo.toml workspace dependencies instead
+[build]
+target-dir = "target"
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C",
+    "link-arg=-Wl,-rpath,@loader_path/../Frameworks",
+    "-C",
+    "link-arg=-Wl,-rpath,@executable_path/../Frameworks",
+]
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C",
+    "link-arg=-Wl,-rpath,@loader_path/../Frameworks",
+    "-C",
+    "link-arg=-Wl,-rpath,@executable_path/../Frameworks",
+]
+
+[env]
+RUST_LOG = "browser=info,afm_node=info,afm_zkvm=info"
+AFM_ROUTER_URL = "http://localhost:4810"
+AFM_REGISTRY_URL = "http://localhost:4820"

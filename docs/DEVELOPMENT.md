@@ -309,7 +309,77 @@ cargo build --release
 pnpm run build
 ```
 
+### MCP Server Integration
+
+The AI Copilot can now reach external Model Context Protocol (MCP) servers. You can manage remote
+servers from **Settings → Model Context Servers** inside the browser UI (no more manual JSON
+patching), or keep editing `configs/mcp_servers.json` directly if you prefer version control for the
+manifest. The settings panel lets you enable/disable transports, edit headers/Env vars, and see
+connection status at a glance.
+
+> **New:** MCP manifests now live under `configs/mcp_profiles/` so every browsing profile keeps its
+> own curated server list. The settings panel exposes a profile selector plus Import/Export actions
+> so teams can share bundles without touching the filesystem.
+
+> **Secrets:** Header and environment entries marked as “Secret” are stored in the OS keyring and
+> never written to disk. The UI masks these values, lets you rotate them in place, and fetches them
+> on demand via `read_mcp_secret` when you click Reveal.
+
+```json
+{
+  "servers": [
+    {
+      "id": "demo-weather",
+      "name": "Local Demo MCP",
+      "endpoint": "http://127.0.0.1:7410/mcp",
+      "enabled": true,
+      "timeoutMs": 20000,
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer dev-token"
+      }
+    },
+    {
+      "id": "local-stdio",
+      "name": "Local STDIO MCP",
+      "transport": "stdio",
+      "program": "./bin/mcp-server",
+      "args": ["--stdio"],
+      "env": {
+        "API_KEY": "set-me"
+      },
+      "enabled": false
+    }
+  ]
+}
+```
+
+- `transport` supports `"http"`, `"websocket"`, or `"stdio"`; stdio/websocket transports maintain
+  persistent connections and react to `tools/listChanged` notifications automatically.
+- Toggle `enabled` per server to control discovery.
+- `headers` are optional and let you attach API keys or auth tokens to HTTP/WebSocket requests.
+- `defaultCapability` (e.g. `"navigate"`) gates every tool from that server behind a runtime
+  capability request.
+- Tool descriptions are cached between agent runs and refreshed automatically whenever a server emits
+  `tools/listChanged` (or after a short TTL for plain HTTP endpoints), so we no longer re-fetch on
+  every invocation.
+
+Changes applied through the UI write back to `configs/mcp_servers.json` and hot-reload the agent –
+no restart required.
+
 ## Code Standards
+
+### Agent Apps
+
+- `configs/agent_apps.json` stores reusable workflows. Each entry mirrors the "OpenAI Apps" model:
+  `instructions`, `promptTemplate`, `quickPrompts`, `heroColor`, and policy flags like `noEgress`.
+- `AgentAppRegistry` (Rust) hot-loads that file and powers the toolbar's **Apps** launcher. The UI
+  lets you pick a card, fire a quick prompt, and inspect the agent's final answer without leaving the
+  browser.
+- Use `invoke('list_agent_apps')` to show catalogs and `invoke('launch_agent_app', { request })` to
+  kick off a templated agent run.
+- See `docs/AGENT_APPS.md` for the research notes comparing this experience with OpenAI's upcoming
+  Apps announcement.
 
 ### Rust Code Standards
 
@@ -886,5 +956,60 @@ Fixes #456
 - [ ] Performance impact considered
 - [ ] Security implications reviewed
 - [ ] Error handling is appropriate
+
+## Secure Updates
+
+Binary releases are distributed over IPFS and must be signed before clients
+apply them. The `updater` crate provides the client-side workflow:
+
+```rust,ignore
+use cid::Cid;
+use ed25519_dalek::VerifyingKey;
+use std::convert::TryInto;
+use updater::{IpfsGatewayClient, UpdateStatus, Updater};
+
+# async fn check_for_updates() -> updater::Result<()> {
+let gateway = IpfsGatewayClient::builder().build()?;
+let key_bytes: [u8; 32] = hex::decode(std::env::var("BROWSER_UPDATE_PUBLIC_KEY_HEX")?)
+    .expect("valid hex")
+    .try_into()
+    .expect("32-byte key");
+let verifying_key = VerifyingKey::from_bytes(&key_bytes).unwrap();
+let updater = Updater::new(gateway, verifying_key);
+
+let manifest_cid = Cid::try_from("bafy...manifest").unwrap();
+match updater.check_for_update_str(env!("CARGO_PKG_VERSION"), &manifest_cid).await? {
+    UpdateStatus::Available(update) => {
+        let binary_path = std::path::Path::new("/usr/local/bin/browser");
+        updater.download_and_apply(&update, binary_path).await?;
+    }
+    UpdateStatus::UpToDate => tracing::info!("Already on the latest release");
+}
+# Ok(())
+# }
+```
+
+Publishing a release follows these steps:
+
+1. Build the binary and compute its SHA-256 digest plus byte size.
+2. Upload the binary to IPFS and record the resulting CID.
+3. Populate an `UpdateManifest`, sign it with the offline Ed25519 release key, and add the JSON to IPFS.
+4. Distribute the manifest CID through the canonical channel (e.g. ENS record, signed feed).
+5. Clients verify the signature, validate the SHA-256 digest, and atomically swap the binary.
+
+Set the following environment variables before launching the GUI so it can automatically
+poll for releases using the new updater integration:
+
+- `BROWSER_UPDATE_MANIFEST_CID` – CID of the signed manifest JSON.
+- `BROWSER_UPDATE_PUBLIC_KEY_HEX` – hex-encoded Ed25519 verifying key (32 bytes).
+- `BROWSER_UPDATE_GATEWAY` – optional HTTP(s) gateway base (defaults to `https://ipfs.io/`).
+- `BROWSER_UPDATE_TARGET_PATH` – absolute filesystem path to the browser binary that should be replaced.
+
+When running, the GUI emits an `update-status` Tauri event containing the most recent
+`UpdateInfo`. The front-end listens for this event, displays a banner when new versions
+are available, and can either download them manually or call the new `apply_update`
+command (exposed through the updater banner) to atomically swap the binary. After a
+successful install, the backend broadcasts an `update-applied` event so the UI can prompt
+the user to restart.
 
 This development guide provides the foundation for contributing to the decentralized browser project. Follow these guidelines to ensure code quality, maintainability, and project success.

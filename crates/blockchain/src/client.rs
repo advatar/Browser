@@ -1,13 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use sp_core::{
+    Encode,
     crypto::{Pair, Ss58Codec},
     sr25519::Pair as Sr25519Pair,
-    Encode,
 };
 use sp_runtime::{
+    OpaqueExtrinsic,
     generic::BlockId,
     traits::{Block as BlockT, Header as HeaderT, NumberFor},
-    OpaqueExtrinsic,
 };
 use std::sync::Arc;
 use substrate_subxt::{
@@ -91,7 +91,7 @@ pub type SubstrateSigner = PairSigner<DefaultConfig, Sr25519Pair>;
 pub fn create_signer(seed: &str) -> Result<SubstrateSigner> {
     let pair = Sr25519Pair::from_string(seed, None)
         .map_err(|e| anyhow::anyhow!("Failed to create keypair from seed: {}", e))?;
-    
+
     Ok(PairSigner::new(pair))
 }
 
@@ -114,7 +114,7 @@ mod tests {
     async fn test_client_connection() -> Result<()> {
         let config = test_config();
         let client = SubstrateClient::new(config).await?;
-        
+
         // Test that we can get the genesis hash
         let _genesis_hash = client
             .client
@@ -122,7 +122,7 @@ mod tests {
             .genesis_hash()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to get genesis hash: {}", e))?;
-            
+
         Ok(())
     }
 
@@ -131,11 +131,11 @@ mod tests {
         // Test with Alice's seed
         let alice = AccountKeyring::Alice.to_seed();
         let signer = create_signer(&alice)?;
-        
+
         // Check that the signer has the expected address
         let expected_address = AccountKeyring::Alice.to_account_id();
         assert_eq!(signer.account_id(), &expected_address);
-        
+
         Ok(())
     }
 }

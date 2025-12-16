@@ -10,9 +10,19 @@ repository = ""
 [[bin]]
 name = "p2p-node"
 path = "src/bin/main.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "p2p"
+path = "src/main.rs"
+required-features = ["cli"]
 
 [features]
 default = []
+# CLI binaries and their optional dependencies
+cli = ["dep:clap", "dep:tracing-subscriber"]
+# Enable Kademlia-specific code paths guarded by `#[cfg(feature = "kad")]`
+kad = []
 
 [dependencies]
 # Core dependencies
@@ -29,19 +39,7 @@ tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, optional = true }
 log = "0.4"
 
-# Core libp2p dependencies - using workspace versions
-libp2p = { workspace = true, default-features = false, features = [
-    "tcp",
-    "dns",
-    "yamux",
-    "noise",
-    "ping",
-    "identify",
-    "kad",
-    "mdns",
-    "floodsub",
-    "gossipsub"
-]}
+# Core libp2p dependencies - using direct sub-crates to avoid umbrella re-export mismatches
 libp2p-core.workspace = true
 libp2p-swarm.workspace = true
 libp2p-identify.workspace = true

@@ -1,0 +1,11 @@
+{
+  "activeProfile": "default",
+  "profiles": [
+    {
+      "id": "default",
+      "label": "Default",
+      "createdAt": 0,
+      "updatedAt": 0
+    }
+  ]
+}

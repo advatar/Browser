@@ -3,26 +3,37 @@
     windows_subsystem = "windows"
 )]
 
-use std::sync::{Arc, Mutex};
+use afm_node::AfmNodeConfig;
+use ai_agent::McpToolDescription;
+use serde::Deserialize;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::Emitter;
+use tauri::Manager; // bring Manager trait into scope
 use tauri::{
     menu::{IsMenuItem, Menu, MenuItem, Submenu},
     Runtime, WebviewWindowBuilder,
 };
-use tauri::Manager; // bring Manager trait into scope
 use tauri_plugin_dialog;
+use tokio::sync::Mutex as AsyncMutex;
 
 // Use the library crate modules
+use gui::agent::{
+    AgentManager, AgentRunRequest, AgentRunResponse, AgentSkillSummary, ApprovalBroker,
+    CreditSnapshot, McpServerRegistry,
+};
+use gui::agent_apps::{AgentAppRegistry, AgentAppSummary};
+use gui::app_state::AppState;
 use gui::browser_engine::BrowserEngine;
+use gui::commands::*;
+use gui::mcp_profiles::McpConfigService;
 use gui::protocol_handlers::ProtocolHandler;
 use gui::security::SecurityManager;
 use gui::telemetry::TelemetryManager;
-use gui::commands::*;
 use gui::telemetry_commands::*;
-use blockchain::Wallet;
-use gui::app_state::AppState;
+use gui::wallet_store::WalletStore;
 
 fn log_path() -> PathBuf {
     let mut base = std::env::var_os("HOME")
@@ -58,7 +69,7 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
     let new_window = MenuItem::with_id(manager, "new_window", "New Window", true, None::<&str>)?;
     let settings = MenuItem::with_id(manager, "settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(manager, "quit", "Quit", true, None::<&str>)?;
-    
+
     // Create file menu
     let file_menu = Submenu::with_items(
         manager,
@@ -76,34 +87,37 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
     let cut = MenuItem::with_id(manager, "cut", "Cut", true, Some("CmdOrCtrl+X"))?;
     let copy = MenuItem::with_id(manager, "copy", "Copy", true, Some("CmdOrCtrl+C"))?;
     let paste = MenuItem::with_id(manager, "paste", "Paste", true, Some("CmdOrCtrl+V"))?;
-    let select_all = MenuItem::with_id(manager, "select_all", "Select All", true, Some("CmdOrCtrl+A"))?;
-    
+    let select_all = MenuItem::with_id(
+        manager,
+        "select_all",
+        "Select All",
+        true,
+        Some("CmdOrCtrl+A"),
+    )?;
+
     let edit_menu = Submenu::with_items(
         manager,
         "Edit",
         true,
-        &[
-            &cut as &dyn IsMenuItem<R>,
-            &copy,
-            &paste,
-            &select_all,
-        ],
+        &[&cut as &dyn IsMenuItem<R>, &copy, &paste, &select_all],
     )?;
 
     // Create view menu
     let zoom_in = MenuItem::with_id(manager, "zoomin", "Zoom In", true, Some("CmdOrCtrl+Plus"))?;
     let zoom_out = MenuItem::with_id(manager, "zoomout", "Zoom Out", true, Some("CmdOrCtrl+-"))?;
-    let reset_zoom = MenuItem::with_id(manager, "resetzoom", "Reset Zoom", true, Some("CmdOrCtrl+0"))?;
-    
+    let reset_zoom = MenuItem::with_id(
+        manager,
+        "resetzoom",
+        "Reset Zoom",
+        true,
+        Some("CmdOrCtrl+0"),
+    )?;
+
     let view_menu = Submenu::with_items(
         manager,
         "View",
         true,
-        &[
-            &zoom_in as &dyn IsMenuItem<R>,
-            &zoom_out,
-            &reset_zoom,
-        ],
+        &[&zoom_in as &dyn IsMenuItem<R>, &zoom_out, &reset_zoom],
     )?;
 
     // Create main menu
@@ -112,7 +126,7 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
         &[&file_menu as &dyn IsMenuItem<R>, &edit_menu, &view_menu],
     )?;
     log_startup("create_main_menu: success");
-    
+
     Ok(menu)
 }
 
@@ -122,20 +136,17 @@ fn create_browser_window<R: Runtime>(
 ) -> tauri::Result<()> {
     log_startup("create_browser_window: start");
     let initial_url = url.unwrap_or("about:home");
-    
+
     // Create the menu first
     let menu = create_main_menu(app)?;
 
-    let webview = WebviewWindowBuilder::new(
-        app,
-        "main",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Decentralized Browser")
-    .inner_size(1200.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .menu(menu)
-    .build()?;
+    let webview =
+        WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+            .title("Decentralized Browser")
+            .inner_size(1200.0, 800.0)
+            .min_inner_size(800.0, 600.0)
+            .menu(menu)
+            .build()?;
     log_startup("create_browser_window: webview built");
 
     // Store the initial URL in the app state
@@ -148,7 +159,7 @@ fn create_browser_window<R: Runtime>(
     // Enable dev tools in debug mode
     #[cfg(debug_assertions)]
     webview.open_devtools();
-    
+
     // Setup menu event handlers
     let webview_ = webview.clone();
     webview.on_menu_event(move |_webview, event| {
@@ -162,15 +173,20 @@ fn create_browser_window<R: Runtime>(
             } else if id == "settings" {
                 println!("Settings requested");
             } else if id == "zoomin" {
-                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0.5);") {
+                if let Err(e) =
+                    webview.eval("document.getElementById('webview').setZoomLevel(0.5);")
+                {
                     eprintln!("Zoom in failed: {}", e);
                 }
             } else if id == "zoomout" {
-                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(-0.5);") {
+                if let Err(e) =
+                    webview.eval("document.getElementById('webview').setZoomLevel(-0.5);")
+                {
                     eprintln!("Zoom out failed: {}", e);
                 }
             } else if id == "resetzoom" {
-                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0);") {
+                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0);")
+                {
                     eprintln!("Reset zoom failed: {}", e);
                 }
             } else if id == "quit" {
@@ -200,6 +216,36 @@ fn main() {
     }));
 
     log_startup("main: starting tauri builder");
+    let approval_broker = ApprovalBroker::new();
+    let mcp_config = Arc::new(match McpConfigService::load() {
+        Ok(service) => service,
+        Err(err) => {
+            log_startup(&format!("failed to load MCP profiles: {err}"));
+            match McpConfigService::reset() {
+                Ok(service) => service,
+                Err(reset_err) => {
+                    log_startup(&format!("failed to reset MCP profiles: {reset_err}"));
+                    McpConfigService::load().expect("reinitialised MCP profiles")
+                }
+            }
+        }
+    });
+    let mcp_registry = Arc::new(
+        match McpServerRegistry::from_config_service(mcp_config.clone()) {
+            Ok(registry) => registry,
+            Err(err) => {
+                log_startup(&format!("failed to load MCP manifest: {err}"));
+                McpServerRegistry::empty(mcp_config.clone())
+            }
+        },
+    );
+    let agent_apps = Arc::new(match AgentAppRegistry::load_default() {
+        Ok(registry) => registry,
+        Err(err) => {
+            log_startup(&format!("failed to load agent apps: {err}"));
+            AgentAppRegistry::empty()
+        }
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -208,21 +254,90 @@ fn main() {
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
-            wallet: Arc::new(Mutex::new(Wallet::new())),
+            wallet_store: Arc::new(Mutex::new(WalletStore::new().unwrap_or_else(|_| WalletStore::default()))),
+            agent_manager: Arc::new(AsyncMutex::new(None)),
+            approval_broker: approval_broker.clone(),
+            afm_node_controller: Arc::new(AsyncMutex::new(None)),
+            afm_node_handle: Arc::new(Mutex::new(None)),
+            afm_node_config: Arc::new(Mutex::new(AfmNodeConfig::default())),
+            mcp_registry: mcp_registry.clone(),
+            mcp_config: mcp_config.clone(),
+            agent_apps: agent_apps.clone(),
         })
         .setup(|app| {
             log_startup("setup: entered");
             create_browser_window(app.app_handle(), None)?;
-            
+
+            if let Some(state) = app.app_handle().try_state::<AppState>() {
+                let agent_mutex = state.agent_manager.clone();
+                let app_handle = app.app_handle().clone();
+                match AgentManager::new(app_handle, &*state, state.approval_broker.clone()) {
+                    Ok(manager) => {
+                        tauri::async_runtime::block_on(async move {
+                            let mut slot = agent_mutex.lock().await;
+                            *slot = Some(manager);
+                        });
+                    }
+                    Err(err) => {
+                        log_startup(&format!("agent initialisation failed: {err}"));
+                    }
+                }
+            }
+
+            if let Some(state) = app.app_handle().try_state::<AppState>() {
+                let telemetry = state.telemetry_manager.clone();
+                let app_handle = app.app_handle().clone();
+
+                std::thread::spawn(move || {
+                    if let Ok(manager) = telemetry.lock() {
+                        let result = tauri::async_runtime::block_on(manager.check_for_updates());
+                        let update_payload = manager
+                            .update_info
+                            .lock()
+                            .ok()
+                            .and_then(|info| info.clone());
+                        drop(manager);
+
+                        if let Err(err) = result {
+                            log_startup(&format!("initial update check failed: {err}"));
+                        }
+
+                        if let Some(info) = update_payload {
+                            if let Err(err) = app_handle.emit("update-status", info) {
+                                log_startup(&format!("failed to emit update-status event: {err}"));
+                            }
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            agent_list_tools,
+            agent_run_task,
+            list_agent_apps,
+            launch_agent_app,
+            agent_list_skills,
+            agent_get_credits,
+            agent_top_up_credits,
+            agent_set_no_egress,
+            agent_resolve_approval,
             navigate_to,
             get_current_url,
             execute_script,
             // Settings
             get_settings,
             update_settings,
+            list_mcp_servers,
+            save_mcp_servers,
+            test_mcp_server,
+            list_mcp_profiles,
+            set_active_mcp_profile,
+            create_mcp_profile,
+            import_mcp_profile,
+            export_mcp_profile,
+            read_mcp_secret,
             create_tab,
             close_tab,
             switch_tab,
@@ -242,15 +357,218 @@ fn main() {
             get_performance_summary,
             add_security_alert,
             check_for_updates,
+            apply_update,
             export_telemetry,
             set_telemetry_enabled,
             // Wallet
             get_wallet_info,
             connect_wallet,
-            disconnect_wallet
+            disconnect_wallet,
+            get_agent_wallet,
+            set_agent_wallet_policy,
+            evaluate_agent_spend,
+            // AFM node controls
+            start_afm_node,
+            stop_afm_node,
+            afm_node_status,
+            afm_submit_task,
+            afm_feed_gossip
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn agent_list_tools<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<McpToolDescription>, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_ref()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+    manager
+        .tool_descriptions()
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn agent_run_task<R: Runtime>(
+    request: AgentRunRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<AgentRunResponse, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let mut guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_mut()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    manager
+        .run_task(request)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchAgentAppRequest {
+    app_id: String,
+    #[serde(default)]
+    input: Option<String>,
+}
+
+#[tauri::command]
+async fn list_agent_apps<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<AgentAppSummary>, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    Ok(state.agent_apps.list())
+}
+
+#[tauri::command]
+async fn launch_agent_app<R: Runtime>(
+    request: LaunchAgentAppRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<AgentRunResponse, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_apps = state.agent_apps.clone();
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let app = agent_apps
+        .find(&request.app_id)
+        .ok_or_else(|| format!("agent app `{}` not found", request.app_id))?;
+    let task = app.render_task(request.input.as_deref());
+
+    let mut guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_mut()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    manager
+        .run_task(AgentRunRequest {
+            task,
+            skill_id: app.skill_id.clone(),
+            no_egress: app.no_egress,
+        })
+        .await
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn agent_list_skills<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<AgentSkillSummary>, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_ref()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    Ok(manager.list_skills())
+}
+
+#[tauri::command]
+async fn agent_get_credits<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<CreditSnapshot, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_ref()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    Ok(manager.credit_snapshot().await)
+}
+
+#[tauri::command]
+async fn agent_top_up_credits<R: Runtime>(
+    tokens: u32,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<CreditSnapshot, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_ref()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    Ok(manager.top_up_credits(tokens).await)
+}
+
+#[tauri::command]
+async fn agent_set_no_egress<R: Runtime>(
+    enabled: bool,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let agent_mutex = state.agent_manager.clone();
+    drop(state);
+
+    let guard = agent_mutex.lock().await;
+    let manager = guard
+        .as_ref()
+        .ok_or_else(|| "agent manager not initialised".to_string())?;
+
+    manager.set_no_egress(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+async fn agent_resolve_approval<R: Runtime>(
+    request_id: String,
+    approved: bool,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    state
+        .approval_broker
+        .resolve(&request_id, approved)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 // Tauri command to navigate to a URL
@@ -264,14 +582,14 @@ async fn navigate_to<R: Runtime>(
         Some(webview) => webview,
         None => return Err("Webview not found".to_string()),
     };
-    
+
     // Update the URL in app state
     if let Some(state) = app_handle.try_state::<AppState>() {
         if let Ok(mut current_url) = state.current_url.lock() {
             *current_url = url.clone();
         }
     }
-    
+
     // Execute navigation in the webview
     // The React UI may render certain about:* pages natively and not include the iframe.
     // Guard against missing element to avoid console errors.
@@ -282,7 +600,7 @@ async fn navigate_to<R: Runtime>(
     if let Err(e) = webview.eval(&script) {
         return Err(format!("Failed to navigate: {}", e));
     }
-    
+
     Ok(())
 }
 
@@ -311,28 +629,48 @@ async fn execute_script<R: Runtime>(
         Some(webview) => webview,
         None => return Err("Webview not found".to_string()),
     };
-    
+
     if let Err(e) = webview.eval(&script) {
         return Err(format!("Failed to execute script: {}", e));
     }
-    
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use afm_node::AfmNodeConfig;
+    use gui::agent::McpServerRegistry;
+    use gui::agent_apps::AgentAppRegistry;
+    use gui::mcp_profiles::McpConfigService;
+    use gui::wallet_store::WalletStore;
+
     #[test]
     fn test_app_state() {
+        let mcp_config = Arc::new(
+            McpConfigService::load().unwrap_or_else(|_| McpConfigService::reset().unwrap()),
+        );
         let state = AppState {
             current_url: Mutex::new("https://example.com".to_string()),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
+            wallet_store: Arc::new(Mutex::new(WalletStore::new().unwrap_or_else(|_| WalletStore::default()))),
+            agent_manager: Arc::new(AsyncMutex::new(None)),
+            approval_broker: ApprovalBroker::new(),
+            afm_node_controller: Arc::new(AsyncMutex::new(None)),
+            afm_node_handle: Arc::new(Mutex::new(None)),
+            afm_node_config: Arc::new(Mutex::new(AfmNodeConfig::default())),
+            mcp_registry: Arc::new(
+                McpServerRegistry::from_config_service(mcp_config.clone())
+                    .unwrap_or_else(|_| McpServerRegistry::empty(mcp_config.clone())),
+            ),
+            mcp_config,
+            agent_apps: Arc::new(AgentAppRegistry::empty()),
         };
-        
+
         let url = state.current_url.lock().unwrap();
         assert_eq!(*url, "https://example.com");
     }

@@ -2,10 +2,15 @@
 //!
 //! This crate provides IPFS functionality including block storage,
 //! content addressing, and peer-to-peer networking.
-//!     }
-//!     
-//!     Ok(())
-//! }
+//!
+//! ```ignore
+//! use std::path::PathBuf;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let node = ipfs::new_node(PathBuf::from("/tmp/ipfs-doc")).await?;
+//! println!("Local peer id: {:?}", node.local_peer_id());
+//! # Ok(())
+//! # }
 //! ```
 
 #![deny(missing_docs)]
@@ -14,9 +19,9 @@
 pub mod blockstore;
 pub mod ipfs;
 
+pub use crate::ipfs::{Block, BlockStore, Config, Error, EventStream, Node, NodeEvent, Result};
 /// Re-export commonly used types from the `ipfs` module.
 pub use blockstore::SledStore;
-pub use crate::ipfs::{Block, BlockStore, Config, Error, EventStream, Node, NodeEvent, Result};
 pub use cid::Cid;
 pub use libipld;
 pub use libp2p::{Multiaddr, PeerId};

@@ -1,5 +1,5 @@
 //! # Blockchain
-//! 
+//!
 //! This crate provides blockchain integration for the Browser project, including
 //! Substrate client, wallet management, and transaction handling.
 //!
@@ -18,10 +18,10 @@ use sp_runtime::codec;
 #[cfg(feature = "substrate")]
 mod client;
 #[cfg(feature = "substrate")]
+mod sync;
+#[cfg(feature = "substrate")]
 mod transaction;
 mod wallet;
-#[cfg(feature = "substrate")]
-mod sync;
 
 // Re-export the most commonly used types
 #[cfg(feature = "substrate")]
@@ -32,15 +32,15 @@ pub use sp_core::{
 };
 #[cfg(feature = "substrate")]
 pub use sp_runtime::{
+    Justifications, MultiSignature,
     generic::Era,
     traits::{Block as BlockT, Header as HeaderT},
-    MultiSignature, Justifications,
 };
+#[cfg(feature = "substrate")]
+pub use sync::{BlockData, ChainSync, SyncConfig, SyncStatus};
 #[cfg(feature = "substrate")]
 pub use transaction::{Transaction, TransactionBuilder, TransactionReceipt};
 pub use wallet::{KeyPair, KeyType, Wallet, WalletError};
-#[cfg(feature = "substrate")]
-pub use sync::{ChainSync, SyncConfig, SyncStatus, BlockData};
 
 /// Error type for the blockchain crate
 #[derive(thiserror::Error, Debug)]
@@ -48,19 +48,19 @@ pub enum Error {
     /// Client error
     #[error("Client error: {0}")]
     Client(#[from] anyhow::Error),
-    
+
     /// Wallet error
     #[error("Wallet error: {0}")]
     Wallet(#[from] WalletError),
-    
+
     /// Transaction error
     #[error("Transaction error: {0}")]
     Transaction(String),
-    
+
     /// Codec error
     #[error("Codec error: {0}")]
     Codec(#[from] codec::Error),
-    
+
     /// Other error
     #[error("Blockchain error: {0}")]
     Other(String),

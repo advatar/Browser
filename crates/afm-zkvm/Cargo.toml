@@ -1,0 +1,18 @@
+[package]
+name = "afm-zkvm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Host runner facade for the zkVM programs used by the AFM node"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10.1"
+tokio = { workspace = true }

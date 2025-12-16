@@ -1,13 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use sp_core::{
-    crypto::{Derive, Ss58Codec, Ss58AddressFormatRegistry},
-    ed25519, sr25519, ecdsa, Pair as PairT,
+    Pair as PairT,
+    crypto::{Derive, Ss58AddressFormatRegistry, Ss58Codec},
+    ecdsa, ed25519, sr25519,
 };
-use std::{
-    fmt,
-    str::FromStr,
-    sync::Arc,
-};
+use std::{fmt, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 /// Supported key types for the wallet
@@ -177,11 +174,11 @@ impl Wallet {
         if self.keys.contains_key(name) {
             return Err(anyhow!("Key with name '{}' already exists", name));
         }
-        
+
         if self.default_key.is_none() {
             self.default_key = Some(name.to_string());
         }
-        
+
         self.keys.insert(name.to_string(), key_pair);
         Ok(())
     }
@@ -218,14 +215,14 @@ impl Wallet {
     /// Remove a key pair from the wallet
     pub fn remove_key(&mut self, name: &str) -> Option<KeyPair> {
         let removed = self.keys.remove(name);
-        
+
         // Update default key if needed
         if let Some(ref default) = self.default_key {
             if default == name {
                 self.default_key = self.keys.keys().next().cloned();
             }
         }
-        
+
         removed
     }
 }
@@ -240,7 +237,7 @@ mod tests {
         let key_pair = KeyPair::from_phrase(DEV_PHRASE, None).unwrap();
         let public_key = key_pair.public_key();
         assert!(!public_key.is_empty());
-        
+
         let ss58 = key_pair.to_ss58();
         assert!(!ss58.is_empty());
     }
@@ -249,10 +246,10 @@ mod tests {
     fn test_key_pair_sign_verify() {
         let key_pair = KeyPair::from_phrase(DEV_PHRASE, None).unwrap();
         let message = b"test message";
-        
+
         let signature = key_pair.sign(message);
         assert!(key_pair.verify(message, &signature));
-        
+
         // Test with wrong message
         assert!(!key_pair.verify(b"wrong message", &signature));
     }
@@ -260,23 +257,23 @@ mod tests {
     #[test]
     fn test_wallet_operations() {
         let mut wallet = Wallet::new();
-        
+
         // Add a key
         let key_pair = KeyPair::from_phrase(DEV_PHRASE, None).unwrap();
         wallet.add_key("alice", key_pair).unwrap();
-        
+
         // Check default key is set
         assert!(wallet.default_key().is_some());
-        
+
         // Add another key and set as default
         let key_pair2 = KeyPair::from_seed(&[1; 32], KeyType::Sr25519).unwrap();
         wallet.add_key("bob", key_pair2).unwrap();
         wallet.set_default_key("bob").unwrap();
-        
+
         // List keys
         let keys = wallet.list_keys();
         assert_eq!(keys.len(), 2);
-        
+
         // Remove a key
         wallet.remove_key("alice");
         assert_eq!(wallet.list_keys().len(), 1);

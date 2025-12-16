@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use codec::{Decode, Encode};
 use sp_core::crypto::AccountId32;
 use sp_runtime::{
+    MultiSignature,
     generic::Era,
     traits::{IdentifyAccount, Verify},
-    MultiSignature,
 };
 use std::str::FromStr;
 
@@ -52,13 +52,13 @@ impl Transaction {
     pub fn sign(mut self, signer: &sp_core::sr25519::Pair) -> Result<Self> {
         // Create the signer payload
         let signer_payload = self.encode();
-        
+
         // Sign the payload
         let signature = signer.sign(&signer_payload);
-        
+
         // Convert to multi-signature
         self.signature = Some(MultiSignature::Sr25519(signature));
-        
+
         Ok(self)
     }
 
@@ -69,7 +69,7 @@ impl Transaction {
             let mut unsigned = self.clone();
             unsigned.signature = None;
             let signer_payload = unsigned.encode();
-            
+
             // Verify the signature
             match signature.verify(&*signer_payload, &self.from) {
                 Ok(valid) => valid,
@@ -112,16 +112,16 @@ impl TransactionBuilder {
 
     /// Set the sender's account ID
     pub fn from(mut self, from: &str) -> Result<Self> {
-        let account_id = AccountId32::from_str(from)
-            .map_err(|_| anyhow!("Invalid account ID: {}", from))?;
+        let account_id =
+            AccountId32::from_str(from).map_err(|_| anyhow!("Invalid account ID: {}", from))?;
         self.from = Some(account_id);
         Ok(self)
     }
 
     /// Set the recipient's account ID
     pub fn to(mut self, to: &str) -> Result<Self> {
-        let account_id = AccountId32::from_str(to)
-            .map_err(|_| anyhow!("Invalid account ID: {}", to))?;
+        let account_id =
+            AccountId32::from_str(to).map_err(|_| anyhow!("Invalid account ID: {}", to))?;
         self.to = Some(account_id);
         Ok(self)
     }
@@ -188,17 +188,14 @@ pub struct TransactionReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sp_core::{
-        crypto::Pair,
-        sr25519::Pair as Sr25519Pair,
-    };
+    use sp_core::{crypto::Pair, sr25519::Pair as Sr25519Pair};
     use sp_keyring::AccountKeyring;
 
     #[test]
     fn test_transaction_builder() {
         let alice = AccountKeyring::Alice.to_account_id();
         let bob = AccountKeyring::Bob.to_account_id();
-        
+
         let tx = TransactionBuilder::new()
             .from(&hex::encode(alice.as_ref()))
             .unwrap()
@@ -209,20 +206,20 @@ mod tests {
             .tip(10)
             .build()
             .unwrap();
-            
+
         assert_eq!(tx.from, alice);
         assert_eq!(tx.to, bob);
         assert_eq!(tx.amount, 1000);
         assert_eq!(tx.nonce, 1);
         assert_eq!(tx.tip, 10);
     }
-    
+
     #[test]
     fn test_transaction_signing() {
         // Create a key pair
         let pair = Sr25519Pair::from_string("//Alice", None).unwrap();
         let public = pair.public();
-        
+
         // Create a transaction
         let mut tx = Transaction {
             from: public.into(),
@@ -233,13 +230,13 @@ mod tests {
             era: Era::Immortal,
             signature: None,
         };
-        
+
         // Sign the transaction
         let signed_tx = tx.clone().sign(&pair).unwrap();
-        
+
         // Verify the signature
         assert!(signed_tx.verify());
-        
+
         // Tamper with the transaction and verify it fails
         let mut tampered_tx = signed_tx.clone();
         tampered_tx.amount = 2000;

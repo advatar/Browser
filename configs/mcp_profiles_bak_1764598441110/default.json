@@ -1,0 +1,31 @@
+{
+  "servers": [
+    {
+      "id": "demo-weather",
+      "name": "Local Demo MCP",
+      "endpoint": "http://127.0.0.1:7410/mcp",
+      "enabled": false,
+      "headers": {},
+      "timeoutMs": 20000,
+      "defaultCapability": null,
+      "transport": "http"
+    },
+    {
+      "id": "local-stdio",
+      "name": "Local STDIO MCP",
+      "endpoint": "",
+      "enabled": false,
+      "headers": {},
+      "timeoutMs": 20000,
+      "defaultCapability": null,
+      "transport": "stdio",
+      "program": "./bin/mcp-server",
+      "args": [
+        "--stdio"
+      ],
+      "env": {
+        "API_KEY": "set-me"
+      }
+    }
+  ]
+}

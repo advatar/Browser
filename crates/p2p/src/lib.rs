@@ -1,5 +1,5 @@
 //! # P2P Networking Module
-//! 
+//!
 //! This module provides peer-to-peer networking capabilities using libp2p.
 
 use std::time::Duration;
@@ -14,15 +14,13 @@ pub use behaviour::P2PEvent;
 
 // External dependencies
 use anyhow::Result;
+use futures::StreamExt; // for select_next_some()
+use libp2p_core::transport::Transport; // Bring Transport trait into scope for .upgrade()
 use libp2p_core::Multiaddr;
 use libp2p_identity::{Keypair, PeerId};
-use libp2p_swarm;
-use libp2p::Transport; // Bring Transport trait into scope for .upgrade()
-use libp2p::SwarmBuilder; // SwarmBuilder moved under libp2p
-use futures::StreamExt; // for select_next_some()
 use libp2p_noise as noise; // Alias noise crate for noise::Config
-use tokio::task;
-use tokio::sync::{oneshot, mpsc};
+use libp2p_swarm::{Swarm, SwarmEvent};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 // Common re-exports and type definitions
@@ -30,8 +28,7 @@ use tracing::{error, info, warn};
 // Re-export commonly used types
 pub use libp2p_identity::Keypair as IdentityKeypair;
 
-// Re-export NetworkBehaviour trait
-pub use libp2p_swarm::NetworkBehaviour as P2PNetworkBehaviour;
+// Intentionally do not re-export NetworkBehaviour to avoid version mismatches across crates
 
 /// Errors that can occur in the P2P module.
 #[derive(Error, Debug)]
@@ -39,39 +36,39 @@ pub enum P2PError {
     /// Error during transport setup
     #[error("Transport error: {0}")]
     TransportError(String),
-    
+
     /// Error during noise handshake
     #[error("Noise handshake failed: {0}")]
     NoiseHandshake(String),
-    
+
     /// Error during key generation
     #[error("Key generation failed: {0}")]
     KeyGenerationError(String),
-    
+
     /// Error during swarm setup
     #[error("Swarm error: {0}")]
     SwarmError(String),
-    
+
     /// Error during peer connection
     #[error("Peer connection error: {0}")]
     PeerConnectionError(String),
-    
+
     /// Error during peer discovery
     #[error("Peer discovery error: {0}")]
     DiscoveryError(String),
-    
+
     /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     /// Multiaddr parse error
     #[error("Multiaddr parse error: {0}")]
     Multiaddr(#[from] libp2p_core::multiaddr::Error),
-    
+
     /// Behaviour error
     #[error("Behaviour error: {0}")]
     Behaviour(String),
-    
+
     /// General error
     #[error("P2P error: {0}")]
     Other(String),
@@ -132,7 +129,7 @@ impl Default for P2PConfig {
 
 /// Main P2P service that manages networking functionality.
 pub struct P2PService {
-    swarm: libp2p_swarm::Swarm<P2PBehaviour>,
+    swarm: Swarm<P2PBehaviour>,
     event_sender: mpsc::Sender<P2PEvent>,
     event_receiver: mpsc::Receiver<P2PEvent>,
     command_sender: mpsc::Sender<P2PCommand>,
@@ -154,31 +151,30 @@ impl P2PService {
         // Create message channels for event passing
         let (event_sender, event_receiver) = mpsc::channel::<P2PEvent>(100);
         let (command_sender, command_receiver) = mpsc::channel::<P2PCommand>(100);
-        
+
         // Generate or use provided keypair for the peer ID
-        let local_key = config.keypair.clone().unwrap_or_else(|| Self::generate_keypair());
+        let local_key = config
+            .keypair
+            .clone()
+            .unwrap_or_else(|| Self::generate_keypair());
         let peer_id = local_key.public().to_peer_id();
-        
+
         // Create the P2P behaviour with all protocols
         let behaviour = P2PBehaviour::new(&local_key);
-        
+
         // Create a proper transport stack
         let transport = Self::build_transport(&local_key)?;
-        
-        // Create the swarm with the transport and behaviour
-        let swarm = SwarmBuilder::with_executor(
+
+        // Create the swarm using Swarm::new without a built-in executor (feature-gate free)
+        let mut swarm = Swarm::new(
             transport,
             behaviour,
             peer_id,
-            |fut| {
-                tokio::spawn(fut);
-            }
-        )
-        .idle_connection_timeout(config.connection_timeout)
-        .build();
-        
+            libp2p_swarm::Config::without_executor(),
+        );
+
         info!("Creating P2P service with peer ID: {}", peer_id);
-        
+
         // Create the service instance
         Ok(Self {
             swarm,
@@ -194,13 +190,18 @@ impl P2PService {
     }
 
     /// Build a transport stack with TCP, noise encryption, and yamux multiplexing
-    fn build_transport(keypair: &Keypair) -> anyhow::Result<libp2p_core::transport::Boxed<(PeerId, libp2p_core::muxing::StreamMuxerBox)>> {
+    fn build_transport(
+        keypair: &Keypair,
+    ) -> anyhow::Result<libp2p_core::transport::Boxed<(PeerId, libp2p_core::muxing::StreamMuxerBox)>>
+    {
         // Create a noise key pair for authenticated encryption
-        let noise_keys = noise::Config::new(keypair)
-            .map_err(|err| anyhow::anyhow!("Signing libp2p-noise static DH keypair failed: {}", err))?;
+        let noise_keys = noise::Config::new(keypair).map_err(|err| {
+            anyhow::anyhow!("Signing libp2p-noise static DH keypair failed: {}", err)
+        })?;
 
         // Create a TCP transport using tokio
-        let tcp_transport = libp2p_tcp::tokio::Transport::new(libp2p_tcp::Config::default().nodelay(true));
+        let tcp_transport =
+            libp2p_tcp::tokio::Transport::new(libp2p_tcp::Config::default().nodelay(true));
 
         // Upgrade the transport with noise for encryption and yamux for multiplexing
         let transport = tcp_transport
@@ -208,10 +209,10 @@ impl P2PService {
             .authenticate(noise_keys)
             .multiplex(libp2p_yamux::Config::default())
             .boxed();
-            
+
         Ok(transport)
     }
-    
+
     /// Handle a behaviour event from the swarm
     fn handle_event(&mut self, event: P2PEvent) -> anyhow::Result<()> {
         // Forward the event through the event channel
@@ -220,7 +221,7 @@ impl P2PService {
         }
         Ok(())
     }
-    
+
     /// Get the local listening addresses
     pub fn local_addresses(&self) -> anyhow::Result<Vec<Multiaddr>> {
         Ok(self.listening_addresses.clone())
@@ -233,11 +234,12 @@ impl P2PService {
 
         // Start listening on the configured address
         let listen_addr = self.config.listen_addr.clone();
-        self.swarm.listen_on(listen_addr.clone())
+        self.swarm
+            .listen_on(listen_addr.clone())
             .map_err(|e| anyhow::anyhow!("Failed to start listening: {}", e))?;
-        
+
         info!("P2P service listening on: {}", listen_addr);
-        
+
         // Connect to bootstrap nodes if configured
         if !self.config.bootstrap_nodes.is_empty() {
             for addr in &self.config.bootstrap_nodes {
@@ -251,7 +253,7 @@ impl P2PService {
         // Start the main event loop
         self.run_event_loop().await
     }
-    
+
     /// Run the main P2P event loop
     async fn run_event_loop(&mut self) -> Result<(), anyhow::Error> {
         loop {
@@ -260,12 +262,12 @@ impl P2PService {
                 event = self.swarm.select_next_some() => {
                     self.handle_swarm_event(event).await?;
                 }
-                
+
                 // Handle commands from other parts of the application
                 Some(command) = self.command_receiver.recv() => {
                     self.handle_command(command).await?;
                 }
-                
+
                 // Graceful shutdown on channel close
                 else => {
                     info!("P2P service shutting down");
@@ -273,24 +275,34 @@ impl P2PService {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Handle swarm events
-    async fn handle_swarm_event(&mut self, event: libp2p_swarm::SwarmEvent<P2PEvent>) -> Result<(), anyhow::Error> {
-        use libp2p_swarm::SwarmEvent;
-        
+    async fn handle_swarm_event(
+        &mut self,
+        event: SwarmEvent<P2PEvent>,
+    ) -> Result<(), anyhow::Error> {
         match event {
             SwarmEvent::Behaviour(behaviour_event) => {
                 self.handle_event(behaviour_event)?;
             }
-            SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                info!("Connection established with peer: {} at {}", peer_id, endpoint.get_remote_address());
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                info!(
+                    "Connection established with peer: {} at {}",
+                    peer_id,
+                    endpoint.get_remote_address()
+                );
                 self.connected_peers.insert(peer_id);
             }
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
-                info!("Connection closed with peer: {} (cause: {:?})", peer_id, cause);
+                info!(
+                    "Connection closed with peer: {} (cause: {:?})",
+                    peer_id, cause
+                );
                 self.connected_peers.remove(&peer_id);
             }
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -301,11 +313,26 @@ impl P2PService {
                 info!("No longer listening on: {}", address);
                 self.listening_addresses.retain(|addr| addr != &address);
             }
-            SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
-                info!("Incoming connection from {} to {}", send_back_addr, local_addr);
+            SwarmEvent::IncomingConnection {
+                local_addr,
+                send_back_addr,
+                ..
+            } => {
+                info!(
+                    "Incoming connection from {} to {}",
+                    send_back_addr, local_addr
+                );
             }
-            SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
-                warn!("Incoming connection error from {} to {}: {}", send_back_addr, local_addr, error);
+            SwarmEvent::IncomingConnectionError {
+                local_addr,
+                send_back_addr,
+                error,
+                ..
+            } => {
+                warn!(
+                    "Incoming connection error from {} to {}: {}",
+                    send_back_addr, local_addr, error
+                );
             }
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                 warn!("Outgoing connection error to {:?}: {}", peer_id, error);
@@ -314,10 +341,10 @@ impl P2PService {
                 // Handle other events as needed
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Handle commands from other parts of the application
     async fn handle_command(&mut self, command: P2PCommand) -> Result<(), anyhow::Error> {
         match command {
@@ -354,7 +381,10 @@ impl P2PService {
             P2PCommand::AddAddress(peer_id, addr) => {
                 #[cfg(feature = "kad")]
                 {
-                    self.swarm.behaviour_mut().kademlia().add_address(&peer_id, addr);
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia()
+                        .add_address(&peer_id, addr);
                 }
                 info!("Added address {} for peer {}", addr, peer_id);
             }
@@ -370,7 +400,7 @@ impl P2PService {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -378,58 +408,58 @@ impl P2PService {
     fn build_dummy_transport() -> anyhow::Result<()> {
         Ok(())
     }
-    
+
     /// Generate a keypair for testing
     pub fn generate_keypair() -> libp2p_identity::Keypair {
         // Generate a new Ed25519 keypair
-        libp2p_identity::ed25519::Keypair::generate().into()
+        libp2p_identity::Keypair::generate_ed25519()
     }
 
     /// Get the peer ID from the swarm
     pub fn local_peer_id(&self) -> PeerId {
         self.peer_id
     }
-    
+
     /// Get a command sender for external interaction
     pub fn command_sender(&self) -> mpsc::Sender<P2PCommand> {
         self.command_sender.clone()
     }
-    
+
     /// Get an event receiver for external monitoring
     pub fn event_receiver(&mut self) -> &mut mpsc::Receiver<P2PEvent> {
         &mut self.event_receiver
     }
-    
+
     /// Get the list of connected peers
     pub fn connected_peers(&self) -> Vec<PeerId> {
         self.connected_peers.iter().cloned().collect()
     }
-    
+
     /// Check if a peer is connected
     pub fn is_peer_connected(&self, peer_id: &PeerId) -> bool {
         self.connected_peers.contains(peer_id)
     }
-    
+
     /// Get the number of connected peers
     pub fn peer_count(&self) -> usize {
         self.connected_peers.len()
     }
-    
+
     /// Dial a peer address (convenience method)
     pub async fn dial(&mut self, addr: Multiaddr) -> Result<(), anyhow::Error> {
         self.handle_command(P2PCommand::Dial(addr)).await
     }
-    
+
     /// Start providing a key in the DHT (convenience method)
     pub async fn start_providing(&mut self, key: Vec<u8>) -> Result<(), anyhow::Error> {
         self.handle_command(P2PCommand::StartProviding(key)).await
     }
-    
+
     /// Get a record from the DHT (convenience method)
     pub async fn get_record(&mut self, key: Vec<u8>) -> Result<(), anyhow::Error> {
         self.handle_command(P2PCommand::GetRecord(key)).await
     }
-    
+
     /// Disconnect from a peer (convenience method)
     pub async fn disconnect_peer(&mut self, peer_id: PeerId) -> Result<(), anyhow::Error> {
         self.handle_command(P2PCommand::Disconnect(peer_id)).await
@@ -440,79 +470,79 @@ impl P2PService {
 mod tests {
     use super::*;
     use std::error::Error as StdErrorTrait;
-    
+
     #[tokio::test]
     async fn test_p2p_service_creation() -> Result<(), Box<dyn StdErrorTrait>> {
         let _ = env_logger::try_init();
-        
+
         // Test with default config
         let config = P2PConfig::default();
         let service = P2PService::with_config(config)?;
-        
+
         // Verify peer_id is valid
         let peer_id = service.local_peer_id();
         assert_ne!(peer_id.to_string().len(), 0);
-        
+
         // Verify initial state
         assert_eq!(service.peer_count(), 0);
         assert!(!service.is_peer_connected(&peer_id));
-        
+
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_p2p_service_configuration() -> Result<(), Box<dyn StdErrorTrait>> {
         let _ = env_logger::try_init();
-        
+
         // Test with custom config
         let mut config = P2PConfig::default();
         config.enable_mdns = false;
         config.enable_kademlia = false;
         config.connection_timeout = Duration::from_secs(30);
-        
+
         let service = P2PService::with_config(config)?;
-        
+
         // Verify configuration is applied
         assert_eq!(service.local_addresses()?.len(), 0); // No addresses until started
         assert_eq!(service.connected_peers().len(), 0);
-        
+
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_p2p_service_api() -> Result<(), Box<dyn StdErrorTrait>> {
         let _ = env_logger::try_init();
-        
+
         let config = P2PConfig::default();
         let mut service = P2PService::with_config(config)?;
-        
+
         // Test command sender
         let _sender = service.command_sender();
-        
+
         // Test peer management
         let peer_id = service.local_peer_id();
         assert!(!service.is_peer_connected(&peer_id));
         assert_eq!(service.peer_count(), 0);
-        
+
         Ok(())
     }
-    
+
     #[tokio::test]
     async fn test_p2p_service_transport() -> Result<(), Box<dyn StdErrorTrait>> {
         let _ = env_logger::try_init();
-        
+
         let config = P2PConfig {
             enable_mdns: false,
             enable_kademlia: false,
             ..Default::default()
         };
-        
+
         let service = P2PService::with_config(config)?;
-        
+
         // Test that the service can be created
         let peer_id = service.local_peer_id();
         assert_ne!(peer_id.to_string().len(), 0);
-        
+
         Ok(())
     }
 }

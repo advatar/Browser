@@ -1,0 +1,12 @@
+{
+  "name": "@browser/afm-pipelines",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ./src/worker.mjs",
+    "build": "node ./src/worker.mjs --snapshot",
+    "lint": "node ./src/worker.mjs --lint",
+    "test": "node ./src/worker.mjs --self-test"
+  }
+}

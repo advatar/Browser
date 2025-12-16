@@ -31,7 +31,9 @@ impl Default for Config {
                 "/ip6/::/tcp/0".parse().unwrap(),
             ],
             bootstrap_nodes: vec![
-                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN".parse().unwrap(),
+                "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
+                    .parse()
+                    .unwrap(),
             ],
             dht_server: true,
             mdns: true,
@@ -47,31 +49,31 @@ impl Config {
         config.repo_path = repo_path.into();
         config
     }
-    
+
     /// Set the listening addresses
     pub fn listen_on(mut self, addrs: Vec<Multiaddr>) -> Self {
         self.listen_on = addrs;
         self
     }
-    
+
     /// Set the bootstrap nodes
     pub fn bootstrap_nodes(mut self, nodes: Vec<Multiaddr>) -> Self {
         self.bootstrap_nodes = nodes;
         self
     }
-    
+
     /// Enable/disable DHT server
     pub fn dht_server(mut self, enabled: bool) -> Self {
         self.dht_server = enabled;
         self
     }
-    
+
     /// Enable/disable mDNS
     pub fn mdns(mut self, enabled: bool) -> Self {
         self.mdns = enabled;
         self
     }
-    
+
     /// Enable/disable metrics
     pub fn metrics(mut self, enabled: bool) -> Self {
         self.metrics = enabled;
@@ -82,7 +84,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_config_defaults() {
         let config = Config::default();

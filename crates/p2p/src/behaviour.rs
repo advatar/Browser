@@ -1,11 +1,9 @@
 //! Custom network behaviour combining Identify and Ping protocols.
 
-use libp2p::{
-    identity::Keypair,
-    swarm::NetworkBehaviour,
-};
-use libp2p::identify;
-use libp2p::ping;
+use libp2p_identify as identify;
+use libp2p_identity::Keypair;
+use libp2p_ping as ping;
+// Use re-exported derive macro from libp2p_swarm (feature "macros" enabled in workspace)
 
 /// Network events emitted by the P2P behaviour
 #[derive(Debug)]
@@ -15,8 +13,12 @@ pub enum P2PEvent {
 }
 
 /// Combined network behaviour for P2P networking
-#[derive(NetworkBehaviour)]
-#[behaviour(to_swarm = "P2PEvent")]
+#[derive(libp2p_swarm::NetworkBehaviour)]
+#[behaviour(
+    prelude = "libp2p_swarm::derive_prelude",
+    out_event = "P2PEvent",
+    event_process = false
+)]
 pub struct P2PBehaviour {
     identify: identify::Behaviour,
     ping: ping::Behaviour,
@@ -30,10 +32,7 @@ impl P2PBehaviour {
         ));
         let ping = ping::Behaviour::new(ping::Config::new());
 
-        Self {
-            identify,
-            ping,
-        }
+        Self { identify, ping }
     }
 }
 

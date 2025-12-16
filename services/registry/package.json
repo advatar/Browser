@@ -1,0 +1,12 @@
+{
+  "name": "@browser/afm-registry",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ./src/server.mjs",
+    "build": "node ./src/server.mjs --snapshot",
+    "lint": "node ./src/server.mjs --lint",
+    "test": "node ./src/server.mjs --self-test"
+  }
+}

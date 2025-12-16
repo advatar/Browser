@@ -1,7 +1,6 @@
-use crate::telemetry::{TelemetryManager, SecuritySeverity};
+use crate::telemetry::{ApplyUpdateSummary, SecuritySeverity};
 use std::collections::HashMap;
-use tauri::{AppHandle, Manager, Runtime, State};
-use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// Report an error through telemetry
 #[tauri::command]
@@ -13,7 +12,8 @@ pub fn report_error<R: Runtime>(
 ) -> Result<(), String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.report_error(&error_type, &message, context)
+            telemetry
+                .report_error(&error_type, &message, context)
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -30,7 +30,8 @@ pub fn track_usage<R: Runtime>(
 ) -> Result<(), String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.track_usage(&event_type, event_data, duration_ms)
+            telemetry
+                .track_usage(&event_type, event_data, duration_ms)
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -49,7 +50,14 @@ pub fn record_performance<R: Runtime>(
 ) -> Result<(), String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.record_performance(memory_mb, cpu_percent, network_latency, page_load_time, startup_time)
+            telemetry
+                .record_performance(
+                    memory_mb,
+                    cpu_percent,
+                    network_latency,
+                    page_load_time,
+                    startup_time,
+                )
                 .map_err(|e| e.to_string())?;
         }
     }
@@ -63,8 +71,7 @@ pub fn get_error_summary<R: Runtime>(
 ) -> Result<HashMap<String, u32>, String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.get_error_summary()
-                .map_err(|e| e.to_string())
+            telemetry.get_error_summary().map_err(|e| e.to_string())
         } else {
             Ok(HashMap::new())
         }
@@ -80,7 +87,8 @@ pub fn get_performance_summary<R: Runtime>(
 ) -> Result<HashMap<String, f64>, String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.get_performance_summary()
+            telemetry
+                .get_performance_summary()
                 .map_err(|e| e.to_string())
         } else {
             Ok(HashMap::new())
@@ -110,14 +118,15 @@ pub fn add_security_alert<R: Runtime>(
 
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.add_security_alert(
-                severity,
-                &alert_type,
-                &message,
-                affected_components,
-                mitigation_steps,
-            )
-            .map_err(|e| e.to_string())?;
+            telemetry
+                .add_security_alert(
+                    severity,
+                    &alert_type,
+                    &message,
+                    affected_components,
+                    mitigation_steps,
+                )
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -125,27 +134,64 @@ pub fn add_security_alert<R: Runtime>(
 
 /// Check for updates
 #[tauri::command]
-pub fn check_for_updates<R: Runtime>(
-    app_handle: AppHandle<R>,
-) -> Result<(), String> {
+pub fn check_for_updates<R: Runtime>(app_handle: AppHandle<R>) -> Result<(), String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
             tauri::async_runtime::block_on(telemetry.check_for_updates())
                 .map_err(|e| e.to_string())?;
+
+            let payload = telemetry
+                .update_info
+                .lock()
+                .ok()
+                .and_then(|info| info.clone());
+            drop(telemetry);
+
+            if let Some(update_info) = payload {
+                if let Err(err) = app_handle.emit("update-status", update_info) {
+                    log::warn!("failed to emit update-status event: {}", err);
+                }
+            }
         }
     }
     Ok(())
 }
 
-/// Export telemetry data
+/// Apply the currently downloaded update
 #[tauri::command]
-pub fn export_telemetry<R: Runtime>(
-    app_handle: AppHandle<R>,
-) -> Result<String, String> {
+pub fn apply_update<R: Runtime>(app_handle: AppHandle<R>) -> Result<ApplyUpdateSummary, String> {
     if let Some(state) = app_handle.try_state::<crate::AppState>() {
         if let Ok(telemetry) = state.telemetry_manager.lock() {
-            telemetry.export_telemetry()
-                .map_err(|e| e.to_string())
+            match tauri::async_runtime::block_on(telemetry.apply_pending_update()) {
+                Ok((summary, status)) => {
+                    let status_clone = status.clone();
+                    let summary_clone = summary.clone();
+                    drop(telemetry);
+
+                    if let Err(err) = app_handle.emit("update-status", status_clone) {
+                        log::warn!("failed to emit update-status event: {}", err);
+                    }
+
+                    if let Err(err) = app_handle.emit("update-applied", summary_clone) {
+                        log::warn!("failed to emit update-applied event: {}", err);
+                    }
+
+                    return Ok(summary);
+                }
+                Err(err) => return Err(err.to_string()),
+            }
+        }
+    }
+
+    Err("Update manager unavailable".into())
+}
+
+/// Export telemetry data
+#[tauri::command]
+pub fn export_telemetry<R: Runtime>(app_handle: AppHandle<R>) -> Result<String, String> {
+    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+        if let Ok(telemetry) = state.telemetry_manager.lock() {
+            telemetry.export_telemetry().map_err(|e| e.to_string())
         } else {
             Ok("No telemetry data available".to_string())
         }

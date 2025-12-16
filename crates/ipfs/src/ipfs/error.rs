@@ -96,21 +96,21 @@ impl From<futures::channel::oneshot::Canceled> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_error_display() {
         let io_error = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let error = Error::Io(io_error);
         assert!(error.to_string().contains("I/O error"));
-        
+
         // Produce a cid::Error by attempting to parse an invalid CID
         let cid_error = cid::Cid::try_from(&b""[..]).unwrap_err();
         let error = Error::Cid(cid_error);
         assert!(error.to_string().contains("CID error"));
-        
+
         let error = Error::ChannelClosed;
         assert_eq!(error.to_string(), "Channel closed");
-        
+
         let error = Error::Other("custom error".to_string());
         assert_eq!(error.to_string(), "custom error");
     }

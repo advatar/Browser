@@ -24,16 +24,16 @@ pub use self::{
 };
 
 // Re-export node implementations conditionally
-#[cfg(not(feature = "legacy"))]
-pub use node_modern::Node as ModernNode;
 #[cfg(feature = "legacy")]
 pub use node::Node as LegacyNode;
+#[cfg(not(feature = "legacy"))]
+pub use node_modern::Node as ModernNode;
 
 // Re-export common types
 pub use cid::Cid;
+pub use libipld;
 pub use libp2p::{Multiaddr, PeerId};
 pub use multihash;
-pub use libipld;
 
 /// The main IPFS node type that switches between implementations based on features.
 #[cfg(not(feature = "legacy"))]
@@ -66,10 +66,10 @@ pub type EventStream = futures::channel::mpsc::Receiver<NodeEvent>;
 pub trait BlockStore: Send + Sync + 'static {
     /// Get a block by its CID
     async fn get_block(&self, cid: &Cid) -> Result<Option<Block>>;
-    
+
     /// Store a block
     async fn put_block(&mut self, block: Block) -> Result<Cid>;
-    
+
     /// Check if a block exists
     async fn has_block(&self, cid: &Cid) -> Result<bool>;
 }

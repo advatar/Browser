@@ -118,6 +118,7 @@ graph TD
 - **Rust** 1.70 or later ([Install Rust](https://rustup.rs/))
 - **Node.js** 18+ and **pnpm** ([Install Node.js](https://nodejs.org/))
 - **Git** for version control
+- **Docker** (optional, for local devnet)
 
 ## 📥 Download
 
@@ -154,6 +155,14 @@ pnpm install
 
 # Build the GUI components
 pnpm run build
+
+### Local Ethereum devnet (Anvil)
+For local wallet broadcasting and end-to-end spends, start the bundled Anvil devnet:
+```bash
+docker compose up -d anvil
+export ADVATAR_ETH_RPC=http://localhost:8545
+```
+Agent wallet spends will sign and submit raw transactions to this devnet and also log to `~/.advatar/broadcasts.jsonl`.
 ```
 
 ### Running the Application

@@ -1,6 +1,8 @@
+#![cfg(feature = "substrate")]
+
 //! Test utilities for the blockchain crate
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use std::{
     process::{Child, Command, Stdio},
     sync::Once,
@@ -52,7 +54,10 @@ impl TestNode {
                 .try_init();
         });
 
-        Self { process: None, config }
+        Self {
+            process: None,
+            config,
+        }
     }
 
     /// Start the test node
