@@ -269,6 +269,12 @@ fn main() {
             create_browser_window(app.app_handle(), None)?;
 
             if let Some(state) = app.app_handle().try_state::<AppState>() {
+                if let Err(err) = apply_persisted_settings(&state) {
+                    log_startup(&format!("failed to apply persisted settings: {err}"));
+                }
+            }
+
+            if let Some(state) = app.app_handle().try_state::<AppState>() {
                 let agent_mutex = state.agent_manager.clone();
                 let app_handle = app.app_handle().clone();
                 match AgentManager::new(app_handle, &*state, state.approval_broker.clone()) {

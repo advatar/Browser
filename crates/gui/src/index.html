@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/css/browser.css" />
   <link rel="stylesheet" href="/css/context-menu.css" />
   <link rel="stylesheet" href="/css/history-panel.css" />
+  <link rel="stylesheet" href="/css/downloads-panel.css" />
   <style>
     :root {
       --toolbar-bg: #f0f0f0;
@@ -563,6 +564,11 @@
             <path fill="currentColor" d="M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.04,19 9.19,18.27 7.86,17H6.42A9,9 0 0,0 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3" />
           </svg>
         </button>
+        <button id="downloads-button" title="Downloads" class="toolbar-button">
+          <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z" />
+          </svg>
+        </button>
         <button id="bookmarks-button" title="Bookmarks" class="toolbar-button">
           <svg viewBox="0 0 24 24" width="16" height="16">
             <path fill="currentColor" d="M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5C19,3.89 18.1,3 17,3Z" />
@@ -680,26 +686,10 @@
     // Initialize managers
     const tabManager = new TabManager();
     const navigationManager = new NavigationManager(tabManager);
-    
-    // Initialize bookmarks bar
-    const bookmarksBar = new BookmarksBar('bookmarks-container', {
-      subscribe: (event, callback) => {
-        // Simple event bus implementation
-        const handler = (e) => {
-          if (e.detail?.type === event) {
-            callback(e.detail.data);
-          }
-        };
-        document.addEventListener('browser-event', handler);
-        return () => document.removeEventListener('browser-event', handler);
-      },
-      publish: (event, data) => {
-        document.dispatchEvent(new CustomEvent('browser-event', {
-          detail: { type: event, data }
-        }));
-      }
-    });
     const uiManager = new UIManager(tabManager, navigationManager);
+    
+    // Initialize bookmarks bar using shared event bus
+    const bookmarksBar = new BookmarksBar('bookmarks-container', uiManager.eventBus);
     
     // Initialize the browser with a default tab
     document.addEventListener('DOMContentLoaded', async () => {
@@ -738,9 +728,10 @@
         // Ctrl+1-9 to switch to specific tab
         if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
           const index = parseInt(e.key) - 1;
-          if (index < tabManager.tabs.length) {
+          const tabs = tabManager.getAllTabs();
+          if (index < tabs.length) {
             e.preventDefault();
-            tabManager.activateTab(tabManager.tabs[index].id);
+            tabManager.activateTab(tabs[index].id);
           }
         }
       });

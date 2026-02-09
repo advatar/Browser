@@ -1,0 +1,143 @@
+/* Bookmarks Panel Styles */
+.bookmarks-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 760px;
+  max-width: 90vw;
+  height: 600px;
+  max-height: 90vh;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bookmarks-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #f8f9fa;
+}
+
+.bookmarks-panel-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.bookmarks-close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.bookmarks-close-btn:hover {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.bookmarks-panel-controls {
+  padding: 12px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.bookmarks-panel-search {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+}
+
+.bookmarks-panel-search:focus {
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.bookmarks-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.bookmarks-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.bookmarks-panel-folder-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.bookmarks-panel-folder-header:hover {
+  background: #f2f4f7;
+}
+
+.bookmarks-panel-folder-contents {
+  margin-left: 16px;
+  border-left: 1px dashed #d0d5dd;
+  padding-left: 6px;
+}
+
+.bookmarks-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  cursor: pointer;
+}
+
+.bookmarks-panel-item:hover {
+  background: #f2f4f7;
+}
+
+.bookmarks-panel-favicon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.bookmarks-panel-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bookmarks-panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2939;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bookmarks-panel-url {
+  font-size: 12px;
+  color: #667085;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

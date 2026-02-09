@@ -704,7 +704,14 @@ impl BitswapService {
                 
                 SwarmEvent::Behaviour(BitswapEvent::Error { error }) => {
                     log::error!("Bitswap error: {}", error);
-                    // TODO: Consider reconnecting or other recovery actions
+                    self.metrics.connection_errors.inc();
+                    if let Err(e) = self
+                        .event_sender
+                        .send(NodeEvent::Error(format!("Bitswap error: {}", error)))
+                        .await
+                    {
+                        log::error!("Failed to forward Bitswap error: {}", e);
+                    }
                 }
                 
                 SwarmEvent::NewListenAddr { address, .. } => {

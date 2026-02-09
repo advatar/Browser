@@ -8,6 +8,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -178,9 +179,9 @@ pub async fn get_security_status<R: Runtime>(
 
     Ok(SecurityStatus {
         is_secure,
-        certificate_valid: true, // TODO: Implement certificate validation
+        certificate_valid: security_manager.certificate_status_for_url(&url, is_secure),
         privacy_settings: security_manager.privacy_settings.clone(),
-        blocked_requests: 0, // TODO: Track blocked requests
+        blocked_requests: security_manager.blocked_request_count().min(u32::MAX as u64) as u32,
     })
 }
 
@@ -372,7 +373,8 @@ pub fn evaluate_agent_spend<R: Runtime>(
 
 // Settings management commands
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct BrowserSettings {
     pub default_search_engine: String,
     pub homepage: String,
@@ -393,12 +395,56 @@ impl Default for BrowserSettings {
     }
 }
 
+fn settings_storage_path() -> Result<PathBuf, String> {
+    let base = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| "Unable to resolve settings directory".to_string())?;
+
+    let mut dir = base;
+    dir.push(".advatar");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    dir.push("browser-settings.json");
+    Ok(dir)
+}
+
+fn load_settings_from_disk() -> Result<BrowserSettings, String> {
+    let path = settings_storage_path()?;
+    if !path.exists() {
+        return Ok(BrowserSettings::default());
+    }
+
+    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).map_err(|e| e.to_string())
+}
+
+fn save_settings_to_disk(settings: &BrowserSettings) -> Result<(), String> {
+    let path = settings_storage_path()?;
+    let payload = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    fs::write(&path, payload).map_err(|e| e.to_string())
+}
+
+pub fn apply_persisted_settings(state: &AppState) -> Result<BrowserSettings, String> {
+    let settings = load_settings_from_disk().unwrap_or_else(|_| BrowserSettings::default());
+
+    if let Ok(mut protocol_handler) = state.protocol_handler.lock() {
+        protocol_handler.set_ipfs_gateway(settings.ipfs_gateway.clone());
+        protocol_handler.set_ens_resolver(settings.ens_resolver.clone());
+    }
+
+    if let Ok(mut security_manager) = state.security_manager.lock() {
+        security_manager.update_privacy_settings(settings.privacy_settings.clone());
+    }
+
+    Ok(settings)
+}
+
 #[tauri::command]
 pub async fn get_settings<R: Runtime>(
     _app_handle: AppHandle<R>,
 ) -> Result<BrowserSettings, String> {
-    // TODO: Load settings from persistent storage
-    Ok(BrowserSettings::default())
+    load_settings_from_disk().or_else(|_| Ok(BrowserSettings::default()))
 }
 
 #[tauri::command]
@@ -409,16 +455,16 @@ pub async fn update_settings<R: Runtime>(
 ) -> Result<(), String> {
     // Update protocol handler settings
     if let Ok(mut protocol_handler) = state.protocol_handler.lock() {
-        protocol_handler.set_ipfs_gateway(settings.ipfs_gateway);
-        protocol_handler.set_ens_resolver(settings.ens_resolver);
+        protocol_handler.set_ipfs_gateway(settings.ipfs_gateway.clone());
+        protocol_handler.set_ens_resolver(settings.ens_resolver.clone());
     }
 
     // Update security settings
     if let Ok(mut security_manager) = state.security_manager.lock() {
-        security_manager.update_privacy_settings(settings.privacy_settings);
+        security_manager.update_privacy_settings(settings.privacy_settings.clone());
     }
 
-    // TODO: Save settings to persistent storage
+    save_settings_to_disk(&settings)?;
     Ok(())
 }
 

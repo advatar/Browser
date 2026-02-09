@@ -64,11 +64,24 @@ impl Repo {
         if !path.exists() {
             std::fs::create_dir_all(&path)?;
         }
+        // Ensure blocks directory exists
+        let blocks_dir = path.join("blocks");
+        if !blocks_dir.exists() {
+            std::fs::create_dir_all(&blocks_dir)?;
+        }
 
         Ok(Self {
             path,
             block_store: InMemoryBlockStore::new(),
         })
+    }
+
+    fn blocks_dir(&self) -> PathBuf {
+        self.path.join("blocks")
+    }
+
+    fn block_path(&self, cid: &Cid) -> PathBuf {
+        self.blocks_dir().join(cid.to_string())
     }
 
     /// Get a block from the repository.
@@ -78,16 +91,31 @@ impl Repo {
             return Ok(Some(Block::with_cid(cid.clone(), data)));
         }
 
-        // TODO: Implement disk storage
-        Ok(None)
+        // Fall back to disk storage
+        let path = self.block_path(cid);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let data = std::fs::read(&path)?;
+        self.block_store.put(cid.clone(), data.clone())?;
+        Ok(Some(Block::with_cid(cid.clone(), data)))
     }
 
     /// Put a block into the repository.
     pub fn put_block(&self, block: Block) -> Result<()> {
         let cid = block.cid().clone();
         let data = block.into_data();
-        self.block_store.put(cid, data)?;
-        // TODO: Implement disk persistence
+        self.block_store.put(cid.clone(), data.clone())?;
+
+        let path = self.block_path(&cid);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        // Write atomically to avoid partial data on crash
+        let tmp_path = path.with_extension("tmp");
+        std::fs::write(&tmp_path, &data)?;
+        std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
 
@@ -98,8 +126,8 @@ impl Repo {
             return Ok(true);
         }
 
-        // TODO: Check disk storage
-        Ok(false)
+        // Check disk storage
+        Ok(self.block_path(cid).exists())
     }
 
     /// Get the path to the repository.
@@ -140,6 +168,15 @@ mod tests {
             assert_eq!(retrieved_block.data(), data.as_slice());
         } else {
             panic!("Block not found in repository");
+        }
+
+        // Verify persistence across repository instances
+        let repo_reopen = Repo::new(temp_dir.path())?;
+        assert!(repo_reopen.has_block(&cid)?);
+        if let Some(retrieved_block) = repo_reopen.get_block(&cid)? {
+            assert_eq!(retrieved_block.data(), data.as_slice());
+        } else {
+            panic!("Block not found after reopening repository");
         }
 
         Ok(())

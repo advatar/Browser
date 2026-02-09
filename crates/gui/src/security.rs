@@ -105,6 +105,7 @@ pub struct SecurityManager {
     pub blocked_domains: Arc<Mutex<HashSet<String>>>,
     pub tracker_lists: Arc<Mutex<Vec<String>>>,
     pub ad_block_lists: Arc<Mutex<Vec<String>>>,
+    pub blocked_requests: Arc<Mutex<u64>>,
 }
 
 impl SecurityManager {
@@ -117,7 +118,51 @@ impl SecurityManager {
             blocked_domains: Arc::new(Mutex::new(HashSet::new())),
             tracker_lists: Arc::new(Mutex::new(Self::default_tracker_list())),
             ad_block_lists: Arc::new(Mutex::new(Self::default_ad_block_list())),
+            blocked_requests: Arc::new(Mutex::new(0)),
         }
+    }
+
+    fn increment_blocked_requests(&self) {
+        if let Ok(mut count) = self.blocked_requests.lock() {
+            *count = count.saturating_add(1);
+        }
+    }
+
+    pub fn blocked_request_count(&self) -> u64 {
+        self.blocked_requests
+            .lock()
+            .map(|count| *count)
+            .unwrap_or(0)
+    }
+
+    pub fn certificate_status_for_url(&self, url: &str, is_secure: bool) -> bool {
+        let parsed = match Url::parse(url) {
+            Ok(parsed) => parsed,
+            Err(_) => return false,
+        };
+
+        if parsed.scheme() != "https" {
+            return true;
+        }
+
+        let domain = match parsed.host_str() {
+            Some(domain) => domain,
+            None => return false,
+        };
+
+        if let Ok(certs) = self.certificates.lock() {
+            if let Some(cert) = certs.get(domain) {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let within_validity = cert.valid_from <= now && cert.valid_to >= now;
+                let matches_domain = cert.subject.contains(domain);
+                return within_validity && matches_domain && cert.is_valid && cert.is_trusted;
+            }
+        }
+
+        is_secure
     }
 
     /// Validate URL security
@@ -128,6 +173,7 @@ impl SecurityManager {
         if let Some(domain) = parsed_url.host_str() {
             if let Ok(blocked_domains) = self.blocked_domains.lock() {
                 if blocked_domains.contains::<str>(domain) {
+                    self.increment_blocked_requests();
                     return Ok(false);
                 }
             }
@@ -137,6 +183,7 @@ impl SecurityManager {
                 if let Ok(tracker_lists) = self.tracker_lists.lock() {
                     for tracker_pattern in tracker_lists.iter() {
                         if domain.contains(tracker_pattern) {
+                            self.increment_blocked_requests();
                             return Ok(false);
                         }
                     }
@@ -148,6 +195,7 @@ impl SecurityManager {
                 if let Ok(ad_block_lists) = self.ad_block_lists.lock() {
                     for ad_pattern in ad_block_lists.iter() {
                         if domain.contains(ad_pattern) {
+                            self.increment_blocked_requests();
                             return Ok(false);
                         }
                     }
@@ -161,13 +209,22 @@ impl SecurityManager {
             "http" => {
                 // Allow HTTP for localhost and development
                 if let Some(host) = parsed_url.host_str() {
-                    Ok(host == "localhost" || host == "127.0.0.1" || host.starts_with("192.168."))
+                    let allowed =
+                        host == "localhost" || host == "127.0.0.1" || host.starts_with("192.168.");
+                    if !allowed {
+                        self.increment_blocked_requests();
+                    }
+                    Ok(allowed)
                 } else {
+                    self.increment_blocked_requests();
                     Ok(false)
                 }
             }
             "ipfs" | "ipns" => Ok(true), // Allow decentralized protocols
-            _ => Ok(false),
+            _ => {
+                self.increment_blocked_requests();
+                Ok(false)
+            }
         }
     }
 

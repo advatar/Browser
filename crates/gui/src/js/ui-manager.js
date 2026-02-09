@@ -1,7 +1,10 @@
-import { debounce } from './utils.js';
+import { debounce, getFaviconUrl, isValidUrl, normalizeUrl } from './utils.js';
 
 import { HistoryManager } from './history-manager.js';
 import { HistoryPanel } from './history-panel.js';
+import { BookmarkManager } from '../features/bookmarks';
+import { BookmarksPanel } from './bookmarks-panel.js';
+import { DownloadsPanel } from './downloads-panel.js';
 
 export class UIManager {
   constructor(tabManager, navigationManager) {
@@ -16,6 +19,10 @@ export class UIManager {
     this.downloadsButton = document.getElementById('downloads-button');
     this.settingsButton = document.getElementById('settings-button');
     this.walletButton = document.getElementById('wallet-button');
+    this.backButton = document.getElementById('back');
+    this.forwardButton = document.getElementById('forward');
+    this.reloadButton = document.getElementById('reload');
+    this.homeButton = document.getElementById('home');
     
     // Wallet state
     this.walletInfo = null;
@@ -25,6 +32,12 @@ export class UIManager {
     this.eventBus = this.createEventBus();
     this.historyManager = new HistoryManager(this.eventBus);
     this.historyPanel = new HistoryPanel(this.historyManager, this.eventBus);
+    this.bookmarkManager = new BookmarkManager(this.eventBus);
+    this.bookmarksPanel = new BookmarksPanel(this.bookmarkManager, this.eventBus);
+    this.downloadsPanel = new DownloadsPanel(this.eventBus);
+    this.suggestions = [];
+    this.suggestionIndex = -1;
+    this.suggestionsElement = this.createSuggestionsElement();
     
     this.setupEventListeners();
     this.setupContextMenu();
@@ -51,9 +64,33 @@ export class UIManager {
     const addressBar = document.getElementById('address-bar');
     if (addressBar) {
       addressBar.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          if (this.suggestions.length > 0) {
+            e.preventDefault();
+            this.setSuggestionIndex(Math.min(this.suggestionIndex + 1, this.suggestions.length - 1));
+          }
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          if (this.suggestions.length > 0) {
+            e.preventDefault();
+            this.setSuggestionIndex(Math.max(this.suggestionIndex - 1, 0));
+          }
+          return;
+        }
         if (e.key === 'Enter') {
+          if (this.suggestions.length > 0 && this.suggestionIndex >= 0) {
+            e.preventDefault();
+            const selected = this.suggestions[this.suggestionIndex];
+            if (selected) {
+              this.applySuggestion(selected);
+              return;
+            }
+          }
           this.navigationManager.navigateTo(addressBar.value);
+          this.hideAddressBarSuggestions();
         } else if (e.key === 'Escape') {
+          this.hideAddressBarSuggestions();
           addressBar.blur();
         }
       });
@@ -194,7 +231,7 @@ export class UIManager {
       
       // Hide suggestions when clicking outside
       document.addEventListener('click', (e) => {
-        if (e.target !== this.addressBar) {
+        if (e.target !== this.addressBar && !this.suggestionsElement?.contains(e.target)) {
           this.hideAddressBarSuggestions();
         }
       });
@@ -301,31 +338,293 @@ export class UIManager {
       this.showAddressBarSuggestions();
     }
   }
+
+  initializeEventListeners() {
+    // Kept for backward compatibility with older init paths.
+  }
+
+  createSuggestionsElement() {
+    const element = document.createElement('div');
+    element.className = 'address-suggestions';
+    element.style.display = 'none';
+    element.setAttribute('role', 'listbox');
+    document.body.appendChild(element);
+
+    element.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
+
+    element.addEventListener('click', (e) => {
+      const item = e.target.closest('.address-suggestion-item');
+      if (!item) return;
+      const index = Number(item.dataset.index);
+      if (Number.isNaN(index)) return;
+      const suggestion = this.suggestions[index];
+      if (suggestion) {
+        this.applySuggestion(suggestion);
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (element.style.display === 'block') {
+        this.positionSuggestions();
+      }
+    });
+
+    return element;
+  }
+
+  positionSuggestions() {
+    if (!this.addressBar || !this.suggestionsElement) return;
+    const rect = this.addressBar.getBoundingClientRect();
+    this.suggestionsElement.style.width = `${rect.width}px`;
+    this.suggestionsElement.style.left = `${rect.left + window.scrollX}px`;
+    this.suggestionsElement.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  }
+
+  setSuggestionIndex(index) {
+    this.suggestionIndex = index;
+    const items = this.suggestionsElement?.querySelectorAll('.address-suggestion-item');
+    if (!items || items.length === 0) return;
+    items.forEach((item, idx) => {
+      if (idx === this.suggestionIndex) {
+        item.classList.add('active');
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.classList.remove('active');
+      }
+    });
+  }
+
+  renderSuggestions() {
+    if (!this.suggestionsElement) return;
+    if (!this.suggestions || this.suggestions.length === 0) {
+      this.hideAddressBarSuggestions();
+      return;
+    }
+
+    const html = this.suggestions
+      .map((suggestion, index) => {
+        const title = this.escapeHtml(suggestion.title || suggestion.url || '');
+        const subtitle = this.escapeHtml(suggestion.subtitle || suggestion.url || '');
+        const iconUrl = suggestion.favicon || (suggestion.url ? getFaviconUrl(suggestion.url) : '');
+        const badge = suggestion.badge ? this.escapeHtml(suggestion.badge) : '';
+        return `
+          <div class="address-suggestion-item ${index === this.suggestionIndex ? 'active' : ''}" data-index="${index}">
+            <div class="address-suggestion-icon">
+              ${iconUrl ? `<img src="${iconUrl}" alt="" onerror="this.style.display='none'">` : '<span>🔎</span>'}
+            </div>
+            <div class="address-suggestion-text">
+              <div class="address-suggestion-title">${title}</div>
+              <div class="address-suggestion-subtitle">${subtitle}</div>
+            </div>
+            ${badge ? `<div class="address-suggestion-badge">${badge}</div>` : ''}
+          </div>
+        `;
+      })
+      .join('');
+
+    this.suggestionsElement.innerHTML = html;
+    this.positionSuggestions();
+    this.suggestionsElement.style.display = 'block';
+  }
+
+  applySuggestion(suggestion) {
+    const value = suggestion.url || suggestion.query || '';
+    if (!value) return;
+    if (this.addressBar) {
+      this.addressBar.value = value;
+    }
+    this.navigationManager.navigateTo(value);
+    this.hideAddressBarSuggestions();
+  }
+
+  buildSuggestions(query) {
+    const suggestions = [];
+    const seen = new Set();
+    const trimmed = (query || '').trim();
+
+    const addSuggestion = (suggestion) => {
+      const key = suggestion.url || suggestion.title;
+      if (key && seen.has(key)) return;
+      if (key) seen.add(key);
+      suggestions.push(suggestion);
+    };
+
+    if (trimmed) {
+      const hasScheme = /^[a-zA-Z]+:\/\//.test(trimmed);
+      const urlCandidate =
+        hasScheme ||
+        trimmed.startsWith('localhost') ||
+        trimmed.includes('.') ||
+        trimmed.startsWith('ipfs://') ||
+        trimmed.startsWith('ipns://') ||
+        trimmed.startsWith('ens://') ||
+        trimmed.startsWith('about:');
+
+      if (urlCandidate) {
+        let url = trimmed;
+        if (!hasScheme && !trimmed.startsWith('ipfs://') && !trimmed.startsWith('ipns://') && !trimmed.startsWith('ens://') && !trimmed.startsWith('about:')) {
+          url = normalizeUrl(trimmed);
+        }
+        addSuggestion({
+          type: 'url',
+          title: `Go to ${url}`,
+          url,
+          subtitle: 'Open URL',
+          badge: 'URL'
+        });
+      }
+
+      addSuggestion({
+        type: 'search',
+        title: `Search "${trimmed}"`,
+        url: trimmed,
+        subtitle: 'Search the web',
+        badge: 'Search'
+      });
+
+      const historyMatches = this.historyManager.searchHistory(trimmed, 6) || [];
+      historyMatches.forEach((item) => {
+        addSuggestion({
+          type: 'history',
+          title: item.title || item.url,
+          url: item.url,
+          subtitle: item.url,
+          favicon: item.favicon || '',
+          badge: 'History'
+        });
+      });
+
+      const bookmarkMatches = this.bookmarkManager.searchBookmarks(trimmed) || [];
+      bookmarkMatches
+        .filter((item) => item && item.url)
+        .slice(0, 6)
+        .forEach((item) => {
+          addSuggestion({
+            type: 'bookmark',
+            title: item.title || item.url,
+            url: item.url,
+            subtitle: item.url,
+            badge: 'Bookmark'
+          });
+        });
+    } else {
+      const mostVisited = this.historyManager.getMostVisited(5) || [];
+      mostVisited.forEach((item) => {
+        addSuggestion({
+          type: 'history',
+          title: item.title || item.url,
+          url: item.url,
+          subtitle: 'Most visited',
+          favicon: item.favicon || '',
+          badge: 'Top'
+        });
+      });
+
+      const bookmarks = [];
+      const root = this.bookmarkManager.getRootFolder?.() || null;
+      if (root) {
+        this.collectBookmarksFromFolder(root, bookmarks);
+      }
+      bookmarks
+        .sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0))
+        .slice(0, 5)
+        .forEach((item) => {
+          addSuggestion({
+            type: 'bookmark',
+            title: item.title || item.url,
+            url: item.url,
+            subtitle: 'Bookmark',
+            badge: 'Bookmark'
+          });
+        });
+    }
+
+    return suggestions;
+  }
+
+  collectBookmarksFromFolder(folder, output) {
+    if (!folder || !folder.children) return;
+    folder.children.forEach((child) => {
+      if (!child) return;
+      if ('url' in child && child.url) {
+        output.push(child);
+      } else if ('children' in child) {
+        this.collectBookmarksFromFolder(child, output);
+      }
+    });
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+  }
   
   showAddressBarSuggestions() {
-    // TODO: Implement address bar suggestions
-    console.log('Show address bar suggestions');
+    this.updateAddressBarSuggestions();
   }
   
   hideAddressBarSuggestions() {
-    // TODO: Hide address bar suggestions
-    console.log('Hide address bar suggestions');
+    if (this.suggestionsElement) {
+      this.suggestionsElement.style.display = 'none';
+    }
+    this.suggestions = [];
+    this.suggestionIndex = -1;
   }
   
   updateAddressBarSuggestions() {
-    // TODO: Update address bar suggestions based on input
-    console.log('Update address bar suggestions');
+    if (!this.addressBar) return;
+    this.suggestions = this.buildSuggestions(this.addressBar.value);
+    this.suggestionIndex = this.suggestions.length ? 0 : -1;
+    this.renderSuggestions();
   }
   
   toggleMenu(event) {
     event.stopPropagation();
-    // TODO: Implement menu toggle
-    console.log('Toggle menu');
+    if (!this.menuElement) {
+      this.menuElement = document.createElement('div');
+      this.menuElement.className = 'browser-menu';
+      this.menuElement.innerHTML = `
+        <button data-action="new-tab">New Tab</button>
+        <button data-action="new-window">New Window</button>
+        <button data-action="history">History</button>
+        <button data-action="bookmarks">Bookmarks</button>
+        <button data-action="downloads">Downloads</button>
+        <button data-action="settings">Settings</button>
+      `;
+      document.body.appendChild(this.menuElement);
+      this.menuElement.addEventListener('click', (e) => {
+        const action = e.target.closest('button')?.dataset.action;
+        if (!action) return;
+        if (action === 'new-tab') this.tabManager.createTab();
+        if (action === 'new-window') this.tabManager.createTab();
+        if (action === 'history') this.showHistory();
+        if (action === 'bookmarks') this.showBookmarks();
+        if (action === 'downloads') this.showDownloads();
+        if (action === 'settings') this.showSettings();
+        this.menuElement.classList.remove('open');
+      });
+      document.addEventListener('click', (e) => {
+        if (e.target !== this.menuButton && !this.menuElement.contains(e.target)) {
+          this.menuElement.classList.remove('open');
+        }
+      });
+    }
+
+    if (this.menuButton) {
+      const rect = this.menuButton.getBoundingClientRect();
+      this.menuElement.style.left = `${rect.left + window.scrollX}px`;
+      this.menuElement.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    }
+    this.menuElement.classList.toggle('open');
   }
   
   showBookmarks() {
-    // TODO: Implement bookmarks panel
-    console.log('Show bookmarks');
+    if (this.bookmarksPanel) {
+      this.bookmarksPanel.toggle();
+    }
   }
   
   showHistory() {
@@ -333,8 +632,9 @@ export class UIManager {
   }
   
   showDownloads() {
-    // TODO: Implement downloads panel
-    console.log('Show downloads');
+    if (this.downloadsPanel) {
+      this.downloadsPanel.toggle();
+    }
   }
   
   showSettings() {

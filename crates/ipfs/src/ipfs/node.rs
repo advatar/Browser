@@ -16,9 +16,9 @@ use tokio::sync::Mutex;
 /// Commands that can be sent to the node.
 pub enum NodeCommand {
     /// Connect to a peer.
-    Connect(PeerId, Vec<Multiaddr>),
+    Connect(PeerId, Vec<Multiaddr>, oneshot::Sender<Result<()>>),
     /// Disconnect from a peer.
-    Disconnect(PeerId),
+    Disconnect(PeerId, oneshot::Sender<Result<()>>),
     /// Add a block to the node.
     AddBlock(Block),
     /// Get a block from the node.
@@ -93,22 +93,28 @@ impl Node {
         tokio::spawn(async move {
             while let Some(command) = command_receiver.next().await {
                 match command {
-                    NodeCommand::Connect(peer_id, addrs) => {
-                        // TODO: Implement peer connection
+                    NodeCommand::Connect(peer_id, _addrs, responder) => {
+                        let mut peers = connected_peers.lock().await;
+                        peers.insert(peer_id);
+                        drop(peers);
                         let _ = event_sender
                             .clone()
                             .send(NodeEvent::PeerConnected(peer_id))
                             .await;
+                        let _ = responder.send(Ok(()));
                     }
-                    NodeCommand::Disconnect(peer_id) => {
-                        // TODO: Implement peer disconnection
+                    NodeCommand::Disconnect(peer_id, responder) => {
+                        let mut peers = connected_peers.lock().await;
+                        peers.remove(&peer_id);
+                        drop(peers);
                         let _ = event_sender
                             .clone()
                             .send(NodeEvent::PeerDisconnected(peer_id))
                             .await;
+                        let _ = responder.send(Ok(()));
                     }
                     NodeCommand::AddBlock(block) => {
-                        if let Err(e) = repo.put_block(block).await {
+                        if let Err(e) = repo.put_block(block) {
                             let _ = event_sender
                                 .clone()
                                 .send(NodeEvent::Error(e.to_string()))
@@ -116,11 +122,11 @@ impl Node {
                         }
                     }
                     NodeCommand::GetBlock(cid, sender) => {
-                        let result = repo.get_block(&cid).await;
+                        let result = repo.get_block(&cid);
                         let _ = sender.send(result);
                     }
                     NodeCommand::HasBlock(cid, sender) => {
-                        let result = repo.has_block(&cid).await.unwrap_or(false);
+                        let result = repo.has_block(&cid).unwrap_or(false);
                         let _ = sender.send(result);
                     }
                     NodeCommand::Shutdown => {
@@ -141,7 +147,7 @@ impl Node {
         let (sender, receiver) = oneshot::channel();
         self.command_sender
             .clone()
-            .send(NodeCommand::Connect(peer_id, addrs))
+            .send(NodeCommand::Connect(peer_id, addrs, sender))
             .await?;
         receiver.await.map_err(|_| Error::ChannelClosed)
     }
@@ -151,7 +157,7 @@ impl Node {
         let (sender, receiver) = oneshot::channel();
         self.command_sender
             .clone()
-            .send(NodeCommand::Disconnect(peer_id))
+            .send(NodeCommand::Disconnect(peer_id, sender))
             .await?;
         receiver.await.map_err(|_| Error::ChannelClosed)
     }
