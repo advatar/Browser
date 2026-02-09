@@ -1,0 +1,28 @@
+version: 1
+
+components:
+  tauri_gui:
+    description: Desktop app (Tauri v2). Rust backend in crates/gui, UI served from orbit-shell-ui.
+    path: crates/gui
+    config: crates/gui/tauri.conf.json
+    depends_on:
+      - orbit_shell_ui
+      - llm_router_lib
+    dev:
+      frontend_dev_url: http://localhost:5174
+    artifacts:
+      macos_app_bundle: target/release/bundle/macos/*.app
+      macos_dmg: target/release/bundle/dmg/*.dmg
+
+  orbit_shell_ui:
+    description: Frontend used by the Tauri GUI (built via beforeBuildCommand).
+    path: orbit-shell-ui
+    dev:
+      vite_dev_server: http://localhost:5174
+    build_output:
+      dist: orbit-shell-ui/dist
+
+  llm_router_lib:
+    description: Rust library used by the GUI for model routing (not a network service).
+    path: services/llm-router
+

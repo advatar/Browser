@@ -128,39 +128,37 @@ create_packages() {
     
     # macOS
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # Create DMG for macOS
-        if [ -f "crates/gui/src-tauri/target/release/bundle/dmg/${PROJECT_NAME}_${VERSION}_x64.dmg" ]; then
-            cp "crates/gui/src-tauri/target/release/bundle/dmg/${PROJECT_NAME}_${VERSION}_x64.dmg" "$DIST_DIR/"
+        if ls "target/release/bundle/dmg/"*.dmg >/dev/null 2>&1; then
+            cp "target/release/bundle/dmg/"*.dmg "$DIST_DIR/"
             print_status "macOS DMG created"
         fi
-        
-        # Create App bundle
-        if [ -d "crates/gui/src-tauri/target/release/bundle/macos/${PROJECT_NAME}.app" ]; then
-            cp -r "crates/gui/src-tauri/target/release/bundle/macos/${PROJECT_NAME}.app" "$DIST_DIR/"
+
+        if ls "target/release/bundle/macos/"*.app >/dev/null 2>&1; then
+            cp -r "target/release/bundle/macos/"*.app "$DIST_DIR/"
             print_status "macOS App bundle created"
         fi
     fi
     
     # Windows
-    if [ -f "crates/gui/src-tauri/target/release/bundle/msi/${PROJECT_NAME}_${VERSION}_x64_en-US.msi" ]; then
-        cp "crates/gui/src-tauri/target/release/bundle/msi/${PROJECT_NAME}_${VERSION}_x64_en-US.msi" "$DIST_DIR/"
+    if ls "target/release/bundle/msi/"*.msi >/dev/null 2>&1; then
+        cp "target/release/bundle/msi/"*.msi "$DIST_DIR/"
         print_status "Windows MSI created"
     fi
     
     # Linux
-    if [ -f "crates/gui/src-tauri/target/release/bundle/deb/${PROJECT_NAME}_${VERSION}_amd64.deb" ]; then
-        cp "crates/gui/src-tauri/target/release/bundle/deb/${PROJECT_NAME}_${VERSION}_amd64.deb" "$DIST_DIR/"
+    if ls "target/release/bundle/deb/"*.deb >/dev/null 2>&1; then
+        cp "target/release/bundle/deb/"*.deb "$DIST_DIR/"
         print_status "Linux DEB created"
     fi
     
-    if [ -f "crates/gui/src-tauri/target/release/bundle/rpm/${PROJECT_NAME}-${VERSION}-1.x86_64.rpm" ]; then
-        cp "crates/gui/src-tauri/target/release/bundle/rpm/${PROJECT_NAME}-${VERSION}-1.x86_64.rpm" "$DIST_DIR/"
+    if ls "target/release/bundle/rpm/"*.rpm >/dev/null 2>&1; then
+        cp "target/release/bundle/rpm/"*.rpm "$DIST_DIR/"
         print_status "Linux RPM created"
     fi
     
     # AppImage
-    if [ -f "crates/gui/src-tauri/target/release/bundle/appimage/${PROJECT_NAME}_${VERSION}_amd64.AppImage" ]; then
-        cp "crates/gui/src-tauri/target/release/bundle/appimage/${PROJECT_NAME}_${VERSION}_amd64.AppImage" "$DIST_DIR/"
+    if ls "target/release/bundle/appimage/"*.AppImage >/dev/null 2>&1; then
+        cp "target/release/bundle/appimage/"*.AppImage "$DIST_DIR/"
         print_status "Linux AppImage created"
     fi
 }

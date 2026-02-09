@@ -11,7 +11,8 @@ cd "$(dirname "$0")/.."
 
 # Clean previous builds
 echo "🧹 Cleaning previous builds..."
-rm -rf dist/*.dmg dist/*.msi dist/*.deb dist/*.rpm dist/*.AppImage dist/*.exe dist/*.app.tar.gz
+mkdir -p dist
+rm -f dist/*.dmg dist/*.msi dist/*.deb dist/*.rpm dist/*.AppImage dist/*.exe dist/*.app.tar.gz 2>/dev/null || true
 
 # Build for current platform
 echo "🔨 Building for current platform..."
@@ -25,30 +26,30 @@ mkdir -p ../../dist
 # Find and copy Tauri build outputs
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
-    if [ -f "src-tauri/target/release/bundle/dmg/*.dmg" ]; then
-        cp src-tauri/target/release/bundle/dmg/*.dmg ../../dist/
+    if ls ../../target/release/bundle/dmg/*.dmg >/dev/null 2>&1; then
+        cp ../../target/release/bundle/dmg/*.dmg ../../dist/
     fi
-    if [ -f "src-tauri/target/release/bundle/macos/*.app" ]; then
-        tar -czf ../../dist/decentralized-browser-v0.1.0.app.tar.gz -C src-tauri/target/release/bundle/macos/ *.app
+    if ls ../../target/release/bundle/macos/*.app >/dev/null 2>&1; then
+        tar -czf ../../dist/decentralized-browser-v0.1.0.app.tar.gz -C ../../target/release/bundle/macos/ *.app
     fi
 elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
     # Windows
-    if [ -f "src-tauri/target/release/bundle/msi/*.msi" ]; then
-        cp src-tauri/target/release/bundle/msi/*.msi ../../dist/
+    if ls ../../target/release/bundle/msi/*.msi >/dev/null 2>&1; then
+        cp ../../target/release/bundle/msi/*.msi ../../dist/
     fi
-    if [ -f "src-tauri/target/release/*.exe" ]; then
-        cp src-tauri/target/release/*.exe ../../dist/decentralized-browser-v0.1.0.exe
+    if ls ../../target/release/*.exe >/dev/null 2>&1; then
+        cp ../../target/release/*.exe ../../dist/decentralized-browser-v0.1.0.exe
     fi
 else
     # Linux
-    if [ -f "src-tauri/target/release/bundle/deb/*.deb" ]; then
-        cp src-tauri/target/release/bundle/deb/*.deb ../../dist/
+    if ls ../../target/release/bundle/deb/*.deb >/dev/null 2>&1; then
+        cp ../../target/release/bundle/deb/*.deb ../../dist/
     fi
-    if [ -f "src-tauri/target/release/bundle/rpm/*.rpm" ]; then
-        cp src-tauri/target/release/bundle/rpm/*.rpm ../../dist/
+    if ls ../../target/release/bundle/rpm/*.rpm >/dev/null 2>&1; then
+        cp ../../target/release/bundle/rpm/*.rpm ../../dist/
     fi
-    if [ -f "src-tauri/target/release/bundle/appimage/*.AppImage" ]; then
-        cp src-tauri/target/release/bundle/appimage/*.AppImage ../../dist/
+    if ls ../../target/release/bundle/appimage/*.AppImage >/dev/null 2>&1; then
+        cp ../../target/release/bundle/appimage/*.AppImage ../../dist/
     fi
 fi
 

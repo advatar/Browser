@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
 
 export default defineConfig({
@@ -39,5 +39,10 @@ export default defineConfig({
     include: /.*\.tsx?$/,
     exclude: [],
     loader: 'ts',
+  },
+  test: {
+    environment: 'jsdom',
+    clearMocks: true,
+    restoreMocks: true,
   },
 });

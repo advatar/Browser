@@ -26,13 +26,17 @@ tauri-cli:
 	$(CARGO) install tauri-cli --version '^2' --locked
 
 dev: deps
-	$(CARGO) tauri dev -p $(GUI_CRATE)
+	cd $(GUI_DIR) && $(CARGO) tauri dev
 
 frontend-build: deps
 	$(NPM) --prefix $(ORBIT_UI_DIR) run build
 
 build: frontend-build
-	$(CARGO) tauri build -p $(GUI_CRATE)
+	cd $(GUI_DIR) && $(CARGO) tauri build
+
+.PHONY: dmg
+dmg: frontend-build
+	./scripts/package-macos-dmg.sh
 
 afm-node:
 	$(CARGO) run -p $(AFM_NODE_CRATE) --bin dev

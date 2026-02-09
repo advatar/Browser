@@ -547,8 +547,12 @@ mod tests {
         assert!(!decision.permitted);
         assert!(decision.reason.unwrap().contains("per-tx"));
 
-        // Daily limit breach (after first successful 40 spend)
-        let decision = store.evaluate_spend(&agent, 70, "eth").unwrap();
+        // Daily limit breach (accumulate multiple spends, each within per-tx)
+        let decision = store.evaluate_spend(&agent, 50, "eth").unwrap();
+        assert!(decision.permitted);
+        assert_eq!(decision.remaining_daily, Some(10));
+
+        let decision = store.evaluate_spend(&agent, 20, "eth").unwrap();
         assert!(!decision.permitted);
         assert!(decision.reason.unwrap().contains("daily limit"));
 

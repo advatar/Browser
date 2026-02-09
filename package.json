@@ -18,7 +18,11 @@
     "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
     "prepare": "husky"
   },
-  "keywords": ["browser", "decentralized", "web3"],
+  "keywords": [
+    "browser",
+    "decentralized",
+    "web3"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Decentralized Browser Application",
@@ -40,6 +44,7 @@
   },
   "devDependencies": {
     "husky": "^9.1.7",
+    "jsdom": "^28.0.0",
     "lint-staged": "^16.1.2"
   }
 }

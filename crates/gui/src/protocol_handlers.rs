@@ -343,6 +343,7 @@ impl ProtocolHandler {
         if let Some(resolver_url) = &self.ens_resolver {
             // Use Ethereum JSON-RPC to resolve ENS
             let client = reqwest::Client::new();
+            let namehash = self.namehash(name);
 
             // Get resolver address
             let resolver_request = serde_json::json!({
@@ -350,7 +351,7 @@ impl ProtocolHandler {
                 "method": "eth_call",
                 "params": [{
                     "to": "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e", // ENS Registry
-                    "data": format!("0x0178b8bf{}", self.namehash(name))
+                    "data": format!("0x0178b8bf{}", namehash)
                 }, "latest"],
                 "id": 1
             });
@@ -363,44 +364,48 @@ impl ProtocolHandler {
 
             let resolver_response: serde_json::Value = response.json().await?;
 
-            if let Some(resolver_address) = resolver_response["result"].as_str() {
-                if resolver_address
-                    != "0x0000000000000000000000000000000000000000000000000000000000000000"
-                {
-                    // Get content hash from resolver
-                    let content_request = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "method": "eth_call",
-                        "params": [{
-                            "to": &resolver_address[2..42], // Remove 0x prefix and take first 20 bytes
-                            "data": format!("0xbc1c58d1{}", self.namehash(name))
-                        }, "latest"],
-                        "id": 2
-                    });
+            if let Some(resolver_address) = resolver_response["result"]
+                .as_str()
+                .and_then(|raw| self.extract_resolver_address(raw))
+            {
+                // Get content hash from resolver
+                let content_request = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "method": "eth_call",
+                    "params": [{
+                        "to": &resolver_address,
+                        "data": format!("0xbc1c58d1{}", namehash)
+                    }, "latest"],
+                    "id": 2
+                });
 
-                    let content_response = client
-                        .post(resolver_url)
-                        .json(&content_request)
-                        .send()
-                        .await?;
+                let content_response = client
+                    .post(resolver_url)
+                    .json(&content_request)
+                    .send()
+                    .await?;
 
-                    let content_result: serde_json::Value = content_response.json().await?;
+                let content_result: serde_json::Value = content_response.json().await?;
 
-                    let content_hash = content_result["result"].as_str().and_then(|s| {
-                        if s.len() > 2 && s != "0x" {
-                            Some(self.decode_content_hash(&s[2..]))
-                        } else {
-                            None
-                        }
-                    });
+                let content_hash = content_result["result"].as_str().and_then(|s| {
+                    if s.len() > 2 && s != "0x" {
+                        Some(self.decode_content_hash(&s[2..]))
+                    } else {
+                        None
+                    }
+                });
 
-                    return Ok(EnsResolution {
-                        name: name.to_string(),
-                        address: resolver_address.to_string(),
-                        content_hash,
-                        text_records: HashMap::new(), // TODO: Implement text record resolution
-                    });
-                }
+                let text_records = self
+                    .resolve_text_records(&client, resolver_url, &resolver_address, &namehash)
+                    .await
+                    .unwrap_or_default();
+
+                return Ok(EnsResolution {
+                    name: name.to_string(),
+                    address: resolver_address.to_string(),
+                    content_hash,
+                    text_records,
+                });
             }
         }
 
@@ -411,6 +416,111 @@ impl ProtocolHandler {
             content_hash: None,
             text_records: HashMap::new(),
         })
+    }
+
+    fn extract_resolver_address(&self, raw: &str) -> Option<String> {
+        if !raw.starts_with("0x") {
+            return None;
+        }
+        let trimmed = raw.trim_start_matches("0x");
+        if trimmed.len() < 40 {
+            return None;
+        }
+        let addr = &trimmed[trimmed.len() - 40..];
+        if addr.chars().all(|c| c == '0') {
+            return None;
+        }
+        Some(format!("0x{}", addr))
+    }
+
+    async fn resolve_text_records(
+        &self,
+        client: &reqwest::Client,
+        resolver_url: &str,
+        resolver_address: &str,
+        namehash: &str,
+    ) -> Result<HashMap<String, String>> {
+        let mut records = HashMap::new();
+        let keys = ["url", "website", "avatar", "description", "email", "notice"];
+        for key in keys.iter() {
+            let data = self.encode_text_query(namehash, key);
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "eth_call",
+                "params": [{
+                    "to": resolver_address,
+                    "data": data
+                }, "latest"],
+                "id": 3
+            });
+
+            let response = client.post(resolver_url).json(&request).send().await?;
+            let value: serde_json::Value = response.json().await?;
+            if let Some(raw) = value["result"].as_str() {
+                if raw.len() > 2 && raw != "0x" {
+                    if let Some(decoded) = self.decode_abi_string(&raw[2..]) {
+                        if !decoded.trim().is_empty() {
+                            records.insert((*key).to_string(), decoded);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(records)
+    }
+
+    fn encode_text_query(&self, namehash: &str, key: &str) -> String {
+        use sha3::{Digest, Keccak256};
+
+        let mut selector_hasher = Keccak256::new();
+        selector_hasher.update(b"text(bytes32,string)");
+        let selector = selector_hasher.finalize();
+
+        let mut data = Vec::new();
+        data.extend_from_slice(&selector[..4]);
+
+        let namehash_bytes = hex::decode(namehash).unwrap_or_default();
+        let mut namehash_padded = vec![0u8; 32];
+        if namehash_bytes.len() <= 32 {
+            namehash_padded[32 - namehash_bytes.len()..].copy_from_slice(&namehash_bytes);
+        }
+        data.extend_from_slice(&namehash_padded);
+
+        let offset = 64u64;
+        data.extend_from_slice(&self.encode_u256(offset));
+
+        let key_bytes = key.as_bytes();
+        data.extend_from_slice(&self.encode_u256(key_bytes.len() as u64));
+
+        data.extend_from_slice(key_bytes);
+        let pad_len = (32 - (key_bytes.len() % 32)) % 32;
+        data.extend_from_slice(&vec![0u8; pad_len]);
+
+        format!("0x{}", hex::encode(data))
+    }
+
+    fn encode_u256(&self, value: u64) -> [u8; 32] {
+        let mut buffer = [0u8; 32];
+        buffer[24..].copy_from_slice(&value.to_be_bytes());
+        buffer
+    }
+
+    fn decode_abi_string(&self, hex_data: &str) -> Option<String> {
+        let data = hex::decode(hex_data).ok()?;
+        if data.len() < 64 {
+            return None;
+        }
+        let offset = u64::from_be_bytes(data[24..32].try_into().ok()?) as usize;
+        if data.len() < offset + 32 {
+            return None;
+        }
+        let len = u64::from_be_bytes(data[offset + 24..offset + 32].try_into().ok()?) as usize;
+        if data.len() < offset + 32 + len {
+            return None;
+        }
+        let bytes = &data[offset + 32..offset + 32 + len];
+        String::from_utf8(bytes.to_vec()).ok()
     }
 
     /// Calculate ENS namehash
