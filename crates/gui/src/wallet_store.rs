@@ -272,6 +272,10 @@ pub struct WalletStore {
 impl WalletStore {
     pub fn new() -> Result<Self> {
         let storage_path = default_storage_path()?;
+        Self::new_with_storage_path(storage_path)
+    }
+
+    pub fn new_with_storage_path(storage_path: PathBuf) -> Result<Self> {
         let mut store = Self {
             profiles: HashMap::new(),
             default_user: "user".to_string(),
@@ -432,10 +436,12 @@ impl WalletStore {
         let payload = serde_json::to_string_pretty(&stored)?;
         file.write_all(payload.as_bytes())?;
 
-        // Persist seeds into keyring
-        for profile in self.profiles.values() {
-            let entry = keyring_entry(&profile.id)?;
-            entry.set_password(&hex::encode(profile.seed))?;
+        // Persist seeds into keyring (disabled in tests; can prompt/hang and isn't hermetic).
+        if keyring_enabled() {
+            for profile in self.profiles.values() {
+                let entry = keyring_entry(&profile.id)?;
+                entry.set_password(&hex::encode(profile.seed))?;
+            }
         }
 
         Ok(())
@@ -446,9 +452,14 @@ impl WalletStore {
             let data = fs::read_to_string(&self.storage_path)?;
             let stored: Vec<StoredProfile> = serde_json::from_str(&data)?;
             for profile in stored {
-                let seed = match keyring_entry(&profile.id)?.get_password() {
-                    Ok(secret) => hex::decode(secret).unwrap_or_else(|_| generate_seed().unwrap().to_vec()),
-                    Err(_) => generate_seed()?.to_vec(),
+                let seed = if keyring_enabled() {
+                    match keyring_entry(&profile.id)?.get_password() {
+                        Ok(secret) => hex::decode(secret)
+                            .unwrap_or_else(|_| generate_seed().unwrap_or([0u8; 32]).to_vec()),
+                        Err(_) => generate_seed()?.to_vec(),
+                    }
+                } else {
+                    generate_seed()?.to_vec()
                 };
                 let mut wallet_profile = WalletProfile::from_seed(
                     profile.owner.clone(),
@@ -496,6 +507,13 @@ fn keyring_entry(id: &str) -> Result<Entry> {
     Entry::new("advatar-browser-wallet", id).map_err(|e| anyhow!("keyring error: {}", e))
 }
 
+fn keyring_enabled() -> bool {
+    if cfg!(test) {
+        return false;
+    }
+    std::env::var_os("ADVATAR_DISABLE_KEYRING").is_none()
+}
+
 fn generate_seed() -> Result<[u8; 32]> {
     let mut seed = [0u8; 32];
     let mut rng = rand::rngs::OsRng;
@@ -515,17 +533,32 @@ struct StoredProfile {
 mod tests {
     use super::*;
 
+    fn test_storage_path(suffix: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "advatar-wallet-store-test-{}-{}.json",
+            std::process::id(),
+            suffix
+        ));
+        path
+    }
+
     #[test]
     fn creates_user_wallet_with_default_key() {
-        let store = WalletStore::new().expect("wallet store should initialize");
+        let path = test_storage_path("user");
+        let _ = fs::remove_file(&path);
+        let store = WalletStore::new_with_storage_path(path.clone()).expect("wallet store should initialize");
         let snapshot = store.snapshot(&WalletOwner::User).expect("user snapshot");
         assert!(snapshot.is_initialized);
         assert!(snapshot.address.is_some());
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn enforces_policy_limits() {
-        let mut store = WalletStore::new().expect("wallet store should initialize");
+        let path = test_storage_path("limits");
+        let _ = fs::remove_file(&path);
+        let mut store = WalletStore::new_with_storage_path(path.clone()).expect("wallet store should initialize");
         let agent = WalletOwner::Agent("alpha".to_string());
         store.ensure_agent_profile("alpha").unwrap();
 
@@ -560,5 +593,7 @@ mod tests {
         let decision = store.evaluate_spend(&agent, 10, "btc").unwrap();
         assert!(!decision.permitted);
         assert!(decision.reason.unwrap().contains("chain"));
+
+        let _ = fs::remove_file(&path);
     }
 }
