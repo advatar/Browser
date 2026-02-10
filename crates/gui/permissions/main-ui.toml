@@ -17,6 +17,7 @@ commands.allow = [
   "agent_set_no_egress",
   "agent_resolve_approval",
   "navigate_to",
+  "set_content_bounds",
   "get_current_url",
 
   "get_settings",
@@ -68,4 +69,3 @@ commands.allow = [
   "afm_submit_task",
   "afm_feed_gossip",
 ]
-

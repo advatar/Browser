@@ -1,5 +1,4 @@
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
 
 use ai_agent::{McpTool, McpToolDescription, McpToolError, McpToolResult};
 use async_trait::async_trait;
@@ -11,17 +10,14 @@ use sha3::{Digest, Keccak256};
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use tauri::{AppHandle, Listener, Manager, WebviewWindow, Wry};
-use tokio::sync::oneshot;
-use tokio::time::timeout;
-use uuid::Uuid;
+use tauri::{AppHandle, Manager, Wry};
 
 use crate::agent::iproov::{CartMandate, IproovServices};
 use crate::app_state::AppState;
 use crate::browser_engine::BrowserEngine;
 use crate::wallet_store::{WalletOwner, WalletStore};
 
-const DOM_EVENT: &str = "agent://dom-query";
+const CONTENT_WEBVIEW_LABEL: &str = "content";
 
 fn build_description(name: &str, description: &str, schema: Value) -> McpToolDescription {
     McpToolDescription::new(name.to_string(), description.to_string(), schema)
@@ -96,16 +92,16 @@ impl NavigateTool {
             app_handle,
             description: build_description(
                 "browser.navigate",
-                "Navigate the primary webview to the provided URL",
+                "Navigate the content webview to the provided URL",
                 build_url_schema(),
             ),
         }
     }
 
-    fn resolve_webview(&self) -> Result<WebviewWindow<Wry>, McpToolError> {
+    fn resolve_webview(&self) -> Result<tauri::webview::Webview<Wry>, McpToolError> {
         self.app_handle
-            .get_webview_window("main")
-            .ok_or_else(|| McpToolError::Invocation("Main webview window is not available".into()))
+            .get_webview(CONTENT_WEBVIEW_LABEL)
+            .ok_or_else(|| McpToolError::Invocation("Content webview is not available".into()))
     }
 }
 
@@ -139,13 +135,23 @@ impl McpTool for NavigateTool {
             }
         }
 
-        let encoded_url = serde_json::to_string(&params.url).map_err(|e| {
-            McpToolError::Invocation(format!("url encoding failed: {e}"))
-        })?;
-        let script = format!("(function() {{ var frame = document.getElementById('webview'); if (frame) {{ frame.src = {encoded_url}; }} }})();");
+        if params.url.trim_start().to_ascii_lowercase().starts_with("about:") {
+            return Ok(McpToolResult {
+                content: json!({
+                    "status": "internal",
+                    "url": params.url,
+                    "new_tab": params.new_tab
+                }),
+                metadata: Default::default(),
+            });
+        }
+
+        let target = url::Url::parse(params.url.trim())
+            .or_else(|_| url::Url::parse(&format!("https://{}", params.url.trim())))
+            .map_err(|e| McpToolError::InvalidInput(format!("invalid url: {e}")))?;
 
         webview
-            .eval(&script)
+            .navigate(target)
             .map_err(|e| McpToolError::Invocation(format!("navigation failed: {e}")))?;
 
         Ok(McpToolResult {
@@ -171,7 +177,7 @@ impl DomQueryTool {
             app_handle,
             description: build_description(
                 "browser.dom_query",
-                "Query the active document inside the webview using a CSS selector",
+                "Query the active document using a CSS selector (not available for isolated native content webviews)",
                 build_dom_query_schema(),
             ),
         }
@@ -200,99 +206,14 @@ impl McpTool for DomQueryTool {
             ));
         }
 
-        let webview = self.app_handle.get_webview_window("main").ok_or_else(|| {
-            McpToolError::Invocation("Main webview window is not available".into())
-        })?;
-
-        let token = Uuid::new_v4().to_string();
-        let (tx, rx) = oneshot::channel();
-        let sender = Arc::new(StdMutex::new(Some(tx)));
-        let token_for_handler = token.clone();
-        let sender_for_handler = Arc::clone(&sender);
-
-        let listener_id = self.app_handle.listen_any(DOM_EVENT, move |event| {
-            if let Ok(value) = serde_json::from_str::<Value>(event.payload()) {
-                if value.get("token").and_then(|tok| tok.as_str())
-                    == Some(token_for_handler.as_str())
-                {
-                    if let Some(sender) = sender_for_handler.lock().unwrap().take() {
-                        let _ = sender.send(value.clone());
-                    }
-                }
-            }
-        });
-
-        let selector_js = serde_json::to_string(&params.selector)
-            .map_err(|e| McpToolError::Invocation(format!("selector encoding failed: {e}")))?;
-        let token_js = serde_json::to_string(&token)
-            .map_err(|e| McpToolError::Invocation(format!("token encoding failed: {e}")))?;
-        let event_js = serde_json::to_string(DOM_EVENT)
-            .map_err(|e| McpToolError::Invocation(format!("event encoding failed: {e}")))?;
-
-        let script = format!(
-            r#"(function() {{
-    const selector = {selector};
-    const token = {token};
-    const eventName = {event};
-    let results = [];
-    try {{
-        const frame = document.getElementById('webview');
-        const doc = frame && frame.contentDocument ? frame.contentDocument : null;
-        if (!doc) {{
-            window.__TAURI__.event.emit(eventName, {{ token, error: 'active document unavailable' }});
-            return;
-        }}
-        results = Array.from(doc.querySelectorAll(selector)).map((el) => {{
-            return {{
-                tag: el.tagName || '',
-                text: el.innerText || '',
-                html: el.outerHTML || '',
-                href: el.getAttribute('href'),
-                value: 'value' in el ? el.value : null
-            }};
-        }});
-    }} catch (err) {{
-        window.__TAURI__.event.emit(eventName, {{ token, error: String(err) }});
-        return;
-    }}
-    window.__TAURI__.event.emit(eventName, {{ token, data: results }});
-}})();"#,
-            selector = selector_js,
-            token = token_js,
-            event = event_js
-        );
-
-        webview
-            .eval(&script)
-            .map_err(|e| McpToolError::Invocation(format!("failed to run DOM query: {e}")))?;
-
-        let payload = timeout(Duration::from_secs(5), async { rx.await })
-            .await
-            .map_err(|_| McpToolError::Invocation("DOM query timed out".into()))
-            .and_then(|res| {
-                res.map_err(|_| McpToolError::Invocation("DOM query channel closed".into()))
-            })?;
-
-        self.app_handle.unlisten(listener_id);
-
-        if let Some(err) = payload.get("error").and_then(|v| v.as_str()) {
-            return Err(McpToolError::Invocation(err.to_string()));
-        }
-
-        let mut data = payload.get("data").cloned().unwrap_or(Value::Null);
-        if let Some(limit) = params.limit {
-            if let Some(arr) = data.as_array() {
-                data = Value::Array(arr.iter().take(limit).cloned().collect());
-            }
-        }
-
-        Ok(McpToolResult {
-            content: json!({
-                "selector": params.selector,
-                "matches": data,
-            }),
-            metadata: Default::default(),
-        })
+        // Web content is rendered in an isolated native child webview (no iframe and no IPC
+        // capabilities). That prevents us from safely extracting DOM data via JS + IPC.
+        //
+        // If we need this in the future, implement a dedicated DOM snapshot bridge with a tight
+        // allowlist and origin isolation.
+        Err(McpToolError::Invocation(
+            "DOM querying is not available for isolated native content webviews".into(),
+        ))
     }
 }
 

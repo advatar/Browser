@@ -1,7 +1,7 @@
 {
   "identifier": "main",
   "description": "Main window permissions for the local UI (and the Vite dev server during development). Remote web content must not receive IPC access.",
-  "windows": ["main"],
+  "webviews": ["main"],
   "remote": {
     "urls": [
       "http://localhost:5174/*",

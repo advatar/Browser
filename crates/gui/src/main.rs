@@ -35,6 +35,9 @@ use gui::telemetry::TelemetryManager;
 use gui::telemetry_commands::*;
 use gui::wallet_store::WalletStore;
 
+const MAIN_WEBVIEW_LABEL: &str = "main";
+const CONTENT_WEBVIEW_LABEL: &str = "content";
+
 fn log_path() -> PathBuf {
     let mut base = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -141,13 +144,35 @@ fn create_browser_window<R: Runtime>(
     let menu = create_main_menu(app)?;
 
     let webview =
-        WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        WebviewWindowBuilder::new(app, MAIN_WEBVIEW_LABEL, tauri::WebviewUrl::App("index.html".into()))
             .title("Decentralized Browser")
             .inner_size(1200.0, 800.0)
             .min_inner_size(800.0, 600.0)
             .menu(menu)
             .build()?;
     log_startup("create_browser_window: webview built");
+
+    // Create a child webview that will host the actual browsing content.
+    //
+    // IMPORTANT: this must not have any IPC capabilities. We enforce that by scoping capabilities
+    // to the `main` webview label (see `crates/gui/capabilities/main.json`).
+    let content_webview = {
+        use tauri::{LogicalPosition, LogicalSize};
+        use tauri::webview::WebviewBuilder;
+
+        let blank: url::Url = "about:blank".parse().unwrap_or_else(|_| {
+            // `about:blank` should always parse; fallback is a defensive last resort.
+            url::Url::parse("https://example.com").expect("fallback url parses")
+        });
+        let window = webview.as_ref().window();
+        let child = window.add_child(
+            WebviewBuilder::new(CONTENT_WEBVIEW_LABEL, tauri::WebviewUrl::External(blank)),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(0.0, 0.0),
+        )?;
+        let _ = child.hide();
+        child
+    };
 
     // Store the initial URL in the app state
     if let Some(state) = app.try_state::<AppState>() {
@@ -160,10 +185,13 @@ fn create_browser_window<R: Runtime>(
     #[cfg(debug_assertions)]
     webview.open_devtools();
 
-    // Setup menu event handlers
-    let webview_ = webview.clone();
+    // Setup menu event handlers.
+    let zoom_level = Arc::new(Mutex::new(1.0_f64));
+    let content_for_menu = content_webview.clone();
+    let zoom_for_menu = zoom_level.clone();
     webview.on_menu_event(move |_webview, event| {
-        let webview = webview_.clone();
+        let content_webview = content_for_menu.clone();
+        let zoom_level = zoom_for_menu.clone();
         tauri::async_runtime::spawn(async move {
             let id = event.id().as_ref();
             if id == "new_tab" {
@@ -172,22 +200,15 @@ fn create_browser_window<R: Runtime>(
                 println!("New window requested");
             } else if id == "settings" {
                 println!("Settings requested");
-            } else if id == "zoomin" {
-                if let Err(e) =
-                    webview.eval("document.getElementById('webview').setZoomLevel(0.5);")
-                {
-                    eprintln!("Zoom in failed: {}", e);
+            } else if id == "zoomin" || id == "zoomout" || id == "resetzoom" {
+                let mut level = zoom_level.lock().unwrap_or_else(|e| e.into_inner());
+                match id {
+                    "zoomin" => *level = (*level + 0.1).min(5.0),
+                    "zoomout" => *level = (*level - 0.1).max(0.2),
+                    _ => *level = 1.0,
                 }
-            } else if id == "zoomout" {
-                if let Err(e) =
-                    webview.eval("document.getElementById('webview').setZoomLevel(-0.5);")
-                {
-                    eprintln!("Zoom out failed: {}", e);
-                }
-            } else if id == "resetzoom" {
-                if let Err(e) = webview.eval("document.getElementById('webview').setZoomLevel(0);")
-                {
-                    eprintln!("Reset zoom failed: {}", e);
+                if let Err(e) = content_webview.set_zoom(*level) {
+                    eprintln!("Zoom update failed: {}", e);
                 }
             } else if id == "quit" {
                 std::process::exit(0);
@@ -330,6 +351,7 @@ fn main() {
             agent_set_no_egress,
             agent_resolve_approval,
             navigate_to,
+            set_content_bounds,
             get_current_url,
             // Settings
             get_settings,
@@ -583,11 +605,6 @@ async fn navigate_to<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let webview = match app_handle.get_webview_window("main") {
-        Some(webview) => webview,
-        None => return Err("Webview not found".to_string()),
-    };
-
     // Update the URL in app state
     if let Some(state) = app_handle.try_state::<AppState>() {
         if let Ok(mut current_url) = state.current_url.lock() {
@@ -595,14 +612,69 @@ async fn navigate_to<R: Runtime>(
         }
     }
 
-    // Execute navigation in the webview
-    // The React UI may render certain about:* pages natively and not include the iframe.
-    // Guard against missing element to avoid console errors.
-    let encoded_url =
-        serde_json::to_string(&url).map_err(|e| format!("Failed to encode url: {e}"))?;
-    let script = format!("(function() {{ var el = document.getElementById('webview'); if (el) {{ el.src = {encoded_url}; }} }})();");
-    if let Err(e) = webview.eval(&script) {
-        return Err(format!("Failed to navigate: {}", e));
+    // Internal pages are rendered by the main UI; do not navigate the content webview.
+    if url.trim_start().to_ascii_lowercase().starts_with("about:") {
+        return Ok(());
+    }
+
+    let content_webview = app_handle
+        .get_webview(CONTENT_WEBVIEW_LABEL)
+        .ok_or_else(|| "Content webview not found".to_string())?;
+
+    let target = url::Url::parse(url.trim())
+        .or_else(|_| url::Url::parse(&format!("https://{}", url.trim())))
+        .map_err(|e| format!("Invalid URL: {e}"))?;
+
+    content_webview
+        .navigate(target)
+        .map_err(|e| format!("Failed to navigate: {}", e))?;
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct ContentBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+// Tauri command to position and show/hide the content webview.
+//
+// The main UI measures its "content host" DOM rect and sends it here so we can
+// align the native child webview with the React layout.
+#[tauri::command]
+async fn set_content_bounds<R: Runtime>(
+    bounds: Option<ContentBounds>,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize, Position, Rect, Size};
+
+    let content_webview = app_handle
+        .get_webview(CONTENT_WEBVIEW_LABEL)
+        .ok_or_else(|| "Content webview not found".to_string())?;
+
+    match bounds {
+        Some(bounds) if bounds.width > 1.0 && bounds.height > 1.0 => {
+            let rect = Rect {
+                position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
+                size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
+            };
+
+            content_webview
+                .set_bounds(rect)
+                .map_err(|e| format!("Failed to set content bounds: {e}"))?;
+            content_webview
+                .show()
+                .map_err(|e| format!("Failed to show content webview: {e}"))?;
+        }
+        _ => {
+            content_webview
+                .hide()
+                .map_err(|e| format!("Failed to hide content webview: {e}"))?;
+        }
     }
 
     Ok(())
