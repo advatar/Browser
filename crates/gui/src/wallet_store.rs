@@ -97,8 +97,11 @@ impl WalletProfile {
         let seed = generate_seed()?;
         let mut profile = Self::from_seed(owner, label, policy, &seed)?;
         // Persist the seed to keyring for later restores.
-        let entry = keyring_entry(&profile.id)?;
-        entry.set_password(&hex::encode(seed))?;
+        // Disabled in tests (and optionally at runtime) because it can prompt/hang and isn't hermetic.
+        if keyring_enabled() {
+            let entry = keyring_entry(&profile.id)?;
+            entry.set_password(&hex::encode(seed))?;
+        }
         profile.ensure_default_key()?;
         Ok(profile)
     }
@@ -151,9 +154,11 @@ impl WalletProfile {
         self.wallet
             .set_default_key("default")
             .map_err(|e| anyhow!("{}", e))?;
-        // Update keyring with the new seed
-        let entry = keyring_entry(&self.id)?;
-        entry.set_password(&hex::encode(self.seed))?;
+        // Update keyring with the new seed (disabled in tests; see comment in `new`).
+        if keyring_enabled() {
+            let entry = keyring_entry(&self.id)?;
+            entry.set_password(&hex::encode(self.seed))?;
+        }
         Ok(())
     }
 
