@@ -1,0 +1,71 @@
+# App (GUI) permission manifest for the Tauri ACL system.
+#
+# This file defines which Rust `#[tauri::command]` functions the local UI is allowed to invoke.
+# Capability binding (which windows/webviews/origins get this permission) lives in `capabilities/`.
+
+[[permission]]
+identifier = "main-ui"
+description = "Allows the main UI to invoke application commands."
+commands.allow = [
+  "agent_list_tools",
+  "agent_run_task",
+  "list_agent_apps",
+  "launch_agent_app",
+  "agent_list_skills",
+  "agent_get_credits",
+  "agent_top_up_credits",
+  "agent_set_no_egress",
+  "agent_resolve_approval",
+  "navigate_to",
+  "get_current_url",
+
+  "get_settings",
+  "update_settings",
+  "list_mcp_servers",
+  "save_mcp_servers",
+  "test_mcp_server",
+  "list_mcp_profiles",
+  "set_active_mcp_profile",
+  "create_mcp_profile",
+  "import_mcp_profile",
+  "export_mcp_profile",
+  "read_mcp_secret",
+
+  "create_tab",
+  "close_tab",
+  "switch_tab",
+  "get_tabs",
+  "add_bookmark",
+  "get_bookmarks",
+  "remove_bookmark",
+  "get_history",
+  "clear_history",
+  "resolve_protocol_url",
+  "update_security_settings",
+  "get_security_status",
+
+  "report_error",
+  "track_usage",
+  "record_performance",
+  "get_error_summary",
+  "get_performance_summary",
+  "add_security_alert",
+  "check_for_updates",
+  "apply_update",
+  "export_telemetry",
+  "set_telemetry_enabled",
+
+  "get_wallet_info",
+  "connect_wallet",
+  "disconnect_wallet",
+  "get_agent_wallet",
+  "set_agent_wallet_policy",
+  "evaluate_agent_spend",
+
+  "start_afm_node",
+  "stop_afm_node",
+  "afm_node_status",
+  "afm_submit_task",
+  "afm_feed_gossip",
+]
+
