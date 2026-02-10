@@ -331,7 +331,6 @@ fn main() {
             agent_resolve_approval,
             navigate_to,
             get_current_url,
-            execute_script,
             // Settings
             get_settings,
             update_settings,
@@ -599,10 +598,9 @@ async fn navigate_to<R: Runtime>(
     // Execute navigation in the webview
     // The React UI may render certain about:* pages natively and not include the iframe.
     // Guard against missing element to avoid console errors.
-    let script = format!(
-        "(function() {{ var el = document.getElementById('webview'); if (el) {{ el.src = '{}'; }} }})();",
-        url
-    );
+    let encoded_url =
+        serde_json::to_string(&url).map_err(|e| format!("Failed to encode url: {e}"))?;
+    let script = format!("(function() {{ var el = document.getElementById('webview'); if (el) {{ el.src = {encoded_url}; }} }})();");
     if let Err(e) = webview.eval(&script) {
         return Err(format!("Failed to navigate: {}", e));
     }
@@ -622,25 +620,6 @@ async fn get_current_url<R: Runtime>(
         }
     }
     Ok("about:home".to_string())
-}
-
-// Tauri command to execute JavaScript in the webview
-#[tauri::command]
-async fn execute_script<R: Runtime>(
-    script: String,
-    _window: tauri::Window<R>,
-    app_handle: tauri::AppHandle<R>,
-) -> Result<(), String> {
-    let webview = match app_handle.get_webview_window("main") {
-        Some(webview) => webview,
-        None => return Err("Webview not found".to_string()),
-    };
-
-    if let Err(e) = webview.eval(&script) {
-        return Err(format!("Failed to execute script: {}", e));
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

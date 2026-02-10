@@ -139,10 +139,10 @@ impl McpTool for NavigateTool {
             }
         }
 
-        let script = format!(
-            "(function() {{ var frame = document.getElementById('webview'); if (frame) {{ frame.src = '{}'; }} }})();",
-            params.url
-        );
+        let encoded_url = serde_json::to_string(&params.url).map_err(|e| {
+            McpToolError::Invocation(format!("url encoding failed: {e}"))
+        })?;
+        let script = format!("(function() {{ var frame = document.getElementById('webview'); if (frame) {{ frame.src = {encoded_url}; }} }})();");
 
         webview
             .eval(&script)
