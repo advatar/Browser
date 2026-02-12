@@ -13,6 +13,10 @@ commands:
     description: Install and build the GUI frontend (Vite).
     cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run build
 
+  - name: build_legacy_frontend_placeholder
+    description: Build the deprecated placeholder frontend in crates/gui (sanity only).
+    cmd: npm --prefix crates/gui run build
+
   - name: build_gui_release
     description: Build the Tauri GUI in release mode (bundles all default artifacts).
     cmd: make build

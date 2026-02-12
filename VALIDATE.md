@@ -6,9 +6,12 @@
 # Rust unit + integration tests for the GUI crate
 cargo test -p gui
 
-# Frontend build (Vite)
+# Runtime frontend build (Vite)
 npm --prefix orbit-shell-ui ci
 npm --prefix orbit-shell-ui run build
+
+# Legacy placeholder frontend still compiles
+npm --prefix crates/gui run build
 ```
 
 ## DMG Packaging (macOS)

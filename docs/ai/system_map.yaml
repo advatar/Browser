@@ -20,6 +20,11 @@ components:
         - content_go_forward
         - content_reload
         - content_stop
+    legacy_frontend:
+      status: deprecated
+      placeholder: crates/gui/src/index.html
+      removed_paths:
+        - crates/gui/src/js
     depends_on:
       - orbit_shell_ui
       - llm_router_lib

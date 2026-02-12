@@ -56,7 +56,7 @@ cargo tauri dev
 
 - `src/` - Main application source code
   - `main.rs` - Application entry point and Tauri setup
-  - `index.html` - Main browser UI
+  - `tauri.conf.json` points runtime UI to `../../orbit-shell-ui/dist` (React frontend)
 - `tauri.conf.json` - Tauri configuration
 - `Cargo.toml` - Rust dependencies and package configuration
 
