@@ -9,9 +9,9 @@ commands:
     description: Run Rust unit + integration tests for the Tauri GUI crate.
     cmd: cargo test -p gui
 
-  - name: test_frontend_gui
-    description: Run GUI frontend unit tests (Vitest).
-    cmd: npm --prefix crates/gui test
+  - name: build_frontend_gui
+    description: Install and build the GUI frontend (Vite).
+    cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run build
 
   - name: build_gui_release
     description: Build the Tauri GUI in release mode (bundles all default artifacts).

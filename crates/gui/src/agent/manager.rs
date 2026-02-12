@@ -155,9 +155,7 @@ impl AgentManager {
             no_egress: self.no_egress.load(Ordering::SeqCst),
             ..RoutingPolicy::default()
         };
-        let (runtime, _) = self
-            .build_runtime(None, policy, WalletOwner::User)
-            .await?;
+        let (runtime, _) = self.build_runtime(None, policy, WalletOwner::User).await?;
         Ok(runtime.tool_descriptions())
     }
 
@@ -200,7 +198,8 @@ impl AgentManager {
             store.ensure_agent_profile(&agent_id)?;
         }
 
-        let (mut runtime, metered_model) = self.build_runtime(skill_ref, policy, wallet_owner).await?;
+        let (mut runtime, metered_model) =
+            self.build_runtime(skill_ref, policy, wallet_owner).await?;
         metered_model.reset();
 
         let AgentRuntimeResult { agent, ledger_root } = runtime.run(&request.task).await?;

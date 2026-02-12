@@ -25,7 +25,7 @@ use gui::agent::{
     CreditSnapshot, McpServerRegistry,
 };
 use gui::agent_apps::{AgentAppRegistry, AgentAppSummary};
-use gui::app_state::AppState;
+use gui::app_state::{AppState, ContentWebviewBounds};
 use gui::browser_engine::BrowserEngine;
 use gui::commands::*;
 use gui::mcp_profiles::McpConfigService;
@@ -36,7 +36,7 @@ use gui::telemetry_commands::*;
 use gui::wallet_store::WalletStore;
 
 const MAIN_WEBVIEW_LABEL: &str = "main";
-const CONTENT_WEBVIEW_LABEL: &str = "content";
+const CONTENT_WEBVIEW_PREFIX: &str = "content-tab-";
 
 fn log_path() -> PathBuf {
     let mut base = std::env::var_os("HOME")
@@ -65,6 +65,247 @@ fn chrono_like_timestamp() -> String {
     }
 }
 
+fn is_internal_url(url: &str) -> bool {
+    url.trim_start().to_ascii_lowercase().starts_with("about:")
+}
+
+fn parse_external_url(url: &str) -> Result<url::Url, String> {
+    url::Url::parse(url.trim())
+        .or_else(|_| url::Url::parse(&format!("https://{}", url.trim())))
+        .map_err(|e| format!("Invalid URL: {e}"))
+}
+
+fn tab_webview_label(tab_id: &str) -> String {
+    let sanitized = tab_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("{CONTENT_WEBVIEW_PREFIX}{sanitized}")
+}
+
+fn read_tab_label(state: &AppState, tab_id: &str) -> Result<Option<String>, String> {
+    state
+        .content_tab_webviews
+        .lock()
+        .map_err(|_| "content webview map mutex poisoned".to_string())
+        .map(|map| map.get(tab_id).cloned())
+}
+
+fn active_tab_id(state: &AppState) -> Result<Option<String>, String> {
+    state
+        .active_content_tab
+        .lock()
+        .map_err(|_| "active tab mutex poisoned".to_string())
+        .map(|active| active.clone())
+}
+
+fn ensure_tab_webview<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    tab_id: &str,
+    initial_url: Option<&str>,
+) -> Result<tauri::webview::Webview<R>, String> {
+    use tauri::webview::WebviewBuilder;
+    use tauri::{LogicalPosition, LogicalSize};
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    let existing_label = read_tab_label(&state, tab_id)?;
+    if let Some(existing_label) = &existing_label {
+        if let Some(existing) = app_handle.get_webview(existing_label) {
+            return Ok(existing);
+        }
+    }
+
+    let label = existing_label.unwrap_or_else(|| tab_webview_label(tab_id));
+
+    let initial_webview_url = if let Some(url) = initial_url {
+        if is_internal_url(url) {
+            tauri::WebviewUrl::External(
+                url::Url::parse("about:blank")
+                    .map_err(|e| format!("Failed to parse about:blank URL: {e}"))?,
+            )
+        } else {
+            tauri::WebviewUrl::External(parse_external_url(url)?)
+        }
+    } else {
+        tauri::WebviewUrl::External(
+            url::Url::parse("about:blank")
+                .map_err(|e| format!("Failed to parse about:blank URL: {e}"))?,
+        )
+    };
+
+    let window = app_handle
+        .get_webview_window(MAIN_WEBVIEW_LABEL)
+        .ok_or_else(|| "Main webview window not found".to_string())?
+        .as_ref()
+        .window();
+
+    let child = window
+        .add_child(
+            WebviewBuilder::new(&label, initial_webview_url),
+            LogicalPosition::new(0.0, 0.0),
+            LogicalSize::new(0.0, 0.0),
+        )
+        .map_err(|e| format!("Failed to create tab webview: {e}"))?;
+
+    let _ = child.hide();
+
+    if let Ok(mut map) = state.content_tab_webviews.lock() {
+        map.insert(tab_id.to_string(), label);
+    }
+
+    Ok(child)
+}
+
+fn active_tab_webview<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<Option<tauri::webview::Webview<R>>, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    let Some(active_tab_id) = active_tab_id(&state)? else {
+        return Ok(None);
+    };
+
+    let Some(label) = read_tab_label(&state, &active_tab_id)? else {
+        return Ok(None);
+    };
+
+    Ok(app_handle.get_webview(&label))
+}
+
+fn apply_bounds_to_active_webview<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize, Position, Rect, Size};
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    let Some(active_tab_id) = active_tab_id(&state)? else {
+        return Ok(());
+    };
+    let Some(label) = read_tab_label(&state, &active_tab_id)? else {
+        return Ok(());
+    };
+    let Some(webview) = app_handle.get_webview(&label) else {
+        return Ok(());
+    };
+
+    let bounds = state
+        .content_bounds
+        .lock()
+        .map_err(|_| "content bounds mutex poisoned".to_string())?
+        .as_ref()
+        .copied();
+
+    match bounds {
+        Some(bounds) if bounds.is_visible() => {
+            let rect = Rect {
+                position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
+                size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
+            };
+            webview
+                .set_bounds(rect)
+                .map_err(|e| format!("Failed to set content bounds: {e}"))?;
+            webview
+                .show()
+                .map_err(|e| format!("Failed to show content webview: {e}"))?;
+        }
+        _ => {
+            webview
+                .hide()
+                .map_err(|e| format!("Failed to hide content webview: {e}"))?;
+        }
+    }
+
+    Ok(())
+}
+fn create_browser_window<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    url: Option<&str>,
+) -> tauri::Result<()> {
+    log_startup("create_browser_window: start");
+    let initial_url = url.unwrap_or("about:home");
+
+    // Create the menu first
+    let menu = create_main_menu(app)?;
+
+    let webview = WebviewWindowBuilder::new(
+        app,
+        MAIN_WEBVIEW_LABEL,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Decentralized Browser")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .menu(menu)
+    .build()?;
+    log_startup("create_browser_window: webview built");
+
+    // Store the initial URL in the app state
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Ok(mut current_url) = state.current_url.lock() {
+            *current_url = initial_url.to_string();
+        }
+    }
+
+    // Enable dev tools in debug mode
+    #[cfg(debug_assertions)]
+    webview.open_devtools();
+
+    // Setup menu event handlers.
+    let zoom_level = Arc::new(Mutex::new(1.0_f64));
+    let app_handle = app.clone();
+    let zoom_for_menu = zoom_level.clone();
+    webview.on_menu_event(move |_webview, event| {
+        let app_handle = app_handle.clone();
+        let zoom_level = zoom_for_menu.clone();
+        tauri::async_runtime::spawn(async move {
+            let id = event.id().as_ref();
+            if id == "new_tab" {
+                println!("New tab requested");
+            } else if id == "new_window" {
+                println!("New window requested");
+            } else if id == "settings" {
+                println!("Settings requested");
+            } else if id == "zoomin" || id == "zoomout" || id == "resetzoom" {
+                let mut level = zoom_level.lock().unwrap_or_else(|e| e.into_inner());
+                match id {
+                    "zoomin" => *level = (*level + 0.1).min(5.0),
+                    "zoomout" => *level = (*level - 0.1).max(0.2),
+                    _ => *level = 1.0,
+                }
+
+                match active_tab_webview(&app_handle) {
+                    Ok(Some(webview)) => {
+                        if let Err(e) = webview.set_zoom(*level) {
+                            eprintln!("Zoom update failed: {}", e);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        eprintln!("Failed to resolve active tab webview for zoom: {err}");
+                    }
+                }
+            } else if id == "quit" {
+                std::process::exit(0);
+            }
+        });
+    });
+
+    Ok(())
+}
 fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> {
     log_startup("create_main_menu: start");
     // Create menu items
@@ -133,92 +374,6 @@ fn create_main_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Men
     Ok(menu)
 }
 
-fn create_browser_window<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    url: Option<&str>,
-) -> tauri::Result<()> {
-    log_startup("create_browser_window: start");
-    let initial_url = url.unwrap_or("about:home");
-
-    // Create the menu first
-    let menu = create_main_menu(app)?;
-
-    let webview =
-        WebviewWindowBuilder::new(app, MAIN_WEBVIEW_LABEL, tauri::WebviewUrl::App("index.html".into()))
-            .title("Decentralized Browser")
-            .inner_size(1200.0, 800.0)
-            .min_inner_size(800.0, 600.0)
-            .menu(menu)
-            .build()?;
-    log_startup("create_browser_window: webview built");
-
-    // Create a child webview that will host the actual browsing content.
-    //
-    // IMPORTANT: this must not have any IPC capabilities. We enforce that by scoping capabilities
-    // to the `main` webview label (see `crates/gui/capabilities/main.json`).
-    let content_webview = {
-        use tauri::{LogicalPosition, LogicalSize};
-        use tauri::webview::WebviewBuilder;
-
-        let blank: url::Url = "about:blank".parse().unwrap_or_else(|_| {
-            // `about:blank` should always parse; fallback is a defensive last resort.
-            url::Url::parse("https://example.com").expect("fallback url parses")
-        });
-        let window = webview.as_ref().window();
-        let child = window.add_child(
-            WebviewBuilder::new(CONTENT_WEBVIEW_LABEL, tauri::WebviewUrl::External(blank)),
-            LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(0.0, 0.0),
-        )?;
-        let _ = child.hide();
-        child
-    };
-
-    // Store the initial URL in the app state
-    if let Some(state) = app.try_state::<AppState>() {
-        if let Ok(mut current_url) = state.current_url.lock() {
-            *current_url = initial_url.to_string();
-        }
-    }
-
-    // Enable dev tools in debug mode
-    #[cfg(debug_assertions)]
-    webview.open_devtools();
-
-    // Setup menu event handlers.
-    let zoom_level = Arc::new(Mutex::new(1.0_f64));
-    let content_for_menu = content_webview.clone();
-    let zoom_for_menu = zoom_level.clone();
-    webview.on_menu_event(move |_webview, event| {
-        let content_webview = content_for_menu.clone();
-        let zoom_level = zoom_for_menu.clone();
-        tauri::async_runtime::spawn(async move {
-            let id = event.id().as_ref();
-            if id == "new_tab" {
-                println!("New tab requested");
-            } else if id == "new_window" {
-                println!("New window requested");
-            } else if id == "settings" {
-                println!("Settings requested");
-            } else if id == "zoomin" || id == "zoomout" || id == "resetzoom" {
-                let mut level = zoom_level.lock().unwrap_or_else(|e| e.into_inner());
-                match id {
-                    "zoomin" => *level = (*level + 0.1).min(5.0),
-                    "zoomout" => *level = (*level - 0.1).max(0.2),
-                    _ => *level = 1.0,
-                }
-                if let Err(e) = content_webview.set_zoom(*level) {
-                    eprintln!("Zoom update failed: {}", e);
-                }
-            } else if id == "quit" {
-                std::process::exit(0);
-            }
-        });
-    });
-
-    Ok(())
-}
-
 fn main() {
     // Install a panic hook to capture early panics to our log file
     std::panic::set_hook(Box::new(|info| {
@@ -271,11 +426,16 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             current_url: Mutex::new("about:home".to_string()),
+            content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
+            active_content_tab: Mutex::new(None),
+            content_bounds: Mutex::new(None),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
-            wallet_store: Arc::new(Mutex::new(WalletStore::new().unwrap_or_else(|_| WalletStore::default()))),
+            wallet_store: Arc::new(Mutex::new(
+                WalletStore::new().unwrap_or_else(|_| WalletStore::default()),
+            )),
             agent_manager: Arc::new(AsyncMutex::new(None)),
             approval_broker: approval_broker.clone(),
             afm_node_controller: Arc::new(AsyncMutex::new(None)),
@@ -350,8 +510,14 @@ fn main() {
             agent_top_up_credits,
             agent_set_no_egress,
             agent_resolve_approval,
+            activate_tab_webview,
+            close_tab_webview,
             navigate_to,
             set_content_bounds,
+            content_go_back,
+            content_go_forward,
+            content_reload,
+            content_stop,
             get_current_url,
             // Settings
             get_settings,
@@ -598,36 +764,168 @@ async fn agent_resolve_approval<R: Runtime>(
         .map_err(|err| err.to_string())
 }
 
-// Tauri command to navigate to a URL
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivateTabWebviewRequest {
+    tab_id: String,
+    #[serde(default)]
+    initial_url: Option<String>,
+}
+
 #[tauri::command]
-async fn navigate_to<R: Runtime>(
-    url: String,
+async fn activate_tab_webview<R: Runtime>(
+    request: ActivateTabWebviewRequest,
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    // Update the URL in app state
-    if let Some(state) = app_handle.try_state::<AppState>() {
+    let tab_id = request.tab_id.trim();
+    if tab_id.is_empty() {
+        return Err("tab_id must not be empty".to_string());
+    }
+
+    ensure_tab_webview(&app_handle, tab_id, request.initial_url.as_deref())?;
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    if let Some(url) = &request.initial_url {
         if let Ok(mut current_url) = state.current_url.lock() {
             *current_url = url.clone();
         }
     }
 
-    // Internal pages are rendered by the main UI; do not navigate the content webview.
-    if url.trim_start().to_ascii_lowercase().starts_with("about:") {
+    let labels_to_hide = state
+        .content_tab_webviews
+        .lock()
+        .map_err(|_| "content webview map mutex poisoned".to_string())?
+        .iter()
+        .filter(|(id, _)| id.as_str() != tab_id)
+        .map(|(_, label)| label.clone())
+        .collect::<Vec<_>>();
+
+    state
+        .active_content_tab
+        .lock()
+        .map_err(|_| "active tab mutex poisoned".to_string())?
+        .replace(tab_id.to_string());
+
+    for label in labels_to_hide {
+        if let Some(webview) = app_handle.get_webview(&label) {
+            let _ = webview.hide();
+        }
+    }
+
+    apply_bounds_to_active_webview(&app_handle)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloseTabWebviewRequest {
+    tab_id: String,
+}
+
+#[tauri::command]
+async fn close_tab_webview<R: Runtime>(
+    request: CloseTabWebviewRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let tab_id = request.tab_id.trim();
+    if tab_id.is_empty() {
+        return Err("tab_id must not be empty".to_string());
+    }
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    let removed_label = state
+        .content_tab_webviews
+        .lock()
+        .map_err(|_| "content webview map mutex poisoned".to_string())?
+        .remove(tab_id);
+
+    let was_active = state
+        .active_content_tab
+        .lock()
+        .map_err(|_| "active tab mutex poisoned".to_string())?
+        .as_ref()
+        .map(|id| id == tab_id)
+        .unwrap_or(false);
+
+    if was_active {
+        state
+            .active_content_tab
+            .lock()
+            .map_err(|_| "active tab mutex poisoned".to_string())?
+            .take();
+    }
+
+    if let Some(label) = removed_label {
+        if let Some(webview) = app_handle.get_webview(&label) {
+            webview
+                .close()
+                .map_err(|e| format!("Failed to close tab webview: {e}"))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NavigateToRequest {
+    url: String,
+    #[serde(default)]
+    tab_id: Option<String>,
+}
+
+// Tauri command to navigate a tab webview to a URL.
+#[tauri::command]
+async fn navigate_to<R: Runtime>(
+    request: NavigateToRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if request.url.trim().is_empty() {
+        return Err("url must not be empty".to_string());
+    }
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    if let Ok(mut current_url) = state.current_url.lock() {
+        *current_url = request.url.clone();
+    }
+
+    let target_tab_id = if let Some(tab_id) = request.tab_id.as_ref() {
+        if tab_id.trim().is_empty() {
+            return Err("tab_id must not be empty".to_string());
+        }
+        tab_id.trim().to_string()
+    } else {
+        active_tab_id(&state)?.ok_or_else(|| "No active tab webview available".to_string())?
+    };
+
+    let active_tab = active_tab_id(&state)?;
+
+    let webview = ensure_tab_webview(&app_handle, &target_tab_id, Some(&request.url))?;
+
+    if is_internal_url(&request.url) {
         return Ok(());
     }
 
-    let content_webview = app_handle
-        .get_webview(CONTENT_WEBVIEW_LABEL)
-        .ok_or_else(|| "Content webview not found".to_string())?;
+    let target = parse_external_url(&request.url)?;
 
-    let target = url::Url::parse(url.trim())
-        .or_else(|_| url::Url::parse(&format!("https://{}", url.trim())))
-        .map_err(|e| format!("Invalid URL: {e}"))?;
-
-    content_webview
+    webview
         .navigate(target)
-        .map_err(|e| format!("Failed to navigate: {}", e))?;
+        .map_err(|e| format!("Failed to navigate: {e}"))?;
+
+    if active_tab.as_deref() == Some(target_tab_id.as_str()) {
+        apply_bounds_to_active_webview(&app_handle)?;
+    }
 
     Ok(())
 }
@@ -640,46 +938,137 @@ struct ContentBounds {
     height: f64,
 }
 
-// Tauri command to position and show/hide the content webview.
-//
-// The main UI measures its "content host" DOM rect and sends it here so we can
-// align the native child webview with the React layout.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetContentBoundsRequest {
+    bounds: Option<ContentBounds>,
+    #[serde(default)]
+    tab_id: Option<String>,
+}
+
+// Tauri command to position and show/hide the active content webview.
 #[tauri::command]
 async fn set_content_bounds<R: Runtime>(
-    bounds: Option<ContentBounds>,
+    request: SetContentBoundsRequest,
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    use tauri::{LogicalPosition, LogicalSize, Position, Rect, Size};
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
 
-    let content_webview = app_handle
-        .get_webview(CONTENT_WEBVIEW_LABEL)
-        .ok_or_else(|| "Content webview not found".to_string())?;
-
-    match bounds {
-        Some(bounds) if bounds.width > 1.0 && bounds.height > 1.0 => {
-            let rect = Rect {
-                position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
-                size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
-            };
-
-            content_webview
-                .set_bounds(rect)
-                .map_err(|e| format!("Failed to set content bounds: {e}"))?;
-            content_webview
-                .show()
-                .map_err(|e| format!("Failed to show content webview: {e}"))?;
+    if let Some(tab_id) = request.tab_id.as_ref() {
+        if tab_id.trim().is_empty() {
+            return Err("tab_id must not be empty".to_string());
         }
-        _ => {
-            content_webview
-                .hide()
-                .map_err(|e| format!("Failed to hide content webview: {e}"))?;
+
+        ensure_tab_webview(&app_handle, tab_id.trim(), None)?;
+        state
+            .active_content_tab
+            .lock()
+            .map_err(|_| "active tab mutex poisoned".to_string())?
+            .replace(tab_id.trim().to_string());
+    }
+
+    let converted = request.bounds.map(|bounds| ContentWebviewBounds {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+    });
+
+    {
+        let mut bounds_slot = state
+            .content_bounds
+            .lock()
+            .map_err(|_| "content bounds mutex poisoned".to_string())?;
+        *bounds_slot = converted;
+    };
+
+    apply_bounds_to_active_webview(&app_handle)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TabScopedRequest {
+    #[serde(default)]
+    tab_id: Option<String>,
+}
+
+fn resolve_scoped_webview<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    request: &TabScopedRequest,
+) -> Result<Option<tauri::webview::Webview<R>>, String> {
+    if let Some(tab_id) = request.tab_id.as_ref() {
+        if tab_id.trim().is_empty() {
+            return Err("tab_id must not be empty".to_string());
         }
+
+        return Ok(Some(ensure_tab_webview(app_handle, tab_id.trim(), None)?));
+    }
+
+    active_tab_webview(app_handle)
+}
+
+#[tauri::command]
+async fn content_go_back<R: Runtime>(
+    request: TabScopedRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
+        webview
+            .eval("history.back();")
+            .map_err(|e| format!("Failed to go back: {e}"))?;
     }
 
     Ok(())
 }
 
+#[tauri::command]
+async fn content_go_forward<R: Runtime>(
+    request: TabScopedRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
+        webview
+            .eval("history.forward();")
+            .map_err(|e| format!("Failed to go forward: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn content_reload<R: Runtime>(
+    request: TabScopedRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
+        webview
+            .reload()
+            .map_err(|e| format!("Failed to reload: {e}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn content_stop<R: Runtime>(
+    request: TabScopedRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
+        webview
+            .eval("window.stop();")
+            .map_err(|e| format!("Failed to stop loading: {e}"))?;
+    }
+
+    Ok(())
+}
 // Tauri command to get the current URL
 #[tauri::command]
 async fn get_current_url<R: Runtime>(
@@ -710,11 +1099,16 @@ mod tests {
         );
         let state = AppState {
             current_url: Mutex::new("https://example.com".to_string()),
+            content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
+            active_content_tab: Mutex::new(None),
+            content_bounds: Mutex::new(None),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
-            wallet_store: Arc::new(Mutex::new(WalletStore::new().unwrap_or_else(|_| WalletStore::default()))),
+            wallet_store: Arc::new(Mutex::new(
+                WalletStore::new().unwrap_or_else(|_| WalletStore::default()),
+            )),
             agent_manager: Arc::new(AsyncMutex::new(None)),
             approval_broker: ApprovalBroker::new(),
             afm_node_controller: Arc::new(AsyncMutex::new(None)),

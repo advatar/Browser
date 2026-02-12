@@ -135,6 +135,9 @@ mod tests {
             });
         let state = AppState {
             current_url: Mutex::new(String::new()),
+            content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
+            active_content_tab: Mutex::new(None),
+            content_bounds: Mutex::new(None),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),

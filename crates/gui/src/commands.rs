@@ -181,7 +181,9 @@ pub async fn get_security_status<R: Runtime>(
         is_secure,
         certificate_valid: security_manager.certificate_status_for_url(&url, is_secure),
         privacy_settings: security_manager.privacy_settings.clone(),
-        blocked_requests: security_manager.blocked_request_count().min(u32::MAX as u64) as u32,
+        blocked_requests: security_manager
+            .blocked_request_count()
+            .min(u32::MAX as u64) as u32,
     })
 }
 
@@ -284,9 +286,7 @@ pub fn get_wallet_info<R: Runtime>(
 ) -> Result<WalletInfo, String> {
     let snapshot = {
         let mut store = state.wallet_store.lock().map_err(|e| e.to_string())?;
-        store
-            .ensure_user_profile()
-            .map_err(|e| e.to_string())?;
+        store.ensure_user_profile().map_err(|e| e.to_string())?;
         store
             .snapshot(&WalletOwner::User)
             .ok_or_else(|| "wallet snapshot unavailable".to_string())?

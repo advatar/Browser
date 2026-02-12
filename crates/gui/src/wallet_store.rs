@@ -106,7 +106,12 @@ impl WalletProfile {
         Ok(profile)
     }
 
-    fn from_seed(owner: WalletOwner, label: String, policy: WalletPolicy, seed: &[u8]) -> Result<Self> {
+    fn from_seed(
+        owner: WalletOwner,
+        label: String,
+        policy: WalletPolicy,
+        seed: &[u8],
+    ) -> Result<Self> {
         let mut profile = Self {
             id: owner.key(),
             owner,
@@ -227,10 +232,7 @@ impl WalletProfile {
             if let Some(max) = self.policy.max_per_tx {
                 if amount > max {
                     permitted = false;
-                    reason = Some(format!(
-                        "amount {} exceeds per-tx limit of {}",
-                        amount, max
-                    ));
+                    reason = Some(format!("amount {} exceeds per-tx limit of {}", amount, max));
                 }
             }
         }
@@ -294,7 +296,11 @@ impl WalletStore {
     pub fn ensure_user_profile(&mut self) -> Result<WalletSnapshot> {
         let key = self.default_user.clone();
         if !self.profiles.contains_key(&key) {
-            let profile = WalletProfile::new(WalletOwner::User, "User Wallet".to_string(), WalletPolicy::default())?;
+            let profile = WalletProfile::new(
+                WalletOwner::User,
+                "User Wallet".to_string(),
+                WalletPolicy::default(),
+            )?;
             self.profiles.insert(key.clone(), profile);
             self.persist()?;
         }
@@ -309,7 +315,8 @@ impl WalletStore {
         let owner = WalletOwner::Agent(agent_id.to_string());
         let key = owner.key();
         if !self.profiles.contains_key(&key) {
-            let profile = WalletProfile::new(owner.clone(), owner.label(), WalletPolicy::default())?;
+            let profile =
+                WalletProfile::new(owner.clone(), owner.label(), WalletPolicy::default())?;
             self.profiles.insert(key.clone(), profile);
             self.persist()?;
         }
@@ -356,7 +363,11 @@ impl WalletStore {
         self.profiles.get(id).map(|p| p.snapshot())
     }
 
-    pub fn set_policy(&mut self, owner: WalletOwner, policy: WalletPolicy) -> Result<WalletSnapshot> {
+    pub fn set_policy(
+        &mut self,
+        owner: WalletOwner,
+        policy: WalletPolicy,
+    ) -> Result<WalletSnapshot> {
         let key = owner.key();
         let snapshot = {
             let profile = self
@@ -370,7 +381,12 @@ impl WalletStore {
         Ok(snapshot)
     }
 
-    pub fn evaluate_spend(&mut self, owner: &WalletOwner, amount: u128, chain: &str) -> Result<SpendDecision> {
+    pub fn evaluate_spend(
+        &mut self,
+        owner: &WalletOwner,
+        amount: u128,
+        chain: &str,
+    ) -> Result<SpendDecision> {
         let key = owner.key();
         let decision = {
             let profile = self
@@ -384,7 +400,11 @@ impl WalletStore {
         Ok(decision)
     }
 
-    pub fn sign_payload(&mut self, owner: &WalletOwner, payload: &[u8]) -> Result<(String, Vec<u8>)> {
+    pub fn sign_payload(
+        &mut self,
+        owner: &WalletOwner,
+        payload: &[u8],
+    ) -> Result<(String, Vec<u8>)> {
         let key = owner.key();
         let (address, signature) = {
             let profile = self
@@ -479,7 +499,11 @@ impl WalletStore {
         }
 
         if !self.profiles.contains_key(&self.default_user) {
-            let profile = WalletProfile::new(WalletOwner::User, "User Wallet".to_string(), WalletPolicy::default())?;
+            let profile = WalletProfile::new(
+                WalletOwner::User,
+                "User Wallet".to_string(),
+                WalletPolicy::default(),
+            )?;
             self.profiles.insert(self.default_user.clone(), profile);
             self.persist()?;
         }
@@ -552,7 +576,8 @@ mod tests {
     fn creates_user_wallet_with_default_key() {
         let path = test_storage_path("user");
         let _ = fs::remove_file(&path);
-        let store = WalletStore::new_with_storage_path(path.clone()).expect("wallet store should initialize");
+        let store = WalletStore::new_with_storage_path(path.clone())
+            .expect("wallet store should initialize");
         let snapshot = store.snapshot(&WalletOwner::User).expect("user snapshot");
         assert!(snapshot.is_initialized);
         assert!(snapshot.address.is_some());
@@ -563,7 +588,8 @@ mod tests {
     fn enforces_policy_limits() {
         let path = test_storage_path("limits");
         let _ = fs::remove_file(&path);
-        let mut store = WalletStore::new_with_storage_path(path.clone()).expect("wallet store should initialize");
+        let mut store = WalletStore::new_with_storage_path(path.clone())
+            .expect("wallet store should initialize");
         let agent = WalletOwner::Agent("alpha".to_string());
         store.ensure_agent_profile("alpha").unwrap();
 

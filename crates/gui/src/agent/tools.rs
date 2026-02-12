@@ -17,8 +17,6 @@ use crate::app_state::AppState;
 use crate::browser_engine::BrowserEngine;
 use crate::wallet_store::{WalletOwner, WalletStore};
 
-const CONTENT_WEBVIEW_LABEL: &str = "content";
-
 fn build_description(name: &str, description: &str, schema: Value) -> McpToolDescription {
     McpToolDescription::new(name.to_string(), description.to_string(), schema)
 }
@@ -99,9 +97,33 @@ impl NavigateTool {
     }
 
     fn resolve_webview(&self) -> Result<tauri::webview::Webview<Wry>, McpToolError> {
+        let state = self
+            .app_handle
+            .try_state::<AppState>()
+            .ok_or_else(|| McpToolError::Invocation("application state unavailable".into()))?;
+
+        let active_tab_id = state
+            .active_content_tab
+            .lock()
+            .map_err(|_| McpToolError::Invocation("active tab mutex poisoned".into()))?
+            .clone()
+            .ok_or_else(|| {
+                McpToolError::Invocation("active tab webview is not available".into())
+            })?;
+
+        let label = state
+            .content_tab_webviews
+            .lock()
+            .map_err(|_| McpToolError::Invocation("content webview map mutex poisoned".into()))?
+            .get(&active_tab_id)
+            .cloned()
+            .ok_or_else(|| {
+                McpToolError::Invocation("active tab webview is not registered".into())
+            })?;
+
         self.app_handle
-            .get_webview(CONTENT_WEBVIEW_LABEL)
-            .ok_or_else(|| McpToolError::Invocation("Content webview is not available".into()))
+            .get_webview(&label)
+            .ok_or_else(|| McpToolError::Invocation("active tab webview is not available".into()))
     }
 }
 
@@ -135,7 +157,12 @@ impl McpTool for NavigateTool {
             }
         }
 
-        if params.url.trim_start().to_ascii_lowercase().starts_with("about:") {
+        if params
+            .url
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("about:")
+        {
             return Ok(McpToolResult {
                 content: json!({
                     "status": "internal",
@@ -483,11 +510,7 @@ fn record_local_broadcast(intent: &BroadcastIntent) -> bool {
             if let Some(parent) = path.parent() {
                 let _ = create_dir_all(parent);
             }
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
                 if let Ok(line) = serde_json::to_string(intent) {
                     let _ = writeln!(file, "{}", line);
                     return true;
