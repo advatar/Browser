@@ -5,6 +5,21 @@ components:
     description: Desktop app (Tauri v2). Rust backend in crates/gui, UI served from orbit-shell-ui.
     path: crates/gui
     config: crates/gui/tauri.conf.json
+    native_content_webviews:
+      mode: per-tab child webviews (no iframe)
+      state:
+        - AppState.content_tab_webviews
+        - AppState.active_content_tab
+        - AppState.content_bounds
+      commands:
+        - activate_tab_webview
+        - close_tab_webview
+        - navigate_to
+        - set_content_bounds
+        - content_go_back
+        - content_go_forward
+        - content_reload
+        - content_stop
     depends_on:
       - orbit_shell_ui
       - llm_router_lib
@@ -25,4 +40,3 @@ components:
   llm_router_lib:
     description: Rust library used by the GUI for model routing (not a network service).
     path: services/llm-router
-
