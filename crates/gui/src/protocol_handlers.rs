@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -204,7 +206,7 @@ impl ProtocolHandler {
                         // In tests, avoid network fetches; return a stubbed data URL.
                         let data_url = format!(
                             "data:text/plain;base64,{}",
-                            base64::encode(format!("stub-ipfs-content-for-{}", hash))
+                            STANDARD.encode(format!("stub-ipfs-content-for-{}", hash))
                         );
                         Ok(data_url)
                     } else {
@@ -213,7 +215,7 @@ impl ProtocolHandler {
                         let data_url = format!(
                             "data:{};base64,{}",
                             content.content_type,
-                            base64::encode(&content.data)
+                            STANDARD.encode(&content.data)
                         );
                         Ok(data_url)
                     }
@@ -225,7 +227,7 @@ impl ProtocolHandler {
                     let data_url = format!(
                         "data:{};base64,{}",
                         content.content_type,
-                        base64::encode(&content.data)
+                        STANDARD.encode(&content.data)
                     );
                     Ok(data_url)
                 }

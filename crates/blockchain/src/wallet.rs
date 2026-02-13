@@ -1,17 +1,21 @@
 use anyhow::{Result, anyhow};
 use sp_core::{
+    ByteArray,
     Pair as PairT,
-    crypto::{Derive, Ss58AddressFormatRegistry, Ss58Codec},
+    crypto::Ss58Codec,
     ecdsa, ed25519, sr25519,
 };
-use std::{fmt, str::FromStr, sync::Arc};
+use std::{fmt, str::FromStr};
 use thiserror::Error;
 
 /// Supported key types for the wallet
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyType {
+    /// Schnorrkel/Ristretto keypair.
     Sr25519,
+    /// EdDSA Edwards-curve keypair.
     Ed25519,
+    /// ECDSA secp256k1 keypair.
     Ecdsa,
 }
 
@@ -41,16 +45,22 @@ impl FromStr for KeyType {
 /// Errors that can occur when working with the wallet
 #[derive(Error, Debug)]
 pub enum WalletError {
+    /// Provided mnemonic phrase is invalid.
     #[error("Invalid mnemonic phrase: {0}")]
     InvalidMnemonic(String),
+    /// Provided private key bytes are invalid.
     #[error("Invalid private key: {0}")]
     InvalidPrivateKey(String),
+    /// Provided public key bytes are invalid.
     #[error("Invalid public key: {0}")]
     InvalidPublicKey(String),
+    /// Failed to derive or create the keypair.
     #[error("Key generation failed: {0}")]
     KeyGenerationFailed(String),
+    /// Signature does not match the message/public key.
     #[error("Signature verification failed")]
     SignatureVerificationFailed,
+    /// The selected key algorithm is not supported.
     #[error("Unsupported key type: {0}")]
     UnsupportedKeyType(String),
 }
@@ -58,8 +68,11 @@ pub enum WalletError {
 /// A key pair in the wallet
 #[derive(Clone)]
 pub enum KeyPair {
+    /// Sr25519 keypair.
     Sr25519(sr25519::Pair),
-    Ed25519(ed25519::Pair),
+    /// Ed25519 keypair.
+    Ed25519(Box<ed25519::Pair>),
+    /// ECDSA keypair.
     Ecdsa(ecdsa::Pair),
 }
 
@@ -83,7 +96,7 @@ impl KeyPair {
             KeyType::Ed25519 => {
                 let pair = ed25519::Pair::from_seed_slice(seed)
                     .map_err(|e| WalletError::KeyGenerationFailed(e.to_string()))?;
-                Ok(KeyPair::Ed25519(pair))
+                Ok(KeyPair::Ed25519(Box::new(pair)))
             }
             KeyType::Ecdsa => {
                 let pair = ecdsa::Pair::from_seed_slice(seed)
@@ -125,22 +138,22 @@ impl KeyPair {
         match self {
             KeyPair::Sr25519(pair) => {
                 let sig = match sr25519::Signature::from_slice(signature) {
-                    Some(sig) => sig,
-                    None => return false,
+                    Ok(sig) => sig,
+                    Err(_) => return false,
                 };
                 sr25519::Pair::verify(&sig, message, &pair.public())
             }
             KeyPair::Ed25519(pair) => {
                 let sig = match ed25519::Signature::from_slice(signature) {
-                    Some(sig) => sig,
-                    None => return false,
+                    Ok(sig) => sig,
+                    Err(_) => return false,
                 };
                 ed25519::Pair::verify(&sig, message, &pair.public())
             }
             KeyPair::Ecdsa(pair) => {
                 let sig = match ecdsa::Signature::from_slice(signature) {
-                    Some(sig) => sig,
-                    None => return false,
+                    Ok(sig) => sig,
+                    Err(_) => return false,
                 };
                 ecdsa::Pair::verify(&sig, message, &pair.public())
             }
@@ -217,10 +230,10 @@ impl Wallet {
         let removed = self.keys.remove(name);
 
         // Update default key if needed
-        if let Some(ref default) = self.default_key {
-            if default == name {
-                self.default_key = self.keys.keys().next().cloned();
-            }
+        if let Some(ref default) = self.default_key
+            && default == name
+        {
+            self.default_key = self.keys.keys().next().cloned();
         }
 
         removed

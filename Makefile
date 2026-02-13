@@ -34,9 +34,12 @@ frontend-build: deps
 build: frontend-build
 	cd $(GUI_DIR) && $(CARGO) tauri build
 
-.PHONY: dmg
+.PHONY: dmg dmg-prod
 dmg: frontend-build
 	./scripts/package-macos-dmg.sh
+
+dmg-prod: frontend-build
+	PROD_RELEASE=1 ./scripts/package-macos-dmg.sh
 
 afm-node:
 	$(CARGO) run -p $(AFM_NODE_CRATE) --bin dev

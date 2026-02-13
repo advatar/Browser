@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Wallet UI state and management
 #[derive(Debug, Clone, Serialize, Deserialize)]

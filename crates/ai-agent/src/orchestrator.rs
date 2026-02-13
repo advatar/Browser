@@ -19,9 +19,11 @@ pub struct AgentConfig {
 
 impl Default for AgentConfig {
     fn default() -> Self {
-        let mut options = FoundationModelOptions::default();
-        options.temperature = 0.4;
-        options.max_tokens = Some(768);
+        let options = FoundationModelOptions {
+            temperature: 0.4,
+            max_tokens: Some(768),
+            ..FoundationModelOptions::default()
+        };
         Self {
             system_prompt: DEFAULT_SYSTEM_PROMPT.trim().to_string(),
             max_steps: crate::DEFAULT_AGENT_MAX_STEPS,

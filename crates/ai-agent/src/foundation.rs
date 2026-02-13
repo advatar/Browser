@@ -30,7 +30,7 @@ impl PlatformModelClient {
     pub fn detect() -> Result<Self> {
         #[cfg(target_os = "macos")]
         {
-            return Ok(PlatformModelClient::Mac(MacFoundationClient::new()?));
+            Ok(PlatformModelClient::Mac(MacFoundationClient::new()?))
         }
 
         #[cfg(not(target_os = "macos"))]

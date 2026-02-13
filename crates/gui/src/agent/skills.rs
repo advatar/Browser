@@ -83,7 +83,7 @@ impl SkillRegistry {
         if let Some(skill_id) = skill_id {
             if let Some(skill) = self.find(skill_id) {
                 for (capability, spec) in &skill.capabilities {
-                    if let Some(kind) = CapabilityKind::from_str(capability) {
+                    if let Some(kind) = CapabilityKind::parse(capability) {
                         registry.grant(kind, spec.to_limit());
                     }
                 }

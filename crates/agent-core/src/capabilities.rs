@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -33,7 +34,7 @@ impl CapabilityKind {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "click" => Some(Self::Click),
             "scroll" => Some(Self::Scroll),
@@ -43,6 +44,14 @@ impl CapabilityKind {
             "wallet:spend" => Some(Self::WalletSpend),
             _ => None,
         }
+    }
+}
+
+impl FromStr for CapabilityKind {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value).ok_or(())
     }
 }
 

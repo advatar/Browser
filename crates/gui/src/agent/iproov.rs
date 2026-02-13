@@ -7,7 +7,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use p256::ecdsa::signature::Signer;
-use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
+use p256::ecdsa::{Signature, SigningKey};
 use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use rand::Rng;
 use serde::{Deserialize, Serialize};

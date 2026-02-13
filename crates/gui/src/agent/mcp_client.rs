@@ -403,7 +403,7 @@ impl McpServerClient {
         let capability = config
             .default_capability
             .as_deref()
-            .and_then(CapabilityKind::from_str);
+            .and_then(CapabilityKind::parse);
         let transport = match config.transport {
             McpTransportKind::Http => {
                 let endpoint = ensure_endpoint(&config, "http")?;

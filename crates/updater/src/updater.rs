@@ -159,8 +159,8 @@ fn apply_payload(bytes: Vec<u8>, target_path: &Path) -> Result<Option<PathBuf>> 
     let temp_path = temp.into_temp_path();
     #[cfg(unix)]
     {
-        temp_path.persist(&target_path).map_err(map_persist_error)?;
-        return Ok(None);
+        temp_path.persist(target_path).map_err(map_persist_error)?;
+        Ok(None)
     }
 
     #[cfg(not(unix))]
@@ -175,7 +175,7 @@ fn apply_payload(bytes: Vec<u8>, target_path: &Path) -> Result<Option<PathBuf>> 
                 counter += 1;
                 candidate = target_path.with_extension(format!("old{counter}"));
             }
-            fs::rename(&target_path, &candidate)?;
+            fs::rename(target_path, &candidate)?;
             Some(candidate)
         } else {
             None
@@ -197,7 +197,7 @@ fn apply_payload(bytes: Vec<u8>, target_path: &Path) -> Result<Option<PathBuf>> 
             }
         }
 
-        return Ok(None);
+        Ok(None)
     }
 }
 

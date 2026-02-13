@@ -1,13 +1,19 @@
 # Validate
 
-## Unit Tests
+## Unit + Lint
 
 ```bash
+# Strict lint gate for production crates (must pass in CI)
+cargo clippy -p gui -p blockchain -p ai-agent -p updater -p agent-core --all-targets
+
 # Rust unit + integration tests for the GUI crate
 cargo test -p gui
 
-# Runtime frontend build (Vite)
+# Runtime frontend tests (native webview command path + bounds sync)
 npm --prefix orbit-shell-ui ci
+npm --prefix orbit-shell-ui run test
+
+# Runtime frontend build (Vite)
 npm --prefix orbit-shell-ui run build
 
 # Legacy placeholder frontend still compiles
@@ -17,8 +23,11 @@ npm --prefix crates/gui run build
 ## DMG Packaging (macOS)
 
 ```bash
-# Produces dist/decentralized-browser-v<version>-<arch>.dmg
+# Developer packaging (unsigned local build is allowed)
 make dmg
+
+# Production packaging (requires valid signature + notarization ticket)
+make dmg-prod
 ```
 
 ## Manual Smoke

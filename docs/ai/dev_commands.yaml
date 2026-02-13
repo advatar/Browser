@@ -5,12 +5,20 @@ commands:
     description: Install workspace dependencies needed for local development.
     cmd: make deps
 
+  - name: lint_product_strict
+    description: Run strict lint gate for production crates used by CI.
+    cmd: cargo clippy -p gui -p blockchain -p ai-agent -p updater -p agent-core --all-targets
+
   - name: test_rust_gui
     description: Run Rust unit + integration tests for the Tauri GUI crate.
     cmd: cargo test -p gui
 
+  - name: test_runtime_frontend
+    description: Run runtime frontend unit tests (native webview command path checks).
+    cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run test
+
   - name: build_frontend_gui
-    description: Install and build the GUI frontend (Vite).
+    description: Install and build the runtime GUI frontend (Vite).
     cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run build
 
   - name: build_legacy_frontend_placeholder
@@ -22,6 +30,9 @@ commands:
     cmd: make build
 
   - name: package_macos_dmg
-    description: Build and export a macOS DMG into dist/.
+    description: Build and export a macOS DMG into dist/ (developer mode).
     cmd: make dmg
 
+  - name: package_macos_dmg_prod
+    description: Build DMG with strict signature and notarization validation.
+    cmd: make dmg-prod

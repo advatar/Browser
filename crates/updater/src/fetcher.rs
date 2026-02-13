@@ -35,7 +35,7 @@ impl IpfsGatewayClientBuilder {
         let base = self
             .base
             .unwrap_or_else(|| Url::parse("https://ipfs.io/").expect("default IPFS gateway URL"));
-        let client = self.client.unwrap_or_else(Client::new);
+        let client = self.client.unwrap_or_default();
 
         Ok(IpfsGatewayClient { base, client })
     }

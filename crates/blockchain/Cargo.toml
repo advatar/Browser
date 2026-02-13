@@ -27,10 +27,10 @@ substrate = [
 # Polkadot SDK - using stable release
 frame-support = { version = "37.1.0", default-features = false, optional = true }
 frame-system = { version = "37.1.0", default-features = false, optional = true }
-sp-core = { version = "21.0.0", default-features = false }
-sp-runtime = { version = "24.0.0", default-features = false }
-sp-std = { version = "8.0.0", default-features = false }
-sp-io = { version = "23.0.0", default-features = false }
+sp-core = { version = "34.0.0", default-features = false }
+sp-runtime = { version = "39.0.5", default-features = false }
+sp-std = { version = "14.0.0", default-features = false }
+sp-io = { version = "38.0.2", default-features = false }
 anyhow = { workspace = true }
 
 # Crypto and serialization
@@ -51,13 +51,13 @@ thiserror = "1.0"
 web3 = { version = "0.18", optional = true, features = ["signing"] }
 
 [dev-dependencies]
-sp-core = { version = "21.0.0", default-features = false }
-sp-io = { version = "23.0.0", default-features = false }
-sp-keyring = { version = "24.0.0" }
+sp-core = { version = "34.0.0", default-features = false }
+sp-io = { version = "38.0.2", default-features = false }
+sp-keyring = { version = "39.0.0" }
 tempfile = "3.3"
 tokio = { version = "1.0", features = ["full"] }
 futures = "0.3"
 hex = "0.4"
 # Modern subxt for Substrate interaction
-subxt = { version = "0.35", features = ["substrate-compat"] }
-subxt-signer = "0.35"
+subxt = "0.44"
+subxt-signer = "0.44"

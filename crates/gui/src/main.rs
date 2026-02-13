@@ -1093,6 +1093,7 @@ mod tests {
     use gui::wallet_store::WalletStore;
 
     #[test]
+    #[ignore = "requires tauri runtime"]
     fn test_app_state() {
         let mcp_config = Arc::new(
             McpConfigService::load().unwrap_or_else(|_| McpConfigService::reset().unwrap()),
@@ -1107,17 +1108,16 @@ mod tests {
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
             wallet_store: Arc::new(Mutex::new(
-                WalletStore::new().unwrap_or_else(|_| WalletStore::default()),
+                WalletStore::default(),
             )),
             agent_manager: Arc::new(AsyncMutex::new(None)),
             approval_broker: ApprovalBroker::new(),
             afm_node_controller: Arc::new(AsyncMutex::new(None)),
             afm_node_handle: Arc::new(Mutex::new(None)),
             afm_node_config: Arc::new(Mutex::new(AfmNodeConfig::default())),
-            mcp_registry: Arc::new(
-                McpServerRegistry::from_config_service(mcp_config.clone())
-                    .unwrap_or_else(|_| McpServerRegistry::empty(mcp_config.clone())),
-            ),
+            // Keep this unit test hermetic; loading active MCP servers can require
+            // environment-specific secret resolution and block in CI.
+            mcp_registry: Arc::new(McpServerRegistry::empty(mcp_config.clone())),
             mcp_config,
             agent_apps: Arc::new(AgentAppRegistry::empty()),
         };

@@ -569,7 +569,7 @@ async fn broadcast_eth(intent: &BroadcastIntent, seed: &[u8; 32]) -> anyhow::Res
         None => provider.get_transaction_count(from, None).await?,
     };
 
-    let mut tx = TransactionRequest::new()
+    let tx = TransactionRequest::new()
         .to(to)
         .from(from)
         .value(value)
