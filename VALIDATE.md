@@ -46,6 +46,9 @@ make dev
 - In the address bar, try navigating to a URL containing a single quote (for example `https://example.com/?q='test'`) and confirm navigation works without console errors.
 - Navigate to a normal site (for example `https://example.com`) and confirm the page renders inside the app (native content webview) without using an iframe.
 - Navigate to `about:home` and confirm the internal homepage UI renders and the web content view is hidden.
+- Enter a URL in the address bar (for example `https://google.com`) and open the Sidebar → History; verify a new history row appears.
+- Open the same URL twice and verify the history row remains a single entry with updated visit count.
+- Use the history row menu to remove an entry and confirm it disappears.
 - Open 2-3 tabs with different sites, navigate within one tab, switch tabs, and confirm each tab preserves its own page/history state.
 - Use Back, Forward, Reload, and Stop in the toolbar and confirm they affect the active native tab content.
 - Resize the window and toggle the sidebar a few times and confirm the web content stays aligned with the content area.
