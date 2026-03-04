@@ -18,6 +18,12 @@ npm --prefix orbit-shell-ui run build
 
 # Legacy placeholder frontend still compiles
 npm --prefix crates/gui run build
+
+# UI automation regression for address bar submission
+npm --prefix orbit-shell-ui run build
+cd crates/gui
+./node_modules/.bin/playwright test tests/navigation-ui.spec.js
+./node_modules/.bin/playwright test
 ```
 
 ## DMG Packaging (macOS)
