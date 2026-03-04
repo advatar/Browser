@@ -383,11 +383,22 @@ pub struct BrowserSettings {
     pub ens_resolver: Option<String>,
 }
 
+const DEFAULT_HOMEPAGE: &str = "https://example.com";
+
+fn sanitize_homepage(homepage: &str) -> String {
+    let normalized = homepage.trim();
+    if normalized.is_empty() || normalized == "https://vitalik.eth.limo/" || normalized == "https://opensea.eth.limo/" || normalized == "https://opensea.eth.limo" {
+        DEFAULT_HOMEPAGE.to_string()
+    } else {
+        normalized.to_string()
+    }
+}
+
 impl Default for BrowserSettings {
     fn default() -> Self {
         Self {
             default_search_engine: "duckduckgo".to_string(),
-            homepage: "https://vitalik.eth.limo/".to_string(),
+            homepage: DEFAULT_HOMEPAGE.to_string(),
             privacy_settings: PrivacySettings::default(),
             ipfs_gateway: "https://ipfs.io".to_string(),
             ens_resolver: Some("https://eth.limo".to_string()),
@@ -416,7 +427,9 @@ fn load_settings_from_disk() -> Result<BrowserSettings, String> {
     }
 
     let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).map_err(|e| e.to_string())
+    let mut settings = serde_json::from_str::<BrowserSettings>(&data).map_err(|e| e.to_string())?;
+    settings.homepage = sanitize_homepage(&settings.homepage);
+    Ok(settings)
 }
 
 fn save_settings_to_disk(settings: &BrowserSettings) -> Result<(), String> {
@@ -453,6 +466,11 @@ pub async fn update_settings<R: Runtime>(
     state: State<'_, AppState>,
     _app_handle: AppHandle<R>,
 ) -> Result<(), String> {
+    let settings = BrowserSettings {
+        homepage: sanitize_homepage(&settings.homepage),
+        ..settings
+    };
+
     // Update protocol handler settings
     if let Ok(mut protocol_handler) = state.protocol_handler.lock() {
         protocol_handler.set_ipfs_gateway(settings.ipfs_gateway.clone());
