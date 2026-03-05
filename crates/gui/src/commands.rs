@@ -383,7 +383,7 @@ pub struct BrowserSettings {
     pub ens_resolver: Option<String>,
 }
 
-const DEFAULT_HOMEPAGE: &str = "https://example.com";
+const DEFAULT_HOMEPAGE: &str = "https://duckduckgo.com";
 
 fn sanitize_homepage(homepage: &str) -> String {
     let normalized = homepage.trim();
