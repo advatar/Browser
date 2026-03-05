@@ -878,3 +878,39 @@ pub async fn afm_feed_gossip<R: Runtime>(
         .await
         .map_err(|err| err.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_settings_default_homepage_is_duckduckgo() {
+        assert_eq!(BrowserSettings::default().homepage, DEFAULT_HOMEPAGE);
+    }
+
+    #[test]
+    fn sanitize_homepage_rewrites_invalid_ens_defaults() {
+        assert_eq!(
+            sanitize_homepage("https://vitalik.eth.limo/"),
+            DEFAULT_HOMEPAGE
+        );
+        assert_eq!(
+            sanitize_homepage("https://opensea.eth.limo/"),
+            DEFAULT_HOMEPAGE
+        );
+        assert_eq!(sanitize_homepage("https://opensea.eth.limo"), DEFAULT_HOMEPAGE);
+        assert_eq!(sanitize_homepage("   "), DEFAULT_HOMEPAGE);
+    }
+
+    #[test]
+    fn sanitize_homepage_keeps_valid_homepage() {
+        assert_eq!(
+            sanitize_homepage("https://example.com"),
+            "https://example.com"
+        );
+        assert_eq!(
+            sanitize_homepage("https://duckduckgo.com"),
+            "https://duckduckgo.com"
+        );
+    }
+}
