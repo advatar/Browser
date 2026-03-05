@@ -138,6 +138,8 @@ mod tests {
             content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
             active_content_tab: Mutex::new(None),
             content_bounds: Mutex::new(None),
+            last_content_bounds: Mutex::new(None),
+            content_webview_visible: Mutex::new(false),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),

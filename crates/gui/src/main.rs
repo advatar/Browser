@@ -56,6 +56,10 @@ fn log_startup(msg: &str) {
     }
 }
 
+fn log_command(cmd: &str, details: &str) {
+    log_startup(&format!("{} | {}", cmd, details));
+}
+
 fn chrono_like_timestamp() -> String {
     // Minimal, dependency-free timestamp using system time since UNIX_EPOCH
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -110,7 +114,12 @@ fn ensure_tab_webview<R: Runtime>(
     tab_id: &str,
     initial_url: Option<&str>,
 ) -> Result<tauri::webview::Webview<R>, String> {
-    use tauri::webview::WebviewBuilder;
+    log_command(
+        "ensure_tab_webview",
+        &format!("tab_id={} initial_url={}", tab_id, initial_url.unwrap_or("<none>")),
+    );
+
+    use tauri::webview::{PageLoadEvent, WebviewBuilder};
     use tauri::{LogicalPosition, LogicalSize};
 
     let state = app_handle
@@ -120,11 +129,34 @@ fn ensure_tab_webview<R: Runtime>(
     let existing_label = read_tab_label(&state, tab_id)?;
     if let Some(existing_label) = &existing_label {
         if let Some(existing) = app_handle.get_webview(existing_label) {
+            log_command(
+                "ensure_tab_webview",
+                &format!("reuse existing_label={existing_label}"),
+            );
             return Ok(existing);
         }
+        log_command(
+            "ensure_tab_webview",
+            &format!("stale label cache existing_label={existing_label}"),
+        );
     }
 
     let label = existing_label.unwrap_or_else(|| tab_webview_label(tab_id));
+    if let Some(existing) = app_handle.get_webview(&label) {
+        log_command(
+            "ensure_tab_webview",
+            &format!("reuse existing label={label} (stale cache path)"),
+        );
+        if let Ok(mut map) = state.content_tab_webviews.lock() {
+            map.insert(tab_id.to_string(), label.clone());
+        }
+        return Ok(existing);
+    }
+
+    log_command(
+        "ensure_tab_webview",
+        &format!("creating child label={label} tab_id={tab_id}"),
+    );
 
     let initial_webview_url = if let Some(url) = initial_url {
         if is_internal_url(url) {
@@ -144,22 +176,80 @@ fn ensure_tab_webview<R: Runtime>(
 
     let window = app_handle
         .get_webview_window(MAIN_WEBVIEW_LABEL)
+        .or_else(|| {
+            log_command(
+                "ensure_tab_webview",
+                "main window label missing; using first managed webview window",
+            );
+            app_handle
+                .webview_windows()
+                .into_iter()
+                .next()
+                .map(|(_, fallback_window)| fallback_window)
+        })
         .ok_or_else(|| "Main webview window not found".to_string())?
         .as_ref()
         .window();
 
-    let child = window
-        .add_child(
-            WebviewBuilder::new(&label, initial_webview_url),
-            LogicalPosition::new(0.0, 0.0),
-            LogicalSize::new(0.0, 0.0),
-        )
-        .map_err(|e| format!("Failed to create tab webview: {e}"))?;
+    let label_for_navigation = label.clone();
+    let label_for_page_load = label.clone();
+    let builder = WebviewBuilder::new(&label, initial_webview_url)
+        .on_navigation(move |url| {
+            log_command(
+                "content_tab_navigation",
+                &format!("label={label_for_navigation} allowed url={url}"),
+            );
+            true
+        })
+        .on_page_load(move |_webview, payload| {
+            let event_name = match payload.event() {
+                PageLoadEvent::Started => "started",
+                PageLoadEvent::Finished => "finished",
+            };
+            log_command(
+                "content_tab_page_load",
+                &format!(
+                    "label={label_for_page_load} event={event_name} url={}",
+                    payload.url()
+                ),
+            );
+        });
+
+    let child = match window.add_child(
+        builder,
+        LogicalPosition::new(0.0, 0.0),
+        LogicalSize::new(0.0, 0.0),
+    ) {
+        Ok(child) => child,
+        Err(err) => {
+            let err = format!("Failed to create tab webview: {err}");
+            log_command("ensure_tab_webview", &format!("create failed label={label} {err}"));
+
+            if let Some(existing) = app_handle.get_webview(&label) {
+                log_command(
+                    "ensure_tab_webview",
+                    &format!("create raced with existing label={label}, reusing"),
+                );
+                if let Ok(mut map) = state.content_tab_webviews.lock() {
+                    map.insert(tab_id.to_string(), label.clone());
+                }
+                return Ok(existing);
+            }
+
+            Err(err)?
+        }
+    };
 
     let _ = child.hide();
+    log_command("ensure_tab_webview", &format!("created hidden child label={label}"));
 
     if let Ok(mut map) = state.content_tab_webviews.lock() {
         map.insert(tab_id.to_string(), label);
+    } else {
+        log_command(
+            "ensure_tab_webview",
+            &format!("failed to cache label for tab_id={tab_id} due poisoned map mutex"),
+        );
     }
 
     Ok(child)
@@ -183,6 +273,39 @@ fn active_tab_webview<R: Runtime>(
     Ok(app_handle.get_webview(&label))
 }
 
+fn normalize_content_bounds(bounds: ContentWebviewBounds) -> ContentWebviewBounds {
+    const CONTENT_WEBVIEW_Y_OFFSET: f64 = 0.0;
+    let width = if bounds.width.is_finite() && bounds.width >= 0.0 {
+        bounds.width.round().max(0.0)
+    } else {
+        0.0
+    };
+    let height = if bounds.height.is_finite() && bounds.height >= 0.0 {
+        bounds.height.round().max(0.0)
+    } else {
+        0.0
+    };
+
+    let x = if bounds.x.is_finite() {
+        bounds.x.round()
+    } else {
+        0.0
+    };
+
+    let y = if bounds.y.is_finite() {
+        (bounds.y + CONTENT_WEBVIEW_Y_OFFSET).round()
+    } else {
+        CONTENT_WEBVIEW_Y_OFFSET
+    };
+
+    ContentWebviewBounds {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 fn apply_bounds_to_active_webview<R: Runtime>(
     app_handle: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
@@ -193,12 +316,21 @@ fn apply_bounds_to_active_webview<R: Runtime>(
         .ok_or_else(|| "application state unavailable".to_string())?;
 
     let Some(active_tab_id) = active_tab_id(&state)? else {
+        log_command("apply_bounds_to_active_webview", "no active tab");
         return Ok(());
     };
     let Some(label) = read_tab_label(&state, &active_tab_id)? else {
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!("active tab missing label tab_id={active_tab_id}"),
+        );
         return Ok(());
     };
     let Some(webview) = app_handle.get_webview(&label) else {
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!("label missing webview label={label}"),
+        );
         return Ok(());
     };
 
@@ -207,26 +339,82 @@ fn apply_bounds_to_active_webview<R: Runtime>(
         .lock()
         .map_err(|_| "content bounds mutex poisoned".to_string())?
         .as_ref()
-        .copied();
+        .map(|bounds| normalize_content_bounds(*bounds));
+    let mut last_bounds_slot = state
+        .last_content_bounds
+        .lock()
+        .map_err(|_| "content bounds mutex poisoned".to_string())?;
+    let mut visible_slot = state
+        .content_webview_visible
+        .lock()
+        .map_err(|_| "content visibility mutex poisoned".to_string())?;
 
-    match bounds {
-        Some(bounds) if bounds.is_visible() => {
-            let rect = Rect {
-                position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
-                size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
-            };
-            webview
-                .set_bounds(rect)
-                .map_err(|e| format!("Failed to set content bounds: {e}"))?;
-            webview
-                .show()
-                .map_err(|e| format!("Failed to show content webview: {e}"))?;
-        }
-        _ => {
+    let desired_visible = matches!(bounds, Some(bounds) if bounds.is_visible());
+    if !desired_visible {
+        if *visible_slot {
             webview
                 .hide()
                 .map_err(|e| format!("Failed to hide content webview: {e}"))?;
+            *visible_slot = false;
+            *last_bounds_slot = None;
         }
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!("hide tab_id={active_tab_id} label={label}"),
+        );
+        return Ok(());
+    }
+
+    let bounds = bounds.expect("desired visible bounds are present");
+    let should_set_bounds = last_bounds_slot.as_ref() != Some(&bounds);
+    if should_set_bounds {
+        let rect = Rect {
+            position: Position::Logical(LogicalPosition::new(bounds.x, bounds.y)),
+            size: Size::Logical(LogicalSize::new(bounds.width, bounds.height)),
+        };
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!(
+                "set+show tab_id={active_tab_id} label={label} x={} y={} width={} height={}",
+                bounds.x, bounds.y, bounds.width, bounds.height
+            ),
+        );
+        webview
+            .set_bounds(rect)
+            .map_err(|e| {
+                let err = format!("Failed to set content bounds: {e}");
+                log_command(
+                    "apply_bounds_to_active_webview",
+                    &format!("set_bounds failed tab_id={active_tab_id} label={label} {err}"),
+                );
+                err
+            })?;
+        *last_bounds_slot = Some(bounds);
+    }
+
+    if !*visible_slot {
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!("show tab_id={active_tab_id} label={label}"),
+        );
+        webview
+            .show()
+            .map_err(|e| {
+                let err = format!("Failed to show content webview: {e}");
+                log_command(
+                    "apply_bounds_to_active_webview",
+                    &format!("show failed tab_id={active_tab_id} label={label} {err}"),
+                );
+                err
+            })?;
+        *visible_slot = true;
+    }
+
+    if let Err(err) = webview.set_focus() {
+        log_command(
+            "apply_bounds_to_active_webview",
+            &format!("focus failed tab_id={active_tab_id} label={label} err={err}"),
+        );
     }
 
     Ok(())
@@ -241,13 +429,27 @@ fn create_browser_window<R: Runtime>(
     // Create the menu first
     let menu = create_main_menu(app)?;
 
-    let webview = WebviewWindowBuilder::new(
-        app,
-        MAIN_WEBVIEW_LABEL,
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Decentralized Browser")
-    .inner_size(1200.0, 800.0)
+    let initial_webview_url = if cfg!(debug_assertions) {
+        tauri::WebviewUrl::External(
+            url::Url::parse("http://localhost:5174")
+                .unwrap_or_else(|_| url::Url::parse("about:blank").expect("invalid fallback URL")),
+        )
+    } else {
+        tauri::WebviewUrl::App("index.html".into())
+    };
+
+    log_startup(&format!(
+        "create_browser_window: loading {}",
+        if cfg!(debug_assertions) {
+            "http://localhost:5174"
+        } else {
+            "app index.html"
+        }
+    ));
+
+    let webview = WebviewWindowBuilder::new(app, MAIN_WEBVIEW_LABEL, initial_webview_url)
+        .title("Decentralized Browser")
+        .inner_size(1200.0, 800.0)
     .min_inner_size(800.0, 600.0)
     .menu(menu)
     .build()?;
@@ -429,6 +631,8 @@ fn main() {
             content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
             active_content_tab: Mutex::new(None),
             content_bounds: Mutex::new(None),
+            last_content_bounds: Mutex::new(None),
+            content_webview_visible: Mutex::new(false),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
@@ -501,6 +705,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            log_frontend_event,
             agent_list_tools,
             agent_run_task,
             list_agent_apps,
@@ -746,10 +951,16 @@ async fn agent_set_no_egress<R: Runtime>(
     Ok(())
 }
 
-#[tauri::command]
-async fn agent_resolve_approval<R: Runtime>(
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentResolveApprovalRequest {
     request_id: String,
     approved: bool,
+}
+
+#[tauri::command]
+async fn agent_resolve_approval<R: Runtime>(
+    request: AgentResolveApprovalRequest,
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
@@ -759,7 +970,7 @@ async fn agent_resolve_approval<R: Runtime>(
 
     state
         .approval_broker
-        .resolve(&request_id, approved)
+        .resolve(&request.request_id, request.approved)
         .await
         .map_err(|err| err.to_string())
 }
@@ -778,8 +989,18 @@ async fn activate_tab_webview<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    log_command(
+        "activate_tab_webview",
+        &format!(
+            "tab_id={} initial_url={}",
+            request.tab_id,
+            request.initial_url.as_deref().unwrap_or("<none>")
+        ),
+    );
+
     let tab_id = request.tab_id.trim();
     if tab_id.is_empty() {
+        log_command("activate_tab_webview", "invalid request: empty tab_id");
         return Err("tab_id must not be empty".to_string());
     }
 
@@ -812,11 +1033,24 @@ async fn activate_tab_webview<R: Runtime>(
 
     for label in labels_to_hide {
         if let Some(webview) = app_handle.get_webview(&label) {
+            log_command("activate_tab_webview", &format!("hiding sibling label={label}"));
             let _ = webview.hide();
         }
     }
 
-    apply_bounds_to_active_webview(&app_handle)
+    match apply_bounds_to_active_webview(&app_handle) {
+        Ok(()) => {
+            log_command("activate_tab_webview", &format!("success tab_id={tab_id}"));
+            Ok(())
+        }
+        Err(err) => {
+            log_command(
+                "activate_tab_webview",
+                &format!("apply_bounds failed tab_id={tab_id} err={err}"),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -888,7 +1122,17 @@ async fn navigate_to<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    log_command(
+        "navigate_to",
+        &format!(
+            "url={} tab_id={}",
+            request.url,
+            request.tab_id.as_deref().unwrap_or("<auto>")
+        ),
+    );
+
     if request.url.trim().is_empty() {
+        log_command("navigate_to", "invalid request: empty url");
         return Err("url must not be empty".to_string());
     }
 
@@ -902,6 +1146,7 @@ async fn navigate_to<R: Runtime>(
 
     let target_tab_id = if let Some(tab_id) = request.tab_id.as_ref() {
         if tab_id.trim().is_empty() {
+            log_command("navigate_to", "invalid request: empty tab_id");
             return Err("tab_id must not be empty".to_string());
         }
         tab_id.trim().to_string()
@@ -910,22 +1155,46 @@ async fn navigate_to<R: Runtime>(
     };
 
     let active_tab = active_tab_id(&state)?;
+    log_command(
+        "navigate_to",
+        &format!("target_tab_id={target_tab_id} active_tab={}", active_tab.as_deref().unwrap_or("<none>")),
+    );
 
     let webview = ensure_tab_webview(&app_handle, &target_tab_id, Some(&request.url))?;
+    let target_label = read_tab_label(&state, &target_tab_id)?
+        .unwrap_or_else(|| "<missing>".to_string());
+    log_command("navigate_to", &format!("ensure_tab_webview done target_label={target_label}"));
 
     if is_internal_url(&request.url) {
+        log_command(
+            "navigate_to",
+            &format!("internal URL skip load target_tab_id={target_tab_id}"),
+        );
         return Ok(());
     }
 
     let target = parse_external_url(&request.url)?;
+    log_command("navigate_to", &format!("parsed target_url={target}"));
 
     webview
         .navigate(target)
-        .map_err(|e| format!("Failed to navigate: {e}"))?;
+        .map_err(|e| {
+            let err = format!("Failed to navigate: {e}");
+            log_command(
+                "navigate_to",
+                &format!("navigation failed target_tab_id={target_tab_id} label={target_label} {err}"),
+            );
+            err
+        })?;
 
     if active_tab.as_deref() == Some(target_tab_id.as_str()) {
+        log_command(
+            "navigate_to",
+            &format!("active tab; applying bounds tab_id={target_tab_id}"),
+        );
         apply_bounds_to_active_webview(&app_handle)?;
     }
+    log_command("navigate_to", &format!("success tab_id={target_tab_id}"));
 
     Ok(())
 }
@@ -953,12 +1222,21 @@ async fn set_content_bounds<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    let tab_id = request.tab_id.as_deref().unwrap_or("<auto>");
+    let bounds_dbg = request
+        .bounds
+        .as_ref()
+        .map(|b| format!("{}x{} @ {},{}", b.width, b.height, b.x, b.y))
+        .unwrap_or_else(|| "<none>".to_string());
+    log_command("set_content_bounds", &format!("tab_id={tab_id} bounds={bounds_dbg}"));
+
     let state = app_handle
         .try_state::<AppState>()
         .ok_or_else(|| "application state unavailable".to_string())?;
 
     if let Some(tab_id) = request.tab_id.as_ref() {
         if tab_id.trim().is_empty() {
+            log_command("set_content_bounds", "invalid request: empty tab_id");
             return Err("tab_id must not be empty".to_string());
         }
 
@@ -985,7 +1263,19 @@ async fn set_content_bounds<R: Runtime>(
         *bounds_slot = converted;
     };
 
-    apply_bounds_to_active_webview(&app_handle)
+    match apply_bounds_to_active_webview(&app_handle) {
+        Ok(()) => {
+            log_command("set_content_bounds", "success");
+            Ok(())
+        }
+        Err(err) => {
+            log_command(
+                "set_content_bounds",
+                &format!("apply_bounds failed tab_id={tab_id} err={err}"),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1069,18 +1359,47 @@ async fn content_stop<R: Runtime>(
 
     Ok(())
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrontendTraceEvent {
+    event: String,
+    #[serde(default)]
+    details: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[tauri::command]
+async fn log_frontend_event(request: FrontendTraceEvent) -> Result<(), String> {
+    let details = request
+        .details
+        .unwrap_or_else(|| "<none>".to_string());
+    let source = request.source.unwrap_or_else(|| "frontend".to_string());
+    log_startup(&format!(
+        "frontend_event | source={} event={} details={}",
+        source, request.event, details
+    ));
+    Ok(())
+}
+
 // Tauri command to get the current URL
 #[tauri::command]
 async fn get_current_url<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<String, String> {
-    if let Some(state) = app_handle.try_state::<AppState>() {
+    let current_url = if let Some(state) = app_handle.try_state::<AppState>() {
         if let Ok(current_url) = state.current_url.lock() {
-            return Ok(current_url.clone());
+            current_url.clone()
+        } else {
+            "about:home".to_string()
         }
-    }
-    Ok("about:home".to_string())
+    } else {
+        "about:home".to_string()
+    };
+    log_command("get_current_url", &format!("return={current_url}"));
+    Ok(current_url)
 }
 
 #[cfg(test)]
@@ -1103,6 +1422,8 @@ mod tests {
             content_tab_webviews: Mutex::new(std::collections::HashMap::new()),
             active_content_tab: Mutex::new(None),
             content_bounds: Mutex::new(None),
+            last_content_bounds: Mutex::new(None),
+            content_webview_visible: Mutex::new(false),
             browser_engine: Arc::new(BrowserEngine::new()),
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),

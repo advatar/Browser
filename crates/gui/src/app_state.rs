@@ -12,7 +12,7 @@ use crate::protocol_handlers::ProtocolHandler;
 use crate::security::SecurityManager;
 use crate::telemetry::TelemetryManager;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ContentWebviewBounds {
     pub x: f64,
     pub y: f64,
@@ -31,6 +31,8 @@ pub struct AppState {
     pub content_tab_webviews: Mutex<HashMap<String, String>>,
     pub active_content_tab: Mutex<Option<String>>,
     pub content_bounds: Mutex<Option<ContentWebviewBounds>>,
+    pub last_content_bounds: Mutex<Option<ContentWebviewBounds>>,
+    pub content_webview_visible: Mutex<bool>,
     pub browser_engine: Arc<BrowserEngine>,
     pub protocol_handler: Arc<Mutex<ProtocolHandler>>,
     pub security_manager: Arc<Mutex<SecurityManager>>,
