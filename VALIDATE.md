@@ -52,3 +52,7 @@ make dev
 - Open 2-3 tabs with different sites, navigate within one tab, switch tabs, and confirm each tab preserves its own page/history state.
 - Use Back, Forward, Reload, and Stop in the toolbar and confirm they affect the active native tab content.
 - Resize the window and toggle the sidebar a few times and confirm the web content stays aligned with the content area.
+
+## Async Review
+
+- Open `docs/KEYMEIN.md` and confirm the note still matches the repo state: `KeyMeIn` is present as a submodule but is not wired into the current Cargo or JavaScript workspaces.

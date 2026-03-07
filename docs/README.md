@@ -8,6 +8,7 @@ This directory contains comprehensive documentation for the Decentralized Web Br
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development setup, workflows, and contribution guidelines
 - **[USER_GUIDE.md](USER_GUIDE.md)** - End-user documentation and usage instructions
 - **[API.md](API.md)** - API documentation and code-level references
+- **[KEYMEIN.md](KEYMEIN.md)** - Research note on current `KeyMeIn` usage and adoption guidance
 
 ## Quick Navigation
 
