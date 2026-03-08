@@ -6,6 +6,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::agent::{AgentManager, ApprovalBroker, McpServerRegistry};
 use crate::agent_apps::AgentAppRegistry;
+use crate::agent_app_schedules::AgentAppScheduleRegistry;
 use crate::browser_engine::BrowserEngine;
 use crate::mcp_profiles::McpConfigService;
 use crate::protocol_handlers::ProtocolHandler;
@@ -46,4 +47,5 @@ pub struct AppState {
     pub mcp_registry: Arc<McpServerRegistry>,
     pub mcp_config: Arc<McpConfigService>,
     pub agent_apps: Arc<AgentAppRegistry>,
+    pub agent_app_schedules: Arc<AgentAppScheduleRegistry>,
 }

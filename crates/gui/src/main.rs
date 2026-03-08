@@ -10,6 +10,7 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tauri::Manager; // bring Manager trait into scope
 use tauri::{
@@ -21,8 +22,11 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Use the library crate modules
 use gui::agent::{
-    AgentManager, AgentRunRequest, AgentRunResponse, AgentSkillSummary, ApprovalBroker,
-    CreditSnapshot, McpServerRegistry,
+    AgentManager, AgentRunRequest, AgentRunResponse, AgentRunSummary, AgentSkillSummary,
+    ApprovalBroker, CreditSnapshot, McpServerRegistry,
+};
+use gui::agent_app_schedules::{
+    AgentAppScheduleDraft, AgentAppScheduleRegistry, AgentAppScheduleSummary,
 };
 use gui::agent_apps::{AgentAppRegistry, AgentAppSummary};
 use gui::app_state::{AppState, ContentWebviewBounds};
@@ -61,12 +65,17 @@ fn log_command(cmd: &str, details: &str) {
 }
 
 fn chrono_like_timestamp() -> String {
-    // Minimal, dependency-free timestamp using system time since UNIX_EPOCH
-    use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(dur) => format!("{}.{:03}", dur.as_secs(), dur.subsec_millis()),
         Err(_) => "0".to_string(),
     }
+}
+
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn is_internal_url(url: &str) -> bool {
@@ -77,6 +86,79 @@ fn parse_external_url(url: &str) -> Result<url::Url, String> {
     url::Url::parse(url.trim())
         .or_else(|_| url::Url::parse(&format!("https://{}", url.trim())))
         .map_err(|e| format!("Invalid URL: {e}"))
+}
+
+fn spawn_agent_app_scheduler<R: Runtime>(app_handle: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+
+            let (apps, schedules) = match app_handle.try_state::<AppState>() {
+                Some(state) => (state.agent_apps.clone(), state.agent_app_schedules.clone()),
+                None => continue,
+            };
+
+            let due_schedules = match schedules.claim_due(unix_time_ms()) {
+                Ok(schedules) => schedules,
+                Err(err) => {
+                    log_startup(&format!("agent app scheduler claim failed: {err}"));
+                    continue;
+                }
+            };
+
+            if due_schedules.is_empty() {
+                continue;
+            }
+
+            for schedule in due_schedules {
+                let app = match apps.find(&schedule.app_id) {
+                    Some(app) => app,
+                    None => {
+                        let _ = schedules.record_run_result(&schedule.id, "missing_app");
+                        log_startup(&format!(
+                            "agent app scheduler missing app id={} schedule={}",
+                            schedule.app_id, schedule.id
+                        ));
+                        continue;
+                    }
+                };
+
+                let manager = match get_agent_manager(&app_handle).await {
+                    Ok(manager) => manager,
+                    Err(err) => {
+                        let _ = schedules.record_run_result(&schedule.id, "manager_unavailable");
+                        log_startup(&format!(
+                            "agent app scheduler unavailable schedule={} error={err}",
+                            schedule.id
+                        ));
+                        continue;
+                    }
+                };
+
+                let schedules = schedules.clone();
+                tauri::async_runtime::spawn(async move {
+                    let outcome = manager
+                        .run_task(AgentRunRequest {
+                            task: app.render_task(schedule.input.as_deref()),
+                            skill_id: app.skill_id.clone(),
+                            no_egress: app.no_egress,
+                            label: Some(schedule.label.clone()),
+                            app_id: Some(app.id.clone()),
+                            schedule_id: Some(schedule.id.clone()),
+                        })
+                        .await;
+
+                    let status = match outcome {
+                        Ok(response) if response.cancelled => "cancelled",
+                        Ok(_) => "completed",
+                        Err(_) => "failed",
+                    };
+                    let _ = schedules.record_run_result(&schedule.id, status);
+                });
+            }
+        }
+    });
 }
 
 fn tab_webview_label(tab_id: &str) -> String {
@@ -630,6 +712,13 @@ fn main() {
             AgentAppRegistry::empty()
         }
     });
+    let agent_app_schedules = Arc::new(match AgentAppScheduleRegistry::load_default() {
+        Ok(registry) => registry,
+        Err(err) => {
+            log_startup(&format!("failed to load agent app schedules: {err}"));
+            AgentAppScheduleRegistry::empty()
+        }
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
@@ -654,6 +743,7 @@ fn main() {
             mcp_registry: mcp_registry.clone(),
             mcp_config: mcp_config.clone(),
             agent_apps: agent_apps.clone(),
+            agent_app_schedules: agent_app_schedules.clone(),
         })
         .setup(|app| {
             log_startup("setup: entered");
@@ -680,6 +770,8 @@ fn main() {
                     }
                 }
             }
+
+            spawn_agent_app_scheduler(app.app_handle().clone());
 
             if let Some(state) = app.app_handle().try_state::<AppState>() {
                 let telemetry = state.telemetry_manager.clone();
@@ -714,9 +806,13 @@ fn main() {
             log_frontend_event,
             agent_list_tools,
             agent_run_task,
+            agent_list_runs,
             agent_cancel_run,
             list_agent_apps,
             launch_agent_app,
+            list_agent_app_schedules,
+            save_agent_app_schedule,
+            delete_agent_app_schedule,
             agent_list_skills,
             agent_get_credits,
             agent_top_up_credits,
@@ -752,6 +848,8 @@ fn main() {
             remove_bookmark,
             get_history,
             clear_history,
+            search_history,
+            remove_history_entry,
             resolve_protocol_url,
             update_security_settings,
             get_security_status,
@@ -824,6 +922,15 @@ async fn agent_run_task<R: Runtime>(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+async fn agent_list_runs<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<AgentRunSummary>, String> {
+    let manager = get_agent_manager(&app_handle).await?;
+    Ok(manager.list_runs(24).await)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentCancelRunRequest {
@@ -868,6 +975,62 @@ async fn list_agent_apps<R: Runtime>(
 }
 
 #[tauri::command]
+async fn list_agent_app_schedules<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<AgentAppScheduleSummary>, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    Ok(state.agent_app_schedules.list())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveAgentAppScheduleRequest {
+    draft: AgentAppScheduleDraft,
+}
+
+#[tauri::command]
+async fn save_agent_app_schedule<R: Runtime>(
+    request: SaveAgentAppScheduleRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<AgentAppScheduleSummary, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    if state.agent_apps.find(&request.draft.app_id).is_none() {
+        return Err(format!("agent app `{}` not found", request.draft.app_id));
+    }
+    state
+        .agent_app_schedules
+        .upsert(request.draft, unix_time_ms())
+        .map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteAgentAppScheduleRequest {
+    schedule_id: String,
+}
+
+#[tauri::command]
+async fn delete_agent_app_schedule<R: Runtime>(
+    request: DeleteAgentAppScheduleRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<bool, String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    state
+        .agent_app_schedules
+        .delete(request.schedule_id.trim())
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 async fn launch_agent_app<R: Runtime>(
     request: LaunchAgentAppRequest,
     _window: tauri::Window<R>,
@@ -898,6 +1061,9 @@ async fn launch_agent_app<R: Runtime>(
             task,
             skill_id: app.skill_id.clone(),
             no_egress: app.no_egress,
+            label: Some(app.name.clone()),
+            app_id: Some(app.id.clone()),
+            schedule_id: None,
         })
         .await
         .map_err(|err| err.to_string())
@@ -1174,7 +1340,8 @@ async fn navigate_to<R: Runtime>(
     }
 
     let target = parse_external_url(&request.url)?;
-    log_command("navigate_to", &format!("parsed target_url={target}"));
+    let target_url = target.to_string();
+    log_command("navigate_to", &format!("parsed target_url={target_url}"));
 
     webview.navigate(target).map_err(|e| {
         let err = format!("Failed to navigate: {e}");
@@ -1184,6 +1351,12 @@ async fn navigate_to<R: Runtime>(
         );
         err
     })?;
+
+    state
+        .browser_engine
+        .add_to_history(target_url, request.url.clone())
+        .map_err(|err| err.to_string())?;
+    emit_history_updated(&app_handle, &state)?;
 
     if active_tab.as_deref() == Some(target_tab_id.as_str()) {
         log_command(
@@ -1406,6 +1579,7 @@ mod tests {
     use super::*;
     use afm_node::AfmNodeConfig;
     use gui::agent::McpServerRegistry;
+    use gui::agent_app_schedules::AgentAppScheduleRegistry;
     use gui::agent_apps::AgentAppRegistry;
     use gui::mcp_profiles::McpConfigService;
     use gui::wallet_store::WalletStore;
@@ -1438,6 +1612,7 @@ mod tests {
             mcp_registry: Arc::new(McpServerRegistry::empty(mcp_config.clone())),
             mcp_config,
             agent_apps: Arc::new(AgentAppRegistry::empty()),
+            agent_app_schedules: Arc::new(AgentAppScheduleRegistry::empty()),
         };
 
         let url = state.current_url.lock().unwrap();

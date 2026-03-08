@@ -1,6 +1,7 @@
 pub mod afm;
 pub mod agent;
 pub mod agent_apps;
+pub mod agent_app_schedules;
 pub mod app_state;
 pub mod browser_engine;
 pub mod commands;

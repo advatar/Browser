@@ -15,6 +15,18 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 // use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+pub const HISTORY_UPDATED_EVENT: &str = "browser://history-updated";
+
+pub fn emit_history_updated<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
+    let history = state.browser_engine.get_history().map_err(|e| e.to_string())?;
+    app_handle
+        .emit(HISTORY_UPDATED_EVENT, &history)
+        .map_err(|e| e.to_string())
+}
+
 // Tab management commands
 
 #[tauri::command]
@@ -118,13 +130,47 @@ pub async fn get_history<R: Runtime>(
 #[tauri::command]
 pub async fn clear_history<R: Runtime>(
     state: State<'_, AppState>,
-    _app_handle: AppHandle<R>,
+    app_handle: AppHandle<R>,
 ) -> Result<(), String> {
-    // Clear history in browser engine
-    if let Ok(mut history) = state.browser_engine.history.lock() {
-        history.clear();
-    }
+    state.browser_engine.clear_history().map_err(|e| e.to_string())?;
+    emit_history_updated(&app_handle, &state)?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHistoryRequest {
+    pub query: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[tauri::command]
+pub async fn search_history<R: Runtime>(
+    request: SearchHistoryRequest,
+    state: State<'_, AppState>,
+    _app_handle: AppHandle<R>,
+) -> Result<Vec<HistorySearchMatch>, String> {
+    state
+        .browser_engine
+        .search_history(&request.query, request.limit.unwrap_or(12))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn remove_history_entry<R: Runtime>(
+    entry_id: String,
+    state: State<'_, AppState>,
+    app_handle: AppHandle<R>,
+) -> Result<bool, String> {
+    let removed = state
+        .browser_engine
+        .remove_history_entry(&entry_id)
+        .map_err(|e| e.to_string())?;
+    if removed {
+        emit_history_updated(&app_handle, &state)?;
+    }
+    Ok(removed)
 }
 
 // Protocol handling commands

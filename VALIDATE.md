@@ -49,11 +49,16 @@ make dev
 - Enter a URL in the address bar (for example `https://google.com`) and open the Sidebar → History; verify a new history row appears.
 - Open the same URL twice and verify the history row remains a single entry with updated visit count.
 - Use the history row menu to remove an entry and confirm it disappears.
+- After asking the agent for a page snapshot on a visited page, reopen Sidebar → History and confirm the matching history row now shows a summary/snippet from the page.
+- In Sidebar → History, search using a topic or phrase from page content rather than the page title/URL and confirm Smart History returns the visited page.
 - Open 2-3 tabs with different sites, navigate within one tab, switch tabs, and confirm each tab preserves its own page/history state.
 - Use Back, Forward, Reload, and Stop in the toolbar and confirm they affect the active native tab content.
 - Resize the window and toggle the sidebar a few times and confirm the web content stays aligned with the content area.
 - Open the Copilot/agent UI, ask it to inspect the active tab, and confirm the run emits live activity events before the final response arrives.
 - While an agent run is active, press Stop and confirm the run finishes in a cancelled state instead of hanging indefinitely.
+- Launch two Agent Apps back-to-back and confirm both runs appear in the Runs list simultaneously with accurate active/completed status transitions.
+- Save an Agent App schedule, use `Run now`, and confirm it launches the linked workflow using the schedule input.
+- Disable a saved schedule, confirm its status changes to disabled with no next run time, then re-enable it and confirm the next run time returns.
 - Ask the agent to use `browser.dom_query` on a selector that exists on the active page and confirm the response contains live DOM matches from the real tab rather than the old “not available” error.
 - Ask the agent for `browser.page_snapshot` and confirm the payload includes the current page URL, title, main text, links, buttons, and forms from the active native tab.
 - Ask the agent to click, type, and scroll on a simple page (for example a local test form or `https://example.com` plus a searchable form page) and confirm the visible native tab changes accordingly.

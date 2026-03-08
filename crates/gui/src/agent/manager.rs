@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -35,6 +35,7 @@ use crate::wallet_store::{WalletOwner, WalletStore};
 use crate::webview_automation::execute_active_dom_action;
 
 const DEFAULT_INITIAL_CREDITS: i64 = 50_000;
+const MAX_RUN_SUMMARIES: usize = 24;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +45,12 @@ pub struct AgentRunRequest {
     pub skill_id: Option<String>,
     #[serde(default)]
     pub no_egress: Option<bool>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub schedule_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,6 +68,46 @@ pub struct AgentRunResponse {
     pub capabilities: HashMap<String, Option<u32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skill_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRunStatus {
+    Running,
+    CancelRequested,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSummary {
+    pub run_id: String,
+    pub task: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schedule_id: Option<String>,
+    pub status: AgentRunStatus,
+    pub started_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<u64>,
+    pub tokens_used: u64,
+    pub tokens_estimated: bool,
+    pub credits_spent: u64,
+    pub cancelled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub final_answer: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -85,8 +132,13 @@ pub struct AgentRunEventEnvelope {
 pub enum AgentRunEventPayload {
     Started {
         task: String,
+        label: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         skill_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        schedule_id: Option<String>,
     },
     Activity {
         event: AgentEvent,
@@ -111,6 +163,11 @@ pub enum AgentRunEventPayload {
 
 struct RunControl {
     cancelled: AtomicBool,
+}
+
+struct ActiveRunState {
+    control: Arc<RunControl>,
+    summary: AgentRunSummary,
 }
 
 impl RunControl {
@@ -163,7 +220,8 @@ pub struct AgentManager {
     afm_node_handle: Arc<Mutex<Option<AfmNodeHandle>>>,
     mcp_registry: Arc<McpServerRegistry>,
     run_seq: AtomicU64,
-    active_runs: AsyncMutex<HashMap<String, Arc<RunControl>>>,
+    active_runs: AsyncMutex<HashMap<String, ActiveRunState>>,
+    recent_runs: AsyncMutex<VecDeque<AgentRunSummary>>,
 }
 
 impl AgentManager {
@@ -202,6 +260,7 @@ impl AgentManager {
             mcp_registry,
             run_seq: AtomicU64::new(1),
             active_runs: AsyncMutex::new(HashMap::new()),
+            recent_runs: AsyncMutex::new(VecDeque::new()),
         })
     }
 
@@ -237,6 +296,32 @@ impl AgentManager {
         self.no_egress.store(value, Ordering::SeqCst);
     }
 
+    pub async fn list_runs(&self, limit: usize) -> Vec<AgentRunSummary> {
+        let limit = limit.clamp(1, MAX_RUN_SUMMARIES);
+        let active = {
+            let active_runs = self.active_runs.lock().await;
+            active_runs
+                .values()
+                .map(|run| run.summary.clone())
+                .collect::<Vec<_>>()
+        };
+        let recent = {
+            let recent_runs = self.recent_runs.lock().await;
+            recent_runs.iter().cloned().collect::<Vec<_>>()
+        };
+
+        let mut combined = active;
+        combined.extend(recent);
+        combined.sort_by(|left, right| {
+            right
+                .started_at_ms
+                .cmp(&left.started_at_ms)
+                .then_with(|| right.run_id.cmp(&left.run_id))
+        });
+        combined.truncate(limit);
+        combined
+    }
+
     pub async fn tool_descriptions(&self) -> Result<Vec<McpToolDescription>> {
         let policy = RoutingPolicy {
             no_egress: self.no_egress.load(Ordering::SeqCst),
@@ -249,13 +334,18 @@ impl AgentManager {
     }
 
     pub async fn cancel_run(&self, run_id: &str) -> Result<bool> {
-        let maybe_control = {
-            let active_runs = self.active_runs.lock().await;
-            active_runs.get(run_id).cloned()
+        let cancelled = {
+            let mut active_runs = self.active_runs.lock().await;
+            if let Some(run) = active_runs.get_mut(run_id) {
+                run.control.cancel();
+                run.summary.status = AgentRunStatus::CancelRequested;
+                true
+            } else {
+                false
+            }
         };
 
-        if let Some(control) = maybe_control {
-            control.cancel();
+        if cancelled {
             self.emit_run_event(run_id, AgentRunEventPayload::CancelRequested, false)?;
             Ok(true)
         } else {
@@ -294,6 +384,13 @@ impl AgentManager {
         let run_seq = self.run_seq.fetch_add(1, Ordering::SeqCst);
         let run_id = format!("run-{}", run_seq);
         let agent_id = format!("agent-{}", run_seq);
+        let label = request
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| default_run_label(&request.task));
         let wallet_owner = WalletOwner::Agent(agent_id.clone());
         {
             let mut store = self
@@ -306,14 +403,38 @@ impl AgentManager {
         let run_control = RunControl::new();
         {
             let mut active_runs = self.active_runs.lock().await;
-            active_runs.insert(run_id.clone(), run_control.clone());
+            active_runs.insert(
+                run_id.clone(),
+                ActiveRunState {
+                    control: run_control.clone(),
+                    summary: AgentRunSummary {
+                        run_id: run_id.clone(),
+                        task: request.task.clone(),
+                        label: label.clone(),
+                        skill_id: request.skill_id.clone(),
+                        app_id: request.app_id.clone(),
+                        schedule_id: request.schedule_id.clone(),
+                        status: AgentRunStatus::Running,
+                        started_at_ms: now_ms(),
+                        finished_at_ms: None,
+                        tokens_used: 0,
+                        tokens_estimated: false,
+                        credits_spent: 0,
+                        cancelled: false,
+                        final_answer: None,
+                    },
+                },
+            );
         }
 
         self.emit_run_event(
             &run_id,
             AgentRunEventPayload::Started {
                 task: request.task.clone(),
+                label: label.clone(),
                 skill_id: request.skill_id.clone(),
+                app_id: request.app_id.clone(),
+                schedule_id: request.schedule_id.clone(),
             },
             false,
         )?;
@@ -330,8 +451,16 @@ impl AgentManager {
         let (mut runtime, metered_model) = match runtime_result {
             Ok(result) => result,
             Err(err) => {
-                let mut active_runs = self.active_runs.lock().await;
-                active_runs.remove(&run_id);
+                self.finish_run_summary(
+                    &run_id,
+                    AgentRunStatus::Failed,
+                    0,
+                    false,
+                    0,
+                    false,
+                    None,
+                )
+                .await;
                 let _ = self.emit_run_event(
                     &run_id,
                     AgentRunEventPayload::Failed {
@@ -359,6 +488,16 @@ impl AgentManager {
         let result = match run_result {
             Ok(result) => result,
             Err(err) => {
+                self.finish_run_summary(
+                    &run_id,
+                    AgentRunStatus::Failed,
+                    tokens_used,
+                    tokens_estimated,
+                    credits_spent,
+                    false,
+                    None,
+                )
+                .await;
                 let _ = self.emit_run_event(
                     &run_id,
                     AgentRunEventPayload::Failed {
@@ -369,8 +508,6 @@ impl AgentManager {
                     },
                     true,
                 );
-                let mut active_runs = self.active_runs.lock().await;
-                active_runs.remove(&run_id);
                 return Err(err);
             }
         };
@@ -380,6 +517,22 @@ impl AgentManager {
             .events
             .iter()
             .any(|event| matches!(event, AgentEvent::Cancelled { .. }));
+        let final_status = if cancelled {
+            AgentRunStatus::Cancelled
+        } else {
+            AgentRunStatus::Completed
+        };
+
+        self.finish_run_summary(
+            &run_id,
+            final_status,
+            tokens_used,
+            tokens_estimated,
+            credits_spent,
+            cancelled,
+            agent.final_answer.clone(),
+        )
+        .await;
 
         self.emit_run_event(
             &run_id,
@@ -394,9 +547,6 @@ impl AgentManager {
             true,
         )?;
 
-        let mut active_runs = self.active_runs.lock().await;
-        active_runs.remove(&run_id);
-
         Ok(AgentRunResponse {
             run_id,
             agent,
@@ -409,6 +559,9 @@ impl AgentManager {
             credit,
             capabilities,
             skill_id: request.skill_id,
+            label: Some(label),
+            app_id: request.app_id,
+            schedule_id: request.schedule_id,
         })
     }
 
@@ -428,6 +581,40 @@ impl AgentManager {
 
     fn build_cancellation_check(&self, run_control: Arc<RunControl>) -> AgentCancellationCheck {
         Arc::new(move || run_control.is_cancelled())
+    }
+
+    async fn finish_run_summary(
+        &self,
+        run_id: &str,
+        status: AgentRunStatus,
+        tokens_used: u64,
+        tokens_estimated: bool,
+        credits_spent: u64,
+        cancelled: bool,
+        final_answer: Option<String>,
+    ) {
+        let summary = {
+            let mut active_runs = self.active_runs.lock().await;
+            active_runs.remove(run_id).map(|mut active| {
+                active.summary.status = status;
+                active.summary.finished_at_ms = Some(now_ms());
+                active.summary.tokens_used = tokens_used;
+                active.summary.tokens_estimated = tokens_estimated;
+                active.summary.credits_spent = credits_spent;
+                active.summary.cancelled = cancelled;
+                active.summary.final_answer = final_answer;
+                active.summary
+            })
+        };
+
+        if let Some(summary) = summary {
+            let mut recent_runs = self.recent_runs.lock().await;
+            recent_runs.retain(|entry| entry.run_id != summary.run_id);
+            recent_runs.push_front(summary);
+            while recent_runs.len() > MAX_RUN_SUMMARIES {
+                recent_runs.pop_back();
+            }
+        }
     }
 
     fn emit_run_event(
@@ -645,6 +832,26 @@ fn estimate_tokens(input: &str) -> u32 {
         0
     } else {
         chars.div_ceil(4).min(u32::MAX as u64) as u32
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn default_run_label(task: &str) -> String {
+    let trimmed = task.trim();
+    if trimmed.is_empty() {
+        return "Copilot".to_string();
+    }
+    let truncated = trimmed.chars().take(72).collect::<String>();
+    if trimmed.chars().count() > 72 {
+        format!("{truncated}…")
+    } else {
+        truncated
     }
 }
 

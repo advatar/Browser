@@ -108,6 +108,7 @@ impl ApprovalHandler for GuiApprovalHandler {
 mod tests {
     use super::*;
     use crate::agent::McpServerRegistry;
+    use crate::agent_app_schedules::AgentAppScheduleRegistry;
     use crate::agent_apps::AgentAppRegistry;
     use crate::app_state::AppState;
     use crate::browser_engine::BrowserEngine;
@@ -153,6 +154,7 @@ mod tests {
             mcp_registry: Arc::new(mcp_registry),
             mcp_config,
             agent_apps: Arc::new(AgentAppRegistry::empty()),
+            agent_app_schedules: Arc::new(AgentAppScheduleRegistry::empty()),
         };
         let broker = state.approval_broker.clone();
         let app = Builder::default()

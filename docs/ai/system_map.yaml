@@ -5,6 +5,14 @@ components:
     description: Desktop app (Tauri v2). Rust backend in crates/gui, UI served from orbit-shell-ui.
     path: crates/gui
     config: crates/gui/tauri.conf.json
+    agent_runtime:
+      manifests:
+        - configs/agent_apps.json
+        - configs/agent_app_schedules.json
+      events:
+        - agent://approval-request
+        - agent://run-event
+        - browser://history-updated
     native_content_webviews:
       mode: per-tab child webviews (no iframe)
       state:

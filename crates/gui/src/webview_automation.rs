@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use crate::app_state::AppState;
+use crate::commands::emit_history_updated;
 
 const AUTOMATION_TIMEOUT: Duration = Duration::from_secs(8);
 const DEFAULT_QUERY_LIMIT: usize = 20;
@@ -474,6 +475,7 @@ fn sync_active_tab_metadata(app_handle: &AppHandle<Wry>, payload: &Value) -> Res
         .clone();
 
     if let Some(tab_id) = active_tab_id {
+        let (summary, keywords) = payload_summary_and_keywords(payload);
         state
             .browser_engine
             .update_tab(
@@ -486,8 +488,14 @@ fn sync_active_tab_metadata(app_handle: &AppHandle<Wry>, payload: &Value) -> Res
         if !url.is_empty() {
             state
                 .browser_engine
-                .add_to_history(url.clone(), payload_title(payload))
+                .enrich_history_entry(
+                    &url,
+                    Some(payload_title(payload)),
+                    summary,
+                    keywords,
+                )
                 .map_err(|err| err.to_string())?;
+            emit_history_updated(app_handle, &state)?;
         }
     }
 
@@ -511,6 +519,25 @@ fn payload_title(payload: &Value) -> String {
                 .unwrap_or("Untitled")
         })
         .to_string()
+}
+
+fn payload_summary_and_keywords(payload: &Value) -> (Option<String>, Vec<String>) {
+    let summary = payload
+        .get("mainText")
+        .and_then(Value::as_str)
+        .map(|value| value.chars().take(280).collect::<String>());
+    let headings = payload
+        .get("headings")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .take(6)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    (summary, headings)
 }
 
 fn json_string(value: &str) -> String {
