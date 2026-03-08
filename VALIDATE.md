@@ -52,6 +52,12 @@ make dev
 - Open 2-3 tabs with different sites, navigate within one tab, switch tabs, and confirm each tab preserves its own page/history state.
 - Use Back, Forward, Reload, and Stop in the toolbar and confirm they affect the active native tab content.
 - Resize the window and toggle the sidebar a few times and confirm the web content stays aligned with the content area.
+- Open the Copilot/agent UI, ask it to inspect the active tab, and confirm the run emits live activity events before the final response arrives.
+- While an agent run is active, press Stop and confirm the run finishes in a cancelled state instead of hanging indefinitely.
+- Ask the agent to use `browser.dom_query` on a selector that exists on the active page and confirm the response contains live DOM matches from the real tab rather than the old “not available” error.
+- Ask the agent for `browser.page_snapshot` and confirm the payload includes the current page URL, title, main text, links, buttons, and forms from the active native tab.
+- Ask the agent to click, type, and scroll on a simple page (for example a local test form or `https://example.com` plus a searchable form page) and confirm the visible native tab changes accordingly.
+- Run a short agent task with the local Foundation model path and confirm credits decrease even when the provider does not report token usage explicitly.
 
 ## Async Review
 

@@ -12,6 +12,7 @@ pub mod telemetry;
 pub mod telemetry_commands;
 pub mod wallet_store;
 pub mod wallet_ui;
+pub mod webview_automation;
 
 // Re-export commonly used items at the crate root
 pub use app_state::AppState;

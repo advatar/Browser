@@ -116,7 +116,11 @@ fn ensure_tab_webview<R: Runtime>(
 ) -> Result<tauri::webview::Webview<R>, String> {
     log_command(
         "ensure_tab_webview",
-        &format!("tab_id={} initial_url={}", tab_id, initial_url.unwrap_or("<none>")),
+        &format!(
+            "tab_id={} initial_url={}",
+            tab_id,
+            initial_url.unwrap_or("<none>")
+        ),
     );
 
     use tauri::webview::{PageLoadEvent, WebviewBuilder};
@@ -223,7 +227,10 @@ fn ensure_tab_webview<R: Runtime>(
         Ok(child) => child,
         Err(err) => {
             let err = format!("Failed to create tab webview: {err}");
-            log_command("ensure_tab_webview", &format!("create failed label={label} {err}"));
+            log_command(
+                "ensure_tab_webview",
+                &format!("create failed label={label} {err}"),
+            );
 
             if let Some(existing) = app_handle.get_webview(&label) {
                 log_command(
@@ -241,7 +248,10 @@ fn ensure_tab_webview<R: Runtime>(
     };
 
     let _ = child.hide();
-    log_command("ensure_tab_webview", &format!("created hidden child label={label}"));
+    log_command(
+        "ensure_tab_webview",
+        &format!("created hidden child label={label}"),
+    );
 
     if let Ok(mut map) = state.content_tab_webviews.lock() {
         map.insert(tab_id.to_string(), label);
@@ -379,16 +389,14 @@ fn apply_bounds_to_active_webview<R: Runtime>(
                 bounds.x, bounds.y, bounds.width, bounds.height
             ),
         );
-        webview
-            .set_bounds(rect)
-            .map_err(|e| {
-                let err = format!("Failed to set content bounds: {e}");
-                log_command(
-                    "apply_bounds_to_active_webview",
-                    &format!("set_bounds failed tab_id={active_tab_id} label={label} {err}"),
-                );
-                err
-            })?;
+        webview.set_bounds(rect).map_err(|e| {
+            let err = format!("Failed to set content bounds: {e}");
+            log_command(
+                "apply_bounds_to_active_webview",
+                &format!("set_bounds failed tab_id={active_tab_id} label={label} {err}"),
+            );
+            err
+        })?;
         *last_bounds_slot = Some(bounds);
     }
 
@@ -397,16 +405,14 @@ fn apply_bounds_to_active_webview<R: Runtime>(
             "apply_bounds_to_active_webview",
             &format!("show tab_id={active_tab_id} label={label}"),
         );
-        webview
-            .show()
-            .map_err(|e| {
-                let err = format!("Failed to show content webview: {e}");
-                log_command(
-                    "apply_bounds_to_active_webview",
-                    &format!("show failed tab_id={active_tab_id} label={label} {err}"),
-                );
-                err
-            })?;
+        webview.show().map_err(|e| {
+            let err = format!("Failed to show content webview: {e}");
+            log_command(
+                "apply_bounds_to_active_webview",
+                &format!("show failed tab_id={active_tab_id} label={label} {err}"),
+            );
+            err
+        })?;
         *visible_slot = true;
     }
 
@@ -450,9 +456,9 @@ fn create_browser_window<R: Runtime>(
     let webview = WebviewWindowBuilder::new(app, MAIN_WEBVIEW_LABEL, initial_webview_url)
         .title("Decentralized Browser")
         .inner_size(1200.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .menu(menu)
-    .build()?;
+        .min_inner_size(800.0, 600.0)
+        .menu(menu)
+        .build()?;
     log_startup("create_browser_window: webview built");
 
     // Store the initial URL in the app state
@@ -666,7 +672,7 @@ fn main() {
                     Ok(manager) => {
                         tauri::async_runtime::block_on(async move {
                             let mut slot = agent_mutex.lock().await;
-                            *slot = Some(manager);
+                            *slot = Some(Arc::new(manager));
                         });
                     }
                     Err(err) => {
@@ -708,6 +714,7 @@ fn main() {
             log_frontend_event,
             agent_list_tools,
             agent_run_task,
+            agent_cancel_run,
             list_agent_apps,
             launch_agent_app,
             agent_list_skills,
@@ -776,11 +783,9 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-#[tauri::command]
-async fn agent_list_tools<R: Runtime>(
-    _window: tauri::Window<R>,
-    app_handle: tauri::AppHandle<R>,
-) -> Result<Vec<McpToolDescription>, String> {
+async fn get_agent_manager<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+) -> Result<Arc<AgentManager>, String> {
     let state = app_handle
         .try_state::<AppState>()
         .ok_or_else(|| "application state unavailable".to_string())?;
@@ -788,9 +793,18 @@ async fn agent_list_tools<R: Runtime>(
     drop(state);
 
     let guard = agent_mutex.lock().await;
-    let manager = guard
+    guard
         .as_ref()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
+        .cloned()
+        .ok_or_else(|| "agent manager not initialised".to_string())
+}
+
+#[tauri::command]
+async fn agent_list_tools<R: Runtime>(
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<Vec<McpToolDescription>, String> {
+    let manager = get_agent_manager(&app_handle).await?;
     manager
         .tool_descriptions()
         .await
@@ -803,21 +817,35 @@ async fn agent_run_task<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<AgentRunResponse, String> {
-    let state = app_handle
-        .try_state::<AppState>()
-        .ok_or_else(|| "application state unavailable".to_string())?;
-    let agent_mutex = state.agent_manager.clone();
-    drop(state);
-
-    let mut guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_mut()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
-
+    let manager = get_agent_manager(&app_handle).await?;
     manager
         .run_task(request)
         .await
         .map_err(|err| err.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentCancelRunRequest {
+    run_id: String,
+}
+
+#[tauri::command]
+async fn agent_cancel_run<R: Runtime>(
+    request: AgentCancelRunRequest,
+    _window: tauri::Window<R>,
+    app_handle: tauri::AppHandle<R>,
+) -> Result<(), String> {
+    let manager = get_agent_manager(&app_handle).await?;
+    let cancelled = manager
+        .cancel_run(request.run_id.trim())
+        .await
+        .map_err(|err| err.to_string())?;
+    if cancelled {
+        Ok(())
+    } else {
+        Err(format!("unknown agent run `{}`", request.run_id.trim()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -857,10 +885,13 @@ async fn launch_agent_app<R: Runtime>(
         .ok_or_else(|| format!("agent app `{}` not found", request.app_id))?;
     let task = app.render_task(request.input.as_deref());
 
-    let mut guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_mut()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
+    let manager = {
+        let guard = agent_mutex.lock().await;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "agent manager not initialised".to_string())?
+    };
 
     manager
         .run_task(AgentRunRequest {
@@ -877,17 +908,7 @@ async fn agent_list_skills<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<Vec<AgentSkillSummary>, String> {
-    let state = app_handle
-        .try_state::<AppState>()
-        .ok_or_else(|| "application state unavailable".to_string())?;
-    let agent_mutex = state.agent_manager.clone();
-    drop(state);
-
-    let guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_ref()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
-
+    let manager = get_agent_manager(&app_handle).await?;
     Ok(manager.list_skills())
 }
 
@@ -896,17 +917,7 @@ async fn agent_get_credits<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<CreditSnapshot, String> {
-    let state = app_handle
-        .try_state::<AppState>()
-        .ok_or_else(|| "application state unavailable".to_string())?;
-    let agent_mutex = state.agent_manager.clone();
-    drop(state);
-
-    let guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_ref()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
-
+    let manager = get_agent_manager(&app_handle).await?;
     Ok(manager.credit_snapshot().await)
 }
 
@@ -916,17 +927,7 @@ async fn agent_top_up_credits<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<CreditSnapshot, String> {
-    let state = app_handle
-        .try_state::<AppState>()
-        .ok_or_else(|| "application state unavailable".to_string())?;
-    let agent_mutex = state.agent_manager.clone();
-    drop(state);
-
-    let guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_ref()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
-
+    let manager = get_agent_manager(&app_handle).await?;
     Ok(manager.top_up_credits(tokens).await)
 }
 
@@ -936,17 +937,7 @@ async fn agent_set_no_egress<R: Runtime>(
     _window: tauri::Window<R>,
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
-    let state = app_handle
-        .try_state::<AppState>()
-        .ok_or_else(|| "application state unavailable".to_string())?;
-    let agent_mutex = state.agent_manager.clone();
-    drop(state);
-
-    let guard = agent_mutex.lock().await;
-    let manager = guard
-        .as_ref()
-        .ok_or_else(|| "agent manager not initialised".to_string())?;
-
+    let manager = get_agent_manager(&app_handle).await?;
     manager.set_no_egress(enabled);
     Ok(())
 }
@@ -1033,7 +1024,10 @@ async fn activate_tab_webview<R: Runtime>(
 
     for label in labels_to_hide {
         if let Some(webview) = app_handle.get_webview(&label) {
-            log_command("activate_tab_webview", &format!("hiding sibling label={label}"));
+            log_command(
+                "activate_tab_webview",
+                &format!("hiding sibling label={label}"),
+            );
             let _ = webview.hide();
         }
     }
@@ -1157,13 +1151,19 @@ async fn navigate_to<R: Runtime>(
     let active_tab = active_tab_id(&state)?;
     log_command(
         "navigate_to",
-        &format!("target_tab_id={target_tab_id} active_tab={}", active_tab.as_deref().unwrap_or("<none>")),
+        &format!(
+            "target_tab_id={target_tab_id} active_tab={}",
+            active_tab.as_deref().unwrap_or("<none>")
+        ),
     );
 
     let webview = ensure_tab_webview(&app_handle, &target_tab_id, Some(&request.url))?;
-    let target_label = read_tab_label(&state, &target_tab_id)?
-        .unwrap_or_else(|| "<missing>".to_string());
-    log_command("navigate_to", &format!("ensure_tab_webview done target_label={target_label}"));
+    let target_label =
+        read_tab_label(&state, &target_tab_id)?.unwrap_or_else(|| "<missing>".to_string());
+    log_command(
+        "navigate_to",
+        &format!("ensure_tab_webview done target_label={target_label}"),
+    );
 
     if is_internal_url(&request.url) {
         log_command(
@@ -1176,16 +1176,14 @@ async fn navigate_to<R: Runtime>(
     let target = parse_external_url(&request.url)?;
     log_command("navigate_to", &format!("parsed target_url={target}"));
 
-    webview
-        .navigate(target)
-        .map_err(|e| {
-            let err = format!("Failed to navigate: {e}");
-            log_command(
-                "navigate_to",
-                &format!("navigation failed target_tab_id={target_tab_id} label={target_label} {err}"),
-            );
-            err
-        })?;
+    webview.navigate(target).map_err(|e| {
+        let err = format!("Failed to navigate: {e}");
+        log_command(
+            "navigate_to",
+            &format!("navigation failed target_tab_id={target_tab_id} label={target_label} {err}"),
+        );
+        err
+    })?;
 
     if active_tab.as_deref() == Some(target_tab_id.as_str()) {
         log_command(
@@ -1228,7 +1226,10 @@ async fn set_content_bounds<R: Runtime>(
         .as_ref()
         .map(|b| format!("{}x{} @ {},{}", b.width, b.height, b.x, b.y))
         .unwrap_or_else(|| "<none>".to_string());
-    log_command("set_content_bounds", &format!("tab_id={tab_id} bounds={bounds_dbg}"));
+    log_command(
+        "set_content_bounds",
+        &format!("tab_id={tab_id} bounds={bounds_dbg}"),
+    );
 
     let state = app_handle
         .try_state::<AppState>()
@@ -1372,9 +1373,7 @@ struct FrontendTraceEvent {
 
 #[tauri::command]
 async fn log_frontend_event(request: FrontendTraceEvent) -> Result<(), String> {
-    let details = request
-        .details
-        .unwrap_or_else(|| "<none>".to_string());
+    let details = request.details.unwrap_or_else(|| "<none>".to_string());
     let source = request.source.unwrap_or_else(|| "frontend".to_string());
     log_startup(&format!(
         "frontend_event | source={} event={} details={}",
@@ -1428,9 +1427,7 @@ mod tests {
             protocol_handler: Arc::new(Mutex::new(ProtocolHandler::new())),
             security_manager: Arc::new(Mutex::new(SecurityManager::new())),
             telemetry_manager: Arc::new(Mutex::new(TelemetryManager::new())),
-            wallet_store: Arc::new(Mutex::new(
-                WalletStore::default(),
-            )),
+            wallet_store: Arc::new(Mutex::new(WalletStore::default())),
             agent_manager: Arc::new(AsyncMutex::new(None)),
             approval_broker: ApprovalBroker::new(),
             afm_node_controller: Arc::new(AsyncMutex::new(None)),

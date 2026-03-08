@@ -11,6 +11,8 @@ pub use approvals::ApprovalHandler;
 pub use capabilities::{
     CapabilityError, CapabilityKind, CapabilityLimit, CapabilityRegistry, ConsumeOutcome,
 };
-pub use dom::{DomAction, DomEvent, DomObservation};
+pub use dom::{
+    DomAction, DomEvent, DomExecutionResult, DomExecutor, DomObservation, NoopDomExecutor,
+};
 pub use ledger::{AgentLedger, LedgerEntry};
 pub use runtime::{AgentRuntime, AgentRuntimeBuilder, AgentRuntimeResult};

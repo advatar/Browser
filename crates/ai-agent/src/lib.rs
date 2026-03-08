@@ -12,7 +12,8 @@ pub use foundation::{FoundationModelClient, FoundationModelOptions, PlatformMode
 pub use language_model::{LanguageModelClient, LanguageModelResponse};
 pub use mcp::{McpTool, McpToolDescription, McpToolError, McpToolResult};
 pub use orchestrator::{
-    AgentConfig, AgentEvent, AgentOrchestrator, AgentResult, PlanStep, ToolInvocation,
+    AgentCancellationCheck, AgentConfig, AgentEvent, AgentEventCallback, AgentOrchestrator,
+    AgentResult, PlanStep, ToolInvocation,
 };
 
 pub const DEFAULT_AGENT_MAX_STEPS: usize = 8;

@@ -56,6 +56,7 @@ pub enum AgentEvent {
     ModelResponse { raw: String },
     ToolCall { name: String, args: Value },
     ToolResult { name: String, result: Value },
+    Cancelled { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,12 +72,17 @@ struct ToolRecord {
     handler: Arc<dyn McpTool>,
 }
 
+pub type AgentEventCallback = Arc<dyn Fn(AgentEvent) + Send + Sync>;
+pub type AgentCancellationCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
 pub struct AgentOrchestrator {
     model: Arc<dyn LanguageModelClient>,
     config: AgentConfig,
     tools: IndexMap<String, ToolRecord>,
     history: Vec<DialogueTurn>,
     events: Vec<AgentEvent>,
+    event_callback: Option<AgentEventCallback>,
+    cancellation_check: Option<AgentCancellationCheck>,
 }
 
 impl AgentOrchestrator {
@@ -87,6 +93,8 @@ impl AgentOrchestrator {
             tools: IndexMap::new(),
             history: Vec::new(),
             events: Vec::new(),
+            event_callback: None,
+            cancellation_check: None,
         }
     }
 
@@ -99,6 +107,14 @@ impl AgentOrchestrator {
                 handler: tool,
             },
         );
+    }
+
+    pub fn set_event_callback(&mut self, callback: AgentEventCallback) {
+        self.event_callback = Some(callback);
+    }
+
+    pub fn set_cancellation_check(&mut self, check: AgentCancellationCheck) {
+        self.cancellation_check = Some(check);
     }
 
     pub fn tool_descriptions(&self) -> Vec<McpToolDescription> {
@@ -167,14 +183,28 @@ impl AgentOrchestrator {
         self.events.clear();
 
         for step_idx in 0..self.config.max_steps {
+            if self.is_cancelled() {
+                self.emit_event(AgentEvent::Cancelled {
+                    reason: "cancelled before next planning step".to_string(),
+                });
+                return Ok(self.cancelled_result(steps));
+            }
+
             let prompt = self.build_prompt(task);
             let mut options = self.config.model_options.clone();
             options.system_prompt = Some(self.config.system_prompt.clone());
 
             let response = self.model.complete(&prompt, &options).await?;
-            self.events.push(AgentEvent::ModelResponse {
+            self.emit_event(AgentEvent::ModelResponse {
                 raw: response.text.clone(),
             });
+
+            if self.is_cancelled() {
+                self.emit_event(AgentEvent::Cancelled {
+                    reason: "cancelled after model response".to_string(),
+                });
+                return Ok(self.cancelled_result(steps));
+            }
 
             let directive = self.parse_model_directive(&response)?;
             match directive {
@@ -189,16 +219,23 @@ impl AgentOrchestrator {
                         .ok_or_else(|| anyhow!("Model requested unknown tool: {name}"))?
                         .handler
                         .clone();
-                    self.events.push(AgentEvent::ToolCall {
+                    self.emit_event(AgentEvent::ToolCall {
                         name: name.clone(),
                         args: args.clone(),
                     });
+
+                    if self.is_cancelled() {
+                        self.emit_event(AgentEvent::Cancelled {
+                            reason: format!("cancelled before invoking tool {name}"),
+                        });
+                        return Ok(self.cancelled_result(steps));
+                    }
 
                     let observation = record
                         .invoke(args.clone())
                         .await
                         .map_err(|err| anyhow!("Tool {} invocation failed: {}", name, err))?;
-                    self.events.push(AgentEvent::ToolResult {
+                    self.emit_event(AgentEvent::ToolResult {
                         name: name.clone(),
                         result: observation.content.clone(),
                     });
@@ -243,6 +280,29 @@ impl AgentOrchestrator {
             events: self.events.clone(),
             halted: true,
         })
+    }
+
+    fn emit_event(&mut self, event: AgentEvent) {
+        if let Some(callback) = &self.event_callback {
+            callback(event.clone());
+        }
+        self.events.push(event);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation_check
+            .as_ref()
+            .map(|check| check())
+            .unwrap_or(false)
+    }
+
+    fn cancelled_result(&self, steps: Vec<PlanStep>) -> AgentResult {
+        AgentResult {
+            final_answer: None,
+            steps,
+            events: self.events.clone(),
+            halted: true,
+        }
     }
 
     fn parse_model_directive(&self, response: &LanguageModelResponse) -> Result<ModelDirective> {

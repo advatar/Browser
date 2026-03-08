@@ -16,6 +16,7 @@ use crate::agent::iproov::{CartMandate, IproovServices};
 use crate::app_state::AppState;
 use crate::browser_engine::BrowserEngine;
 use crate::wallet_store::{WalletOwner, WalletStore};
+use crate::webview_automation::{active_tab_webview, query_active_dom, snapshot_active_page};
 
 fn build_description(name: &str, description: &str, schema: Value) -> McpToolDescription {
     McpToolDescription::new(name.to_string(), description.to_string(), schema)
@@ -46,6 +47,14 @@ pub fn build_dom_query_schema() -> Value {
 }
 
 pub fn build_tabs_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
+
+pub fn build_page_snapshot_schema() -> Value {
     json!({
         "type": "object",
         "properties": {},
@@ -97,33 +106,7 @@ impl NavigateTool {
     }
 
     fn resolve_webview(&self) -> Result<tauri::webview::Webview<Wry>, McpToolError> {
-        let state = self
-            .app_handle
-            .try_state::<AppState>()
-            .ok_or_else(|| McpToolError::Invocation("application state unavailable".into()))?;
-
-        let active_tab_id = state
-            .active_content_tab
-            .lock()
-            .map_err(|_| McpToolError::Invocation("active tab mutex poisoned".into()))?
-            .clone()
-            .ok_or_else(|| {
-                McpToolError::Invocation("active tab webview is not available".into())
-            })?;
-
-        let label = state
-            .content_tab_webviews
-            .lock()
-            .map_err(|_| McpToolError::Invocation("content webview map mutex poisoned".into()))?
-            .get(&active_tab_id)
-            .cloned()
-            .ok_or_else(|| {
-                McpToolError::Invocation("active tab webview is not registered".into())
-            })?;
-
-        self.app_handle
-            .get_webview(&label)
-            .ok_or_else(|| McpToolError::Invocation("active tab webview is not available".into()))
+        active_tab_webview(&self.app_handle).map_err(|err| McpToolError::Invocation(err.into()))
     }
 }
 
@@ -204,7 +187,7 @@ impl DomQueryTool {
             app_handle,
             description: build_description(
                 "browser.dom_query",
-                "Query the active document using a CSS selector (not available for isolated native content webviews)",
+                "Query the active document in the real browser tab using a CSS selector",
                 build_dom_query_schema(),
             ),
         }
@@ -233,14 +216,57 @@ impl McpTool for DomQueryTool {
             ));
         }
 
-        // Web content is rendered in an isolated native child webview (no iframe and no IPC
-        // capabilities). That prevents us from safely extracting DOM data via JS + IPC.
-        //
-        // If we need this in the future, implement a dedicated DOM snapshot bridge with a tight
-        // allowlist and origin isolation.
-        Err(McpToolError::Invocation(
-            "DOM querying is not available for isolated native content webviews".into(),
-        ))
+        let content = query_active_dom(&self.app_handle, params.selector.trim(), params.limit)
+            .await
+            .map_err(McpToolError::Invocation)?;
+
+        Ok(McpToolResult {
+            content,
+            metadata: Default::default(),
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct PageSnapshotTool {
+    app_handle: AppHandle<Wry>,
+    description: McpToolDescription,
+}
+
+impl PageSnapshotTool {
+    pub fn new(app_handle: AppHandle<Wry>) -> Self {
+        Self {
+            app_handle,
+            description: build_description(
+                "browser.page_snapshot",
+                "Capture a structured snapshot of the active browser tab including title, main text, key links, buttons, and forms",
+                build_page_snapshot_schema(),
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl McpTool for PageSnapshotTool {
+    fn description(&self) -> &McpToolDescription {
+        &self.description
+    }
+
+    async fn invoke(&self, args: Value) -> Result<McpToolResult, McpToolError> {
+        if args != json!({}) && !args.is_null() {
+            return Err(McpToolError::InvalidInput(
+                "browser.page_snapshot does not accept arguments".into(),
+            ));
+        }
+
+        let content = snapshot_active_page(&self.app_handle)
+            .await
+            .map_err(McpToolError::Invocation)?;
+
+        Ok(McpToolResult {
+            content,
+            metadata: Default::default(),
+        })
     }
 }
 

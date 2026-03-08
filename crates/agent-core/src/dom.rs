@@ -1,4 +1,7 @@
+use anyhow::Result;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Actions the agent can perform on the DOM through the instrumentation bridge.
@@ -47,11 +50,58 @@ impl DomEvent {
 pub struct DomObservation {
     pub event: DomEvent,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 impl DomObservation {
-    pub fn new(event: DomEvent, message: String) -> Self {
-        Self { event, message }
+    pub fn new(event: DomEvent, message: String, details: Option<Value>) -> Self {
+        Self {
+            event,
+            message,
+            details,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DomExecutionResult {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+}
+
+impl DomExecutionResult {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            details: None,
+        }
+    }
+
+    pub fn with_details(message: impl Into<String>, details: Value) -> Self {
+        Self {
+            message: message.into(),
+            details: Some(details),
+        }
+    }
+}
+
+#[async_trait]
+pub trait DomExecutor: Send + Sync {
+    async fn execute(&self, action: &DomAction) -> Result<DomExecutionResult>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopDomExecutor;
+
+#[async_trait]
+impl DomExecutor for NoopDomExecutor {
+    async fn execute(&self, action: &DomAction) -> Result<DomExecutionResult> {
+        Ok(DomExecutionResult::new(format!(
+            "{} executed",
+            action.description()
+        )))
     }
 }
 
@@ -67,14 +117,13 @@ impl DomInstrumentation {
         Self::default()
     }
 
-    pub fn execute(&mut self, action: DomAction) -> DomObservation {
+    pub fn record(&mut self, action: DomAction, outcome: DomExecutionResult) -> DomObservation {
         let sequence = self.next_sequence;
         self.next_sequence = self.next_sequence.saturating_add(1);
         let timestamp_ms = current_timestamp_ms();
         let event = DomEvent::new(sequence, action.clone(), timestamp_ms);
         self.events.push(event.clone());
-        let message = format!("{} executed", action.description());
-        DomObservation::new(event, message)
+        DomObservation::new(event, outcome.message, outcome.details)
     }
 
     pub fn events(&self) -> &[DomEvent] {

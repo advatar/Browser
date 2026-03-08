@@ -9,6 +9,7 @@ description = "Allows the main UI to invoke application commands."
 commands.allow = [
   "agent_list_tools",
   "agent_run_task",
+  "agent_cancel_run",
   "list_agent_apps",
   "launch_agent_app",
   "agent_list_skills",

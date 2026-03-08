@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ai_agent::{
-    AgentConfig, AgentOrchestrator, AgentResult, LanguageModelClient, McpTool, McpToolDescription,
-    McpToolError, McpToolResult,
+    AgentCancellationCheck, AgentConfig, AgentEventCallback, AgentOrchestrator, AgentResult,
+    LanguageModelClient, McpTool, McpToolDescription, McpToolError, McpToolResult,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::approvals::ApprovalHandler;
 use crate::capabilities::{CapabilityError, CapabilityKind, CapabilityRegistry};
-use crate::dom::{DomAction, DomInstrumentation};
+use crate::dom::{DomAction, DomExecutor, DomInstrumentation, NoopDomExecutor};
 use crate::ledger::AgentLedger;
 
 const DOM_TOOL_NAME: &str = "dom_action";
@@ -22,15 +22,21 @@ const DOM_TOOL_NAME: &str = "dom_action";
 struct SharedState {
     capabilities: Arc<Mutex<CapabilityRegistry>>,
     dom: Arc<Mutex<DomInstrumentation>>,
+    dom_executor: Arc<dyn DomExecutor>,
     ledger: Arc<Mutex<AgentLedger>>,
     approval: Option<Arc<dyn ApprovalHandler>>,
 }
 
 impl SharedState {
-    fn new(capabilities: CapabilityRegistry, approval: Option<Arc<dyn ApprovalHandler>>) -> Self {
+    fn new(
+        capabilities: CapabilityRegistry,
+        approval: Option<Arc<dyn ApprovalHandler>>,
+        dom_executor: Arc<dyn DomExecutor>,
+    ) -> Self {
         Self {
             capabilities: Arc::new(Mutex::new(capabilities)),
             dom: Arc::new(Mutex::new(DomInstrumentation::new())),
+            dom_executor,
             ledger: Arc::new(Mutex::new(AgentLedger::new())),
             approval,
         }
@@ -115,6 +121,9 @@ pub struct AgentRuntimeBuilder {
     capabilities: CapabilityRegistry,
     tools: Vec<(Arc<dyn McpTool>, Option<CapabilityKind>)>,
     approval_handler: Option<Arc<dyn ApprovalHandler>>,
+    dom_executor: Arc<dyn DomExecutor>,
+    event_callback: Option<AgentEventCallback>,
+    cancellation_check: Option<AgentCancellationCheck>,
 }
 
 impl AgentRuntimeBuilder {
@@ -125,6 +134,9 @@ impl AgentRuntimeBuilder {
             capabilities: CapabilityRegistry::with_browser_defaults(),
             tools: Vec::new(),
             approval_handler: None,
+            dom_executor: Arc::new(NoopDomExecutor),
+            event_callback: None,
+            cancellation_check: None,
         }
     }
 
@@ -143,6 +155,21 @@ impl AgentRuntimeBuilder {
         self
     }
 
+    pub fn with_dom_executor(mut self, executor: Arc<dyn DomExecutor>) -> Self {
+        self.dom_executor = executor;
+        self
+    }
+
+    pub fn with_event_callback(mut self, callback: AgentEventCallback) -> Self {
+        self.event_callback = Some(callback);
+        self
+    }
+
+    pub fn with_cancellation_check(mut self, check: AgentCancellationCheck) -> Self {
+        self.cancellation_check = Some(check);
+        self
+    }
+
     pub fn register_tool(
         mut self,
         tool: Arc<dyn McpTool>,
@@ -153,8 +180,18 @@ impl AgentRuntimeBuilder {
     }
 
     pub fn build(self) -> AgentRuntime {
-        let state = SharedState::new(self.capabilities, self.approval_handler.clone());
+        let state = SharedState::new(
+            self.capabilities,
+            self.approval_handler.clone(),
+            self.dom_executor,
+        );
         let mut orchestrator = AgentOrchestrator::new(self.model, self.config);
+        if let Some(callback) = self.event_callback {
+            orchestrator.set_event_callback(callback);
+        }
+        if let Some(check) = self.cancellation_check {
+            orchestrator.set_cancellation_check(check);
+        }
         orchestrator.register_tool(Arc::new(DomTool::new(state.clone())));
         for (tool, capability) in self.tools {
             let tool: Arc<dyn McpTool> = match capability {
@@ -278,9 +315,16 @@ impl McpTool for DomTool {
                 .map_err(capability_error_to_mcp)?
         };
 
+        let execution = self
+            .state
+            .dom_executor
+            .execute(&action)
+            .await
+            .map_err(|err| McpToolError::Invocation(format!("DOM action failed: {err}")))?;
+
         let observation = {
             let mut dom = self.state.dom.lock().await;
-            dom.execute(action)
+            dom.record(action, execution)
         };
 
         {
@@ -300,6 +344,12 @@ impl McpTool for DomTool {
         if let Some(remaining) = outcome.remaining {
             if let Some(map) = content.as_object_mut() {
                 map.insert("remaining".to_string(), json!(remaining));
+            }
+        }
+
+        if let Some(details) = &observation.details {
+            if let Some(map) = content.as_object_mut() {
+                map.insert("details".to_string(), details.clone());
             }
         }
 

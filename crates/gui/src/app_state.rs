@@ -38,7 +38,7 @@ pub struct AppState {
     pub security_manager: Arc<Mutex<SecurityManager>>,
     pub telemetry_manager: Arc<Mutex<TelemetryManager>>,
     pub wallet_store: Arc<Mutex<WalletStore>>,
-    pub agent_manager: Arc<AsyncMutex<Option<AgentManager>>>,
+    pub agent_manager: Arc<AsyncMutex<Option<Arc<AgentManager>>>>,
     pub approval_broker: Arc<ApprovalBroker>,
     pub afm_node_controller: Arc<AsyncMutex<Option<AfmNodeController>>>,
     pub afm_node_handle: Arc<Mutex<Option<AfmNodeHandle>>>,
