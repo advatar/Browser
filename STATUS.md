@@ -13,3 +13,8 @@
 - Strawberry parity work is implemented and committed.
 - Automated validation is green across Rust, the runtime frontend, and the Playwright UI lane.
 - Remaining follow-up is manual smoke from `VALIDATE.md`.
+- The Tauri/Vite dev stack has been cold-restarted after clearing build artifacts, and the fresh dev binary is running.
+
+## Active Task
+
+- [x] Perform a clean restart of the Tauri/Vite dev stack so updated permissions and runtime UI state are loaded from a fresh process.
