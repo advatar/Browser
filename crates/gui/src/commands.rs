@@ -1,16 +1,17 @@
 use crate::agent::{McpRuntimeStatus, McpServerConfig, McpServerRegistry, McpServerState};
 use crate::mcp_profiles::McpProfileState;
 use crate::wallet_store::{SpendDecision, WalletOwner, WalletPolicy, WalletSnapshot};
-use crate::{afm, browser_engine::*, security::*, AppState};
+use crate::{AppState, afm, browser_engine::*, security::*};
 use afm_node::{AfmNodeController, AfmTaskDescriptor, GossipFrame, NodeStatus};
 use anyhow::Result;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime, State};
 // use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
@@ -193,6 +194,70 @@ pub fn resolve_protocol_url<R: Runtime>(
     // This is a simplified version - in a real app, you'd want to handle this differently
     // or ensure the handler doesn't need to be async
     Ok(url)
+}
+
+#[tauri::command]
+pub async fn probe_runtime_url<R: Runtime>(
+    url: String,
+    state: State<'_, AppState>,
+    _app_handle: AppHandle<R>,
+) -> Result<bool, String> {
+    let candidate = url.trim();
+    if candidate.is_empty() {
+        return Ok(false);
+    }
+
+    let parsed = match url::Url::parse(candidate) {
+        Ok(parsed) => parsed,
+        Err(_) => return Ok(false),
+    };
+
+    let available = match parsed.scheme() {
+        "ipfs" => probe_decentralized_url(&state, candidate, "ipfs").await?,
+        "ipns" => probe_decentralized_url(&state, candidate, "ipns").await?,
+        "http" | "https" => probe_http_url(candidate).await,
+        _ => false,
+    };
+
+    Ok(available)
+}
+
+async fn probe_decentralized_url(
+    state: &State<'_, AppState>,
+    url: &str,
+    fallback_scheme: &str,
+) -> Result<bool, String> {
+    let handler = state
+        .protocol_handler
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+
+    Ok(tokio::time::timeout(
+        Duration::from_secs(8),
+        handler.load_custom_protocol_url(url, fallback_scheme),
+    )
+    .await
+    .map(|result| result.is_ok())
+    .unwrap_or(false))
+}
+
+async fn probe_http_url(url: &str) -> bool {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return false,
+    };
+
+    match client.get(url).send().await {
+        Ok(response) => {
+            let status = response.status();
+            status.is_success() || status.is_redirection()
+        }
+        Err(_) => false,
+    }
 }
 
 // Security management commands
@@ -938,6 +1003,8 @@ pub async fn afm_feed_gossip<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn browser_settings_default_homepage_is_duckduckgo() {
@@ -971,5 +1038,33 @@ mod tests {
             sanitize_homepage("https://duckduckgo.com"),
             "https://duckduckgo.com"
         );
+    }
+
+    #[tokio::test]
+    async fn probe_http_url_accepts_success_statuses() {
+        let url = spawn_http_probe_server("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").await;
+        assert!(probe_http_url(&url).await);
+    }
+
+    #[tokio::test]
+    async fn probe_http_url_rejects_client_errors() {
+        let url =
+            spawn_http_probe_server("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
+        assert!(!probe_http_url(&url).await);
+    }
+
+    async fn spawn_http_probe_server(response: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let _ = socket.read(&mut buffer).await;
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
+
+        format!("http://{}", address)
     }
 }

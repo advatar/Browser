@@ -6,7 +6,7 @@
 use afm_node::AfmNodeConfig;
 use ai_agent::McpToolDescription;
 use serde::Deserialize;
-use std::fs::{create_dir_all, OpenOptions};
+use std::fs::{OpenOptions, create_dir_all};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,8 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tauri::Manager; // bring Manager trait into scope
 use tauri::{
-    menu::{IsMenuItem, Menu, MenuItem, Submenu},
     Runtime, WebviewWindowBuilder,
+    menu::{IsMenuItem, Menu, MenuItem, Submenu},
 };
 use tauri_plugin_dialog;
 use tokio::sync::Mutex as AsyncMutex;
@@ -955,6 +955,7 @@ fn main() {
             search_history,
             remove_history_entry,
             resolve_protocol_url,
+            probe_runtime_url,
             update_security_settings,
             get_security_status,
             report_error,
