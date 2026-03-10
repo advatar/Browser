@@ -56,6 +56,7 @@ commands.allow = [
   "search_history",
   "remove_history_entry",
   "resolve_protocol_url",
+  "probe_runtime_url",
   "update_security_settings",
   "get_security_status",
 

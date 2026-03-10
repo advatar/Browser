@@ -21,3 +21,4 @@
 - [x] Perform a clean restart of the Tauri/Vite dev stack so updated permissions and runtime UI state are loaded from a fresh process.
 - [x] Make the browser resolve `ipfs://` and `ipns://` URLs internally instead of rewriting them to centralized HTTP gateways.
 - [x] Show only home-screen decentralized entries that actually resolve through the browser runtime.
+- [x] Restore the Tauri UI permission for the home-page runtime probe so curated ENS/IPFS entries can render again.
