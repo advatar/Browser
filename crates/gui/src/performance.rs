@@ -445,7 +445,7 @@ impl PerformanceMonitor {
         }
 
         if metrics.network_metrics.average_response_time > 2.0 {
-            recommendations.push("⚠️  Slow network responses detected. Consider using a different IPFS gateway or DNS resolver.");
+            recommendations.push("⚠️  Slow network responses detected. Check the embedded IPFS node connectivity or switch DNS resolvers.");
         }
 
         // Startup time recommendations

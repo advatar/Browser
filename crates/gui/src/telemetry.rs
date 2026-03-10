@@ -805,7 +805,7 @@ impl TelemetryManager {
         // Mock server health checks - in production, these would be real health checks
         let services = vec![
             ("blockchain_rpc", "https://rpc.polkadot.io"),
-            ("ipfs_gateway", "https://ipfs.io"),
+            ("embedded_ipfs_node", "builtin://ipfs"),
             ("ens_resolver", "https://cloudflare-eth.com"),
         ];
 

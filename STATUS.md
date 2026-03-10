@@ -14,7 +14,9 @@
 - Automated validation is green across Rust, the runtime frontend, and the Playwright UI lane.
 - Remaining follow-up is manual smoke from `VALIDATE.md`.
 - The Tauri/Vite dev stack has been cold-restarted after clearing build artifacts, and the fresh dev binary is running.
+- `ipfs://` and `ipns://` navigation now resolves through the embedded browser node instead of rewriting through a public gateway.
 
 ## Active Task
 
 - [x] Perform a clean restart of the Tauri/Vite dev stack so updated permissions and runtime UI state are loaded from a fresh process.
+- [x] Make the browser resolve `ipfs://` and `ipns://` URLs internally instead of rewriting them to centralized HTTP gateways.

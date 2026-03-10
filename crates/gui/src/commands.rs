@@ -21,7 +21,10 @@ pub fn emit_history_updated<R: Runtime>(
     app_handle: &AppHandle<R>,
     state: &AppState,
 ) -> Result<(), String> {
-    let history = state.browser_engine.get_history().map_err(|e| e.to_string())?;
+    let history = state
+        .browser_engine
+        .get_history()
+        .map_err(|e| e.to_string())?;
     app_handle
         .emit(HISTORY_UPDATED_EVENT, &history)
         .map_err(|e| e.to_string())
@@ -132,7 +135,10 @@ pub async fn clear_history<R: Runtime>(
     state: State<'_, AppState>,
     app_handle: AppHandle<R>,
 ) -> Result<(), String> {
-    state.browser_engine.clear_history().map_err(|e| e.to_string())?;
+    state
+        .browser_engine
+        .clear_history()
+        .map_err(|e| e.to_string())?;
     emit_history_updated(&app_handle, &state)?;
     Ok(())
 }
@@ -433,7 +439,11 @@ const DEFAULT_HOMEPAGE: &str = "https://duckduckgo.com";
 
 fn sanitize_homepage(homepage: &str) -> String {
     let normalized = homepage.trim();
-    if normalized.is_empty() || normalized == "https://vitalik.eth.limo/" || normalized == "https://opensea.eth.limo/" || normalized == "https://opensea.eth.limo" {
+    if normalized.is_empty()
+        || normalized == "https://vitalik.eth.limo/"
+        || normalized == "https://opensea.eth.limo/"
+        || normalized == "https://opensea.eth.limo"
+    {
         DEFAULT_HOMEPAGE.to_string()
     } else {
         normalized.to_string()
@@ -446,7 +456,7 @@ impl Default for BrowserSettings {
             default_search_engine: "duckduckgo".to_string(),
             homepage: DEFAULT_HOMEPAGE.to_string(),
             privacy_settings: PrivacySettings::default(),
-            ipfs_gateway: "https://ipfs.io".to_string(),
+            ipfs_gateway: "builtin://ipfs".to_string(),
             ens_resolver: Some("https://eth.limo".to_string()),
         }
     }
@@ -944,7 +954,10 @@ mod tests {
             sanitize_homepage("https://opensea.eth.limo/"),
             DEFAULT_HOMEPAGE
         );
-        assert_eq!(sanitize_homepage("https://opensea.eth.limo"), DEFAULT_HOMEPAGE);
+        assert_eq!(
+            sanitize_homepage("https://opensea.eth.limo"),
+            DEFAULT_HOMEPAGE
+        );
         assert_eq!(sanitize_homepage("   "), DEFAULT_HOMEPAGE);
     }
 

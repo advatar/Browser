@@ -64,6 +64,110 @@ fn log_command(cmd: &str, details: &str) {
     log_startup(&format!("{} | {}", cmd, details));
 }
 
+fn protocol_response(
+    status: tauri::http::StatusCode,
+    content_type: &str,
+    body: Vec<u8>,
+) -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(status)
+        .header(tauri::http::header::CONTENT_TYPE, content_type)
+        .header(tauri::http::header::CACHE_CONTROL, "no-store")
+        .body(body)
+        .expect("valid protocol response")
+}
+
+fn protocol_error_response(
+    status: tauri::http::StatusCode,
+    message: impl Into<String>,
+) -> tauri::http::Response<Vec<u8>> {
+    protocol_response(
+        status,
+        "text/plain; charset=utf-8",
+        message.into().into_bytes(),
+    )
+}
+
+async fn build_decentralized_protocol_response<R: Runtime>(
+    app_handle: tauri::AppHandle<R>,
+    request_url: String,
+    fallback_scheme: &'static str,
+    head_only: bool,
+) -> tauri::http::Response<Vec<u8>> {
+    let handler = match app_handle.try_state::<AppState>() {
+        Some(state) => match state.protocol_handler.lock() {
+            Ok(handler) => handler.clone(),
+            Err(_) => {
+                return protocol_error_response(
+                    tauri::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "protocol handler unavailable",
+                );
+            }
+        },
+        None => {
+            return protocol_error_response(
+                tauri::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "application state unavailable",
+            );
+        }
+    };
+
+    match handler
+        .load_custom_protocol_url(&request_url, fallback_scheme)
+        .await
+    {
+        Ok(content) => {
+            let body = if head_only { Vec::new() } else { content.data };
+            protocol_response(tauri::http::StatusCode::OK, &content.content_type, body)
+        }
+        Err(err) => {
+            log_startup(&format!(
+                "custom protocol resolve failed scheme={fallback_scheme} url={request_url} error={err}"
+            ));
+            protocol_error_response(
+                tauri::http::StatusCode::NOT_FOUND,
+                format!("Failed to resolve {request_url}: {err}"),
+            )
+        }
+    }
+}
+
+fn register_decentralized_protocols<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .register_asynchronous_uri_scheme_protocol("ipfs", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            let request_url = request.uri().to_string();
+            let head_only = request.method() == tauri::http::Method::HEAD;
+            tauri::async_runtime::spawn(async move {
+                responder.respond(
+                    build_decentralized_protocol_response(
+                        app_handle,
+                        request_url,
+                        "ipfs",
+                        head_only,
+                    )
+                    .await,
+                );
+            });
+        })
+        .register_asynchronous_uri_scheme_protocol("ipns", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            let request_url = request.uri().to_string();
+            let head_only = request.method() == tauri::http::Method::HEAD;
+            tauri::async_runtime::spawn(async move {
+                responder.respond(
+                    build_decentralized_protocol_response(
+                        app_handle,
+                        request_url,
+                        "ipns",
+                        head_only,
+                    )
+                    .await,
+                );
+            });
+        })
+}
+
 fn chrono_like_timestamp() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(dur) => format!("{}.{:03}", dur.as_secs(), dur.subsec_millis()),
@@ -719,7 +823,7 @@ fn main() {
             AgentAppScheduleRegistry::empty()
         }
     });
-    tauri::Builder::default()
+    register_decentralized_protocols(tauri::Builder::default())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             current_url: Mutex::new("about:home".to_string()),

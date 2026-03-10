@@ -1,24 +1,30 @@
-use anyhow::{anyhow, Result};
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine as _;
+use anyhow::{anyhow, Context, Result};
+use rust_ipfs::config::BOOTSTRAP_NODES;
+use rust_ipfs::unixfs::Entry as UnixfsEntry;
+use rust_ipfs::{Ipfs, IpfsPath, StorageType, UninitializedIpfsDefault};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 use url::Url;
 
-/// Protocol handler for decentralized protocols
-#[derive(Debug)]
+const DEFAULT_IPFS_GATEWAY: &str = "builtin://ipfs";
+const LOCAL_IPFS_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(Clone)]
 pub struct ProtocolHandler {
     ipfs_gateway: String,
-    ipfs_gateways: Vec<String>,
     ens_resolver: Option<String>,
-    ipns_cache: Arc<RwLock<HashMap<String, String>>>,
-    ens_cache: Arc<RwLock<HashMap<String, String>>>,
+    ens_cache: std::sync::Arc<RwLock<HashMap<String, String>>>,
+    local_ipfs: std::sync::Arc<OnceCell<LocalIpfsNode>>,
 }
 
-/// IPFS content information
+#[derive(Clone)]
+struct LocalIpfsNode {
+    ipfs: Ipfs,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpfsContent {
     pub hash: String,
@@ -27,7 +33,6 @@ pub struct IpfsContent {
     pub data: Vec<u8>,
 }
 
-/// ENS resolution result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnsResolution {
     pub name: String,
@@ -36,124 +41,175 @@ pub struct EnsResolution {
     pub text_records: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecentralizedScheme {
+    Ipfs,
+    Ipns,
+}
+
+impl DecentralizedScheme {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ipfs => "ipfs",
+            Self::Ipns => "ipns",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DecentralizedUrl {
+    scheme: DecentralizedScheme,
+    root: String,
+    path: String,
+}
+
+impl DecentralizedUrl {
+    fn parse(url: &str, fallback_scheme: DecentralizedScheme) -> Result<Self> {
+        let parsed =
+            Url::parse(url).with_context(|| format!("invalid decentralized URL: {url}"))?;
+        let scheme = match parsed.scheme() {
+            "ipfs" => DecentralizedScheme::Ipfs,
+            "ipns" => DecentralizedScheme::Ipns,
+            "http" | "https" => fallback_scheme,
+            other => return Err(anyhow!("unsupported decentralized scheme: {other}")),
+        };
+
+        let localhost_alias = format!("{}.localhost", scheme.as_str());
+        let host = parsed.host_str().unwrap_or_default();
+        let mut segments = parsed
+            .path_segments()
+            .map(|it| it.filter(|segment| !segment.is_empty()).collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        let root = if !host.is_empty() && host != "localhost" && host != localhost_alias {
+            host.to_string()
+        } else {
+            if matches!(segments.first(), Some(prefix) if *prefix == "ipfs" || *prefix == "ipns") {
+                segments.remove(0);
+            }
+            (!segments.is_empty())
+                .then_some(())
+                .ok_or_else(|| anyhow!("missing decentralized content root"))?;
+            segments.remove(0).to_string()
+        };
+
+        let path = segments.join("/");
+
+        Ok(Self { scheme, root, path })
+    }
+
+    fn validate(&self, handler: &ProtocolHandler) -> Result<()> {
+        if self.root.trim().is_empty() {
+            return Err(anyhow!("missing decentralized content root"));
+        }
+        if self.scheme == DecentralizedScheme::Ipfs && !handler.is_valid_ipfs_hash(&self.root) {
+            return Err(anyhow!("Invalid IPFS hash: {}", self.root));
+        }
+        Ok(())
+    }
+
+    fn ipfs_path(&self) -> String {
+        let mut path = format!("/{}/{}", self.scheme.as_str(), self.root);
+        if !self.path.is_empty() {
+            path.push('/');
+            path.push_str(&self.path);
+        }
+        path
+    }
+
+    fn index_path(&self) -> String {
+        let mut path = self.ipfs_path();
+        if !path.ends_with('/') {
+            path.push('/');
+        }
+        path.push_str("index.html");
+        path
+    }
+
+    fn display_url(&self) -> String {
+        let mut url = format!("{}://{}", self.scheme.as_str(), self.root);
+        if !self.path.is_empty() {
+            url.push('/');
+            url.push_str(&self.path);
+        }
+        url
+    }
+
+    fn display_directory_url(&self) -> String {
+        let mut url = self.display_url();
+        if !url.ends_with('/') {
+            url.push('/');
+        }
+        url
+    }
+
+    fn href_for(&self, child: &str) -> String {
+        let mut url = self.display_directory_url();
+        url.push_str(child.trim_start_matches('/'));
+        url
+    }
+}
+
 impl ProtocolHandler {
     pub fn new() -> Self {
         Self {
-            ipfs_gateway: "https://ipfs.io".to_string(),
-            ipfs_gateways: vec![
-                "https://ipfs.io".to_string(),
-                "https://cloudflare-ipfs.com".to_string(),
-                "https://gateway.pinata.cloud".to_string(),
-            ],
+            ipfs_gateway: DEFAULT_IPFS_GATEWAY.to_string(),
             ens_resolver: Some("https://cloudflare-eth.com".to_string()),
-            ipns_cache: Arc::new(RwLock::new(HashMap::new())),
-            ens_cache: Arc::new(RwLock::new(HashMap::new())),
+            ens_cache: std::sync::Arc::new(RwLock::new(HashMap::new())),
+            local_ipfs: std::sync::Arc::new(OnceCell::new()),
         }
     }
 
-    /// Set IPFS gateway
     pub fn set_ipfs_gateway(&mut self, gateway: String) {
         self.ipfs_gateway = gateway;
-        // Ensure primary gateway is first in the fallback list
-        if let Some(pos) = self
-            .ipfs_gateways
-            .iter()
-            .position(|g| g == &self.ipfs_gateway)
-        {
-            // Move to front
-            let gw = self.ipfs_gateways.remove(pos);
-            self.ipfs_gateways.insert(0, gw);
-        } else {
-            self.ipfs_gateways.insert(0, self.ipfs_gateway.clone());
-        }
     }
 
-    /// Set ENS resolver
     pub fn set_ens_resolver(&mut self, resolver: Option<String>) {
         self.ens_resolver = resolver;
     }
 
-    /// Handle IPFS protocol
     pub async fn handle_ipfs(&self, hash: &str) -> Result<IpfsContent> {
-        // Validate IPFS hash
-        if !self.is_valid_ipfs_hash(hash) {
-            return Err(anyhow!("Invalid IPFS hash: {}", hash));
-        }
-
-        // Try to fetch from IPFS gateways with fallback on 5xx/timeout
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        let mut last_err: Option<anyhow::Error> = None;
-        for gw in &self.ipfs_gateways {
-            let url = format!("{}/ipfs/{}", gw, hash);
-            match client.get(&url).send().await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        let content_type = resp
-                            .headers()
-                            .get("content-type")
-                            .and_then(|ct| ct.to_str().ok())
-                            .unwrap_or("application/octet-stream")
-                            .to_string();
-                        let content_length = resp.content_length();
-                        let data = resp.bytes().await?.to_vec();
-                        return Ok(IpfsContent {
-                            hash: hash.to_string(),
-                            content_type,
-                            size: content_length,
-                            data,
-                        });
-                    } else if resp.status().is_server_error() {
-                        last_err = Some(anyhow!("Gateway {} returned {}", gw, resp.status()));
-                        continue; // try next gateway
-                    } else {
-                        // 4xx and others: do not fallback further
-                        return Err(anyhow!(
-                            "Failed to fetch IPFS content from {}: status {}",
-                            gw,
-                            resp.status()
-                        ));
-                    }
-                }
-                Err(e) => {
-                    // network/timeout errors: try next gateway
-                    last_err = Some(anyhow!("{}", e));
-                    continue;
-                }
-            }
-        }
-
-        Err(last_err.unwrap_or_else(|| anyhow!("Failed to fetch IPFS content from all gateways")))
+        let resource = DecentralizedUrl {
+            scheme: DecentralizedScheme::Ipfs,
+            root: hash
+                .trim_start_matches("ipfs://")
+                .trim_matches('/')
+                .to_string(),
+            path: String::new(),
+        };
+        resource.validate(self)?;
+        self.load_decentralized_content(&resource).await
     }
 
-    /// Handle IPNS protocol
     pub async fn handle_ipns(&self, name: &str) -> Result<IpfsContent> {
-        // Check cache first
-        {
-            let cache = self.ipns_cache.read().await;
-            if let Some(hash) = cache.get(name) {
-                return self.handle_ipfs(hash).await;
-            }
-        }
-
-        // Resolve IPNS name to IPFS hash
-        let resolved_hash = self.resolve_ipns(name).await?;
-
-        // Cache the resolution
-        {
-            let mut cache = self.ipns_cache.write().await;
-            cache.insert(name.to_string(), resolved_hash.clone());
-        }
-
-        // Fetch the content
-        self.handle_ipfs(&resolved_hash).await
+        let resource = DecentralizedUrl {
+            scheme: DecentralizedScheme::Ipns,
+            root: name
+                .trim_start_matches("ipns://")
+                .trim_matches('/')
+                .to_string(),
+            path: String::new(),
+        };
+        resource.validate(self)?;
+        self.load_decentralized_content(&resource).await
     }
 
-    /// Handle ENS protocol
+    pub async fn load_custom_protocol_url(
+        &self,
+        url: &str,
+        fallback_scheme: &str,
+    ) -> Result<IpfsContent> {
+        let fallback_scheme = match fallback_scheme {
+            "ipfs" => DecentralizedScheme::Ipfs,
+            "ipns" => DecentralizedScheme::Ipns,
+            other => return Err(anyhow!("unsupported decentralized protocol: {other}")),
+        };
+        let resource = DecentralizedUrl::parse(url, fallback_scheme)?;
+        resource.validate(self)?;
+        self.load_decentralized_content(&resource).await
+    }
+
     pub async fn handle_ens(&self, name: &str) -> Result<String> {
-        // Check cache first
         {
             let cache = self.ens_cache.read().await;
             if let Some(url) = cache.get(name) {
@@ -161,17 +217,14 @@ impl ProtocolHandler {
             }
         }
 
-        // Resolve ENS name
         let resolution = self.resolve_ens(name).await?;
 
-        // Determine the target URL
         let target_url = if let Some(content_hash) = &resolution.content_hash {
-            if content_hash.starts_with("ipfs://") {
+            if content_hash.starts_with("ipfs://") || content_hash.starts_with("ipns://") {
                 content_hash.clone()
             } else if content_hash.starts_with("Qm") || content_hash.starts_with("bafy") {
                 format!("ipfs://{}", content_hash)
             } else {
-                // Try to get URL from text records
                 resolution
                     .text_records
                     .get("url")
@@ -180,11 +233,9 @@ impl ProtocolHandler {
                     .unwrap_or_else(|| format!("https://{}", name))
             }
         } else {
-            // Fallback to traditional web
             format!("https://{}", name)
         };
 
-        // Cache the resolution
         {
             let mut cache = self.ens_cache.write().await;
             cache.insert(name.to_string(), target_url.clone());
@@ -193,166 +244,169 @@ impl ProtocolHandler {
         Ok(target_url)
     }
 
-    /// Resolve URL to appropriate protocol
     pub async fn resolve_url(&self, url: &str) -> Result<String> {
         if let Ok(parsed) = Url::parse(url) {
             match parsed.scheme() {
                 "ipfs" => {
-                    let hash = parsed.path().trim_start_matches('/');
-                    if cfg!(test) {
-                        if !self.is_valid_ipfs_hash(hash) {
-                            return Err(anyhow!("Invalid IPFS hash: {}", hash));
-                        }
-                        // In tests, avoid network fetches; return a stubbed data URL.
-                        let data_url = format!(
-                            "data:text/plain;base64,{}",
-                            STANDARD.encode(format!("stub-ipfs-content-for-{}", hash))
-                        );
-                        Ok(data_url)
-                    } else {
-                        let content = self.handle_ipfs(hash).await?;
-                        // Convert to data URL for display
-                        let data_url = format!(
-                            "data:{};base64,{}",
-                            content.content_type,
-                            STANDARD.encode(&content.data)
-                        );
-                        Ok(data_url)
-                    }
+                    let resource = DecentralizedUrl::parse(url, DecentralizedScheme::Ipfs)?;
+                    resource.validate(self)?;
+                    Ok(resource.display_url())
                 }
                 "ipns" => {
-                    let name = parsed.path().trim_start_matches('/');
-                    let content = self.handle_ipns(name).await?;
-                    // Convert to data URL for display
-                    let data_url = format!(
-                        "data:{};base64,{}",
-                        content.content_type,
-                        STANDARD.encode(&content.data)
-                    );
-                    Ok(data_url)
+                    let resource = DecentralizedUrl::parse(url, DecentralizedScheme::Ipns)?;
+                    resource.validate(self)?;
+                    Ok(resource.display_url())
                 }
                 "ens" => {
-                    let name = parsed.path().trim_start_matches('/');
-                    self.handle_ens(name).await
+                    let name = parsed
+                        .host_str()
+                        .filter(|host| !host.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| parsed.path().trim_start_matches('/').to_string());
+                    self.handle_ens(&name).await
                 }
                 _ => Ok(url.to_string()),
             }
+        } else if url.ends_with(".eth") || url.ends_with(".crypto") || url.ends_with(".blockchain")
+        {
+            self.handle_ens(url).await
         } else {
-            // Check if it looks like an ENS name
-            if url.ends_with(".eth") || url.ends_with(".crypto") || url.ends_with(".blockchain") {
-                self.handle_ens(url).await
-            } else {
-                Ok(url.to_string())
-            }
+            Ok(url.to_string())
         }
     }
 
-    /// Validate IPFS hash
     pub fn is_valid_ipfs_hash(&self, hash: &str) -> bool {
-        // Basic validation for IPFS hashes
         if hash.starts_with("Qm") && hash.len() == 46 {
-            // CIDv0
             true
         } else if hash.starts_with("bafy") || hash.starts_with("bafk") {
-            // CIDv1
             hash.len() >= 50
         } else {
             false
         }
     }
 
-    /// Resolve IPNS name to IPFS hash
-    async fn resolve_ipns(&self, name: &str) -> Result<String> {
-        // Try multiple gateways with fallback on 5xx/timeout
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .timeout(Duration::from_secs(10))
-            .build()?;
+    async fn load_decentralized_content(&self, resource: &DecentralizedUrl) -> Result<IpfsContent> {
+        let node = self.local_ipfs().await?;
+        let requested_path = resource.ipfs_path();
 
-        let mut last_err: Option<anyhow::Error> = None;
-        for gw in &self.ipfs_gateways {
-            let url = format!("{}/ipns/{}", gw, name);
-            // Try HEAD first
-            match client.head(&url).send().await {
-                Ok(head_resp) => {
-                    if head_resp.status().is_success() || head_resp.status().is_redirection() {
-                        if let Some(location) = head_resp.headers().get("location") {
-                            if let Ok(location_str) = location.to_str() {
-                                if let Some(hash) = location_str.strip_prefix("/ipfs/") {
-                                    return Ok(hash.to_string());
-                                }
-                            }
-                        }
-                        // If location not present, try GET
-                        match client.get(&url).send().await {
-                            Ok(get_resp) => {
-                                if get_resp.status().is_success()
-                                    || get_resp.status().is_redirection()
-                                {
-                                    let final_url = get_resp.url().to_string();
-                                    if let Some(hash) =
-                                        final_url.strip_prefix(&format!("{}/ipfs/", gw))
-                                    {
-                                        return Ok(hash
-                                            .split('/')
-                                            .next()
-                                            .unwrap_or(hash)
-                                            .to_string());
-                                    }
-                                } else if get_resp.status().is_server_error() {
-                                    last_err = Some(anyhow!(
-                                        "Gateway {} returned {}",
-                                        gw,
-                                        get_resp.status()
-                                    ));
-                                    continue;
-                                } else {
-                                    return Err(anyhow!(
-                                        "Failed to resolve IPNS via {}: status {}",
-                                        gw,
-                                        get_resp.status()
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                last_err = Some(anyhow!("{}", e));
-                                continue;
-                            }
-                        }
-                    } else if head_resp.status().is_server_error() {
-                        last_err = Some(anyhow!("Gateway {} returned {}", gw, head_resp.status()));
-                        continue;
-                    } else {
-                        return Err(anyhow!(
-                            "Failed to resolve IPNS via {}: status {}",
-                            gw,
-                            head_resp.status()
-                        ));
-                    }
+        if let Ok(bytes) = self.read_unixfs_file(node, &requested_path).await {
+            return Ok(IpfsContent {
+                hash: resource.display_url(),
+                content_type: guess_content_type(resource.path.as_str(), &bytes),
+                size: Some(bytes.len() as u64),
+                data: bytes,
+            });
+        }
+
+        if let Ok(bytes) = self.read_unixfs_file(node, &resource.index_path()).await {
+            return Ok(IpfsContent {
+                hash: resource.display_url(),
+                content_type: "text/html; charset=utf-8".to_string(),
+                size: Some(bytes.len() as u64),
+                data: bytes,
+            });
+        }
+
+        let listing = self.render_directory_listing(node, resource).await?;
+        Ok(IpfsContent {
+            hash: resource.display_url(),
+            content_type: "text/html; charset=utf-8".to_string(),
+            size: Some(listing.len() as u64),
+            data: listing.into_bytes(),
+        })
+    }
+
+    async fn local_ipfs(&self) -> Result<&LocalIpfsNode> {
+        self.local_ipfs
+            .get_or_try_init(|| async { LocalIpfsNode::start().await })
+            .await
+    }
+
+    async fn read_unixfs_file(&self, node: &LocalIpfsNode, path: &str) -> Result<Vec<u8>> {
+        let path = path
+            .parse::<IpfsPath>()
+            .with_context(|| format!("invalid IPFS path: {path}"))?;
+        let bytes = node
+            .ipfs
+            .cat_unixfs(path)
+            .timeout(LOCAL_IPFS_TIMEOUT)
+            .await
+            .context("failed to read UnixFS content")?;
+        Ok(bytes.to_vec())
+    }
+
+    async fn render_directory_listing(
+        &self,
+        node: &LocalIpfsNode,
+        resource: &DecentralizedUrl,
+    ) -> Result<String> {
+        let path = resource
+            .ipfs_path()
+            .parse::<IpfsPath>()
+            .with_context(|| format!("invalid IPFS path: {}", resource.ipfs_path()))?;
+        let entries = node
+            .ipfs
+            .ls_unixfs(path)
+            .timeout(LOCAL_IPFS_TIMEOUT)
+            .await
+            .context("failed to list UnixFS directory")?;
+
+        let mut items = Vec::new();
+        for entry in entries {
+            match entry {
+                UnixfsEntry::RootDirectory { .. } => {}
+                UnixfsEntry::Directory { path, .. } => {
+                    let href = resource.href_for(&path);
+                    items.push(format!(
+                        "<li><a href=\"{}\">{}/</a></li>",
+                        escape_html(&href),
+                        escape_html(&path)
+                    ));
                 }
-                Err(e) => {
-                    last_err = Some(anyhow!("{}", e));
-                    continue;
+                UnixfsEntry::File { file, size, .. } => {
+                    let href = resource.href_for(&file);
+                    items.push(format!(
+                        "<li><a href=\"{}\">{}</a> <span>{} bytes</span></li>",
+                        escape_html(&href),
+                        escape_html(&file),
+                        size
+                    ));
+                }
+                UnixfsEntry::Error { error } => {
+                    return Err(error).context("failed to render directory listing")
                 }
             }
         }
 
-        Err(last_err.unwrap_or_else(|| anyhow!("Failed to resolve IPNS from all gateways")))
+        if items.is_empty() {
+            items.push("<li>This IPFS directory is empty.</li>".to_string());
+        }
+
+        Ok(format!(
+            "<!doctype html><html><head><meta charset=\"utf-8\"><title>{title}</title><style>\
+             body{{font-family:ui-monospace,Menlo,Monaco,monospace;background:#f6f3ea;color:#17120f;padding:24px;}}\
+             h1{{font-size:18px;margin:0 0 8px;}}\
+             p{{margin:0 0 16px;color:#5b5147;}}\
+             ul{{list-style:none;padding:0;margin:0;display:grid;gap:10px;}}\
+             li{{padding:10px 12px;border:1px solid #d6cdbf;border-radius:10px;background:#fffdf7;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}}\
+             a{{color:#6b2d00;text-decoration:none;word-break:break-all;}}\
+             span{{color:#6f6358;font-size:12px;}}</style></head><body>\
+             <h1>{title}</h1><p>Served by the embedded IPFS node.</p><ul>{items}</ul></body></html>",
+            title = escape_html(&resource.display_directory_url()),
+            items = items.join("")
+        ))
     }
 
-    /// Resolve ENS name
     async fn resolve_ens(&self, name: &str) -> Result<EnsResolution> {
         if let Some(resolver_url) = &self.ens_resolver {
-            // Use Ethereum JSON-RPC to resolve ENS
             let client = reqwest::Client::new();
             let namehash = self.namehash(name);
 
-            // Get resolver address
             let resolver_request = serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": "eth_call",
                 "params": [{
-                    "to": "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e", // ENS Registry
+                    "to": "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e",
                     "data": format!("0x0178b8bf{}", namehash)
                 }, "latest"],
                 "id": 1
@@ -370,7 +424,6 @@ impl ProtocolHandler {
                 .as_str()
                 .and_then(|raw| self.extract_resolver_address(raw))
             {
-                // Get content hash from resolver
                 let content_request = serde_json::json!({
                     "jsonrpc": "2.0",
                     "method": "eth_call",
@@ -411,7 +464,6 @@ impl ProtocolHandler {
             }
         }
 
-        // Fallback: assume it's a traditional domain
         Ok(EnsResolution {
             name: name.to_string(),
             address: "".to_string(),
@@ -444,7 +496,7 @@ impl ProtocolHandler {
     ) -> Result<HashMap<String, String>> {
         let mut records = HashMap::new();
         let keys = ["url", "website", "avatar", "description", "email", "notice"];
-        for key in keys.iter() {
+        for key in &keys {
             let data = self.encode_text_query(namehash, key);
             let request = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -525,7 +577,6 @@ impl ProtocolHandler {
         String::from_utf8(bytes.to_vec()).ok()
     }
 
-    /// Calculate ENS namehash
     fn namehash(&self, name: &str) -> String {
         use sha3::{Digest, Keccak256};
 
@@ -535,7 +586,7 @@ impl ProtocolHandler {
             let labels: Vec<&str> = name.split('.').collect();
             for label in labels.iter().rev() {
                 let mut hasher = Keccak256::new();
-                hasher.update(&hash);
+                hasher.update(hash);
                 hasher.update(Keccak256::digest(label.as_bytes()));
                 hash = hasher.finalize().into();
             }
@@ -544,23 +595,19 @@ impl ProtocolHandler {
         hex::encode(hash)
     }
 
-    /// Decode content hash from ENS
     fn decode_content_hash(&self, hex_data: &str) -> String {
-        // Basic implementation - in practice, this would need proper multicodec decoding
         if hex_data.len() > 8 {
             let codec = &hex_data[0..8];
             let hash_data = &hex_data[8..];
 
             match codec {
                 "e3010170" => {
-                    // IPFS hash
                     if let Ok(decoded) = hex::decode(hash_data) {
                         let hash = bs58::encode(decoded).into_string();
                         return format!("ipfs://{}", hash);
                     }
                 }
                 "e5010172" => {
-                    // IPNS hash
                     if let Ok(decoded) = hex::decode(hash_data) {
                         let hash = bs58::encode(decoded).into_string();
                         return format!("ipns://{}", hash);
@@ -570,15 +617,11 @@ impl ProtocolHandler {
             }
         }
 
-        // Fallback
         format!("0x{}", hex_data)
     }
 
-    /// Clear caches
     pub async fn clear_caches(&self) {
-        let mut ipns_cache = self.ipns_cache.write().await;
         let mut ens_cache = self.ens_cache.write().await;
-        ipns_cache.clear();
         ens_cache.clear();
     }
 }
@@ -589,45 +632,174 @@ impl Default for ProtocolHandler {
     }
 }
 
+impl LocalIpfsNode {
+    async fn start() -> Result<Self> {
+        let repo_path = local_ipfs_repo_path()?;
+        std::fs::create_dir_all(&repo_path)
+            .with_context(|| format!("failed to create IPFS repo at {}", repo_path.display()))?;
+
+        let mut builder = UninitializedIpfsDefault::new()
+            .set_storage_type(StorageType::Disk(repo_path))
+            .with_default()
+            .set_default_listener();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            builder = builder.with_mdns();
+        }
+        for addr in BOOTSTRAP_NODES {
+            if let Ok(addr) = addr.parse() {
+                builder = builder.add_bootstrap(addr);
+            }
+        }
+
+        let ipfs = builder
+            .start()
+            .await
+            .context("failed to start embedded IPFS node")?;
+        if let Err(err) = ipfs.bootstrap().await {
+            log::warn!("embedded IPFS bootstrap failed: {err}");
+        }
+        Ok(Self { ipfs })
+    }
+}
+
+fn local_ipfs_repo_path() -> Result<PathBuf> {
+    let base = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| anyhow!("Unable to resolve IPFS repository directory"))?;
+
+    Ok(base.join(".advatar").join("ipfs"))
+}
+
+fn guess_content_type(path: &str, data: &[u8]) -> String {
+    match path
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "html" | "htm" => "text/html; charset=utf-8".to_string(),
+        "css" => "text/css; charset=utf-8".to_string(),
+        "js" | "mjs" => "text/javascript; charset=utf-8".to_string(),
+        "json" => "application/json".to_string(),
+        "svg" => "image/svg+xml".to_string(),
+        "png" => "image/png".to_string(),
+        "jpg" | "jpeg" => "image/jpeg".to_string(),
+        "gif" => "image/gif".to_string(),
+        "webp" => "image/webp".to_string(),
+        "avif" => "image/avif".to_string(),
+        "ico" => "image/x-icon".to_string(),
+        "wasm" => "application/wasm".to_string(),
+        "txt" => "text/plain; charset=utf-8".to_string(),
+        "pdf" => "application/pdf".to_string(),
+        "mp4" => "video/mp4".to_string(),
+        "webm" => "video/webm".to_string(),
+        "mp3" => "audio/mpeg".to_string(),
+        "ogg" => "audio/ogg".to_string(),
+        "wav" => "audio/wav".to_string(),
+        _ => sniff_content_type(data),
+    }
+}
+
+fn sniff_content_type(data: &[u8]) -> String {
+    let lower = String::from_utf8_lossy(&data[..data.len().min(256)]).to_ascii_lowercase();
+    if lower.contains("<!doctype html") || lower.contains("<html") {
+        "text/html; charset=utf-8".to_string()
+    } else if std::str::from_utf8(data).is_ok() {
+        "text/plain; charset=utf-8".to_string()
+    } else {
+        "application/octet-stream".to_string()
+    }
+}
+
+fn escape_html(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const TEST_CID: &str = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+
     #[test]
     fn test_ipfs_hash_validation() {
         let handler = ProtocolHandler::new();
-
-        // Valid CIDv0
         assert!(handler.is_valid_ipfs_hash("QmYjtig7VJQ6XsnUjqqJvj7QaMcCAwtrgNdahSiFofrE7o"));
-
-        // Valid CIDv1
-        assert!(handler
-            .is_valid_ipfs_hash("bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"));
-
-        // Invalid hash
+        assert!(handler.is_valid_ipfs_hash(TEST_CID));
         assert!(!handler.is_valid_ipfs_hash("invalid"));
     }
 
     #[test]
     fn test_namehash() {
         let handler = ProtocolHandler::new();
-
-        // Test empty name
         assert_eq!(
             handler.namehash(""),
             "0000000000000000000000000000000000000000000000000000000000000000"
         );
 
-        // Test eth domain
         let eth_hash = handler.namehash("eth");
         assert!(!eth_hash.is_empty());
         assert_eq!(eth_hash.len(), 64);
     }
 
+    #[test]
+    fn test_decentralized_url_parses_native_ipfs_host() {
+        let parsed = DecentralizedUrl::parse(
+            &format!("ipfs://{TEST_CID}/site/index.html"),
+            DecentralizedScheme::Ipfs,
+        )
+        .unwrap();
+
+        assert_eq!(parsed.root, TEST_CID);
+        assert_eq!(parsed.path, "site/index.html");
+        assert_eq!(
+            parsed.ipfs_path(),
+            format!("/ipfs/{TEST_CID}/site/index.html")
+        );
+    }
+
+    #[test]
+    fn test_decentralized_url_parses_localhost_variant() {
+        let parsed = DecentralizedUrl::parse(
+            &format!("ipfs://localhost/ipfs/{TEST_CID}/assets/app.js"),
+            DecentralizedScheme::Ipfs,
+        )
+        .unwrap();
+
+        assert_eq!(parsed.root, TEST_CID);
+        assert_eq!(parsed.path, "assets/app.js");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_url_preserves_ipfs_scheme() {
+        let handler = ProtocolHandler::new();
+        let resolved = handler
+            .resolve_url(&format!("ipfs://{TEST_CID}/index.html"))
+            .await
+            .unwrap();
+        assert_eq!(resolved, format!("ipfs://{TEST_CID}/index.html"));
+    }
+
     #[tokio::test]
     async fn test_protocol_handler_creation() {
         let handler = ProtocolHandler::new();
-        assert_eq!(handler.ipfs_gateway, "https://ipfs.io");
+        assert_eq!(handler.ipfs_gateway, DEFAULT_IPFS_GATEWAY);
         assert!(handler.ens_resolver.is_some());
+    }
+
+    #[test]
+    fn test_guess_content_type_prefers_html() {
+        assert_eq!(
+            guess_content_type("index.html", b"<!doctype html><html></html>"),
+            "text/html; charset=utf-8"
+        );
     }
 }
