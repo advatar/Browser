@@ -1,6 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
@@ -168,11 +170,13 @@ impl SecurityManager {
     /// Validate URL security
     pub fn validate_url_security(&self, url: &str) -> Result<bool> {
         let parsed_url = Url::parse(url)?;
+        let url_lower = parsed_url.as_str().to_ascii_lowercase();
 
         // Check if domain is blocked
         if let Some(domain) = parsed_url.host_str() {
+            let domain_lower = domain.to_ascii_lowercase();
             if let Ok(blocked_domains) = self.blocked_domains.lock() {
-                if blocked_domains.contains::<str>(domain) {
+                if blocked_domains.contains::<str>(&domain_lower) {
                     self.increment_blocked_requests();
                     return Ok(false);
                 }
@@ -182,7 +186,7 @@ impl SecurityManager {
             if self.privacy_settings.block_trackers {
                 if let Ok(tracker_lists) = self.tracker_lists.lock() {
                     for tracker_pattern in tracker_lists.iter() {
-                        if domain.contains(tracker_pattern) {
+                        if matches_url_pattern(&domain_lower, &url_lower, tracker_pattern) {
                             self.increment_blocked_requests();
                             return Ok(false);
                         }
@@ -194,7 +198,7 @@ impl SecurityManager {
             if self.privacy_settings.block_ads {
                 if let Ok(ad_block_lists) = self.ad_block_lists.lock() {
                     for ad_pattern in ad_block_lists.iter() {
-                        if domain.contains(ad_pattern) {
+                        if matches_url_pattern(&domain_lower, &url_lower, ad_pattern) {
                             self.increment_blocked_requests();
                             return Ok(false);
                         }
@@ -209,8 +213,7 @@ impl SecurityManager {
             "http" => {
                 // Allow HTTP for localhost and development
                 if let Some(host) = parsed_url.host_str() {
-                    let allowed =
-                        host == "localhost" || host == "127.0.0.1" || host.starts_with("192.168.");
+                    let allowed = is_local_or_private_host(host);
                     if !allowed {
                         self.increment_blocked_requests();
                     }
@@ -339,7 +342,7 @@ impl SecurityManager {
     /// Block domain
     pub fn block_domain(&self, domain: &str) -> Result<()> {
         if let Ok(mut blocked_domains) = self.blocked_domains.lock() {
-            blocked_domains.insert(domain.to_string());
+            blocked_domains.insert(domain.trim().to_ascii_lowercase());
         }
         Ok(())
     }
@@ -347,7 +350,7 @@ impl SecurityManager {
     /// Unblock domain
     pub fn unblock_domain(&self, domain: &str) -> Result<()> {
         if let Ok(mut blocked_domains) = self.blocked_domains.lock() {
-            blocked_domains.remove(domain);
+            blocked_domains.remove(&domain.trim().to_ascii_lowercase());
         }
         Ok(())
     }
@@ -442,6 +445,34 @@ impl SecurityManager {
 
         log::info!("Private data cleared");
         Ok(())
+    }
+}
+
+fn matches_url_pattern(domain: &str, url: &str, pattern: &str) -> bool {
+    let normalized = pattern.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if normalized.contains('/') {
+        return url.contains(&normalized);
+    }
+
+    domain == normalized || domain.ends_with(&format!(".{}", normalized))
+}
+
+fn is_local_or_private_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    let Ok(ip) = IpAddr::from_str(host) else {
+        return false;
+    };
+
+    match ip {
+        IpAddr::V4(ipv4) => ipv4.is_private() || ipv4.is_loopback() || ipv4.is_link_local(),
+        IpAddr::V6(ipv6) => ipv6.is_loopback() || ipv6.is_unique_local(),
     }
 }
 

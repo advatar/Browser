@@ -1,22 +1,88 @@
 use crate::agent::{McpRuntimeStatus, McpServerConfig, McpServerRegistry, McpServerState};
 use crate::mcp_profiles::McpProfileState;
 use crate::wallet_store::{SpendDecision, WalletOwner, WalletPolicy, WalletSnapshot};
-use crate::{AppState, afm, browser_engine::*, security::*};
+use crate::{afm, browser_engine::*, security::*, AppState};
 use afm_node::{AfmNodeController, AfmTaskDescriptor, GossipFrame, NodeStatus};
 use anyhow::Result;
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Runtime, State};
-// use tokio::sync::Mutex as AsyncMutex;
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 pub const HISTORY_UPDATED_EVENT: &str = "browser://history-updated";
+pub const TAB_STATE_UPDATED_EVENT: &str = "browser://tab-state-updated";
+pub const DOWNLOADS_UPDATED_EVENT: &str = "browser://downloads-updated";
+pub const NAVIGATION_BLOCKED_EVENT: &str = "browser://navigation-blocked";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabStateUpdate {
+    pub tab_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationBlockedEvent {
+    pub tab_id: Option<String>,
+    pub url: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadSnapshot {
+    pub id: String,
+    pub url: String,
+    pub filename: String,
+    pub total_bytes: Option<u64>,
+    pub received_bytes: u64,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub start_time: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+fn to_download_snapshot(download: DownloadItem) -> DownloadSnapshot {
+    let (status, error) = match download.state {
+        DownloadState::InProgress => ("downloading".to_string(), None),
+        DownloadState::Completed => ("completed".to_string(), None),
+        DownloadState::Cancelled => ("cancelled".to_string(), None),
+        DownloadState::Failed(message) => ("failed".to_string(), Some(message)),
+    };
+
+    DownloadSnapshot {
+        id: download.id,
+        url: download.url,
+        filename: download.filename,
+        total_bytes: download.total_bytes,
+        received_bytes: download.received_bytes,
+        status,
+        error,
+        start_time: download.start_time,
+        completed_time: download.completed_time,
+        file_path: download.file_path,
+    }
+}
 
 pub fn emit_history_updated<R: Runtime>(
     app_handle: &AppHandle<R>,
@@ -28,6 +94,40 @@ pub fn emit_history_updated<R: Runtime>(
         .map_err(|e| e.to_string())?;
     app_handle
         .emit(HISTORY_UPDATED_EVENT, &history)
+        .map_err(|e| e.to_string())
+}
+
+pub fn emit_tab_state_updated<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    payload: &TabStateUpdate,
+) -> Result<(), String> {
+    app_handle
+        .emit(TAB_STATE_UPDATED_EVENT, payload)
+        .map_err(|e| e.to_string())
+}
+
+pub fn emit_navigation_blocked<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    payload: &NavigationBlockedEvent,
+) -> Result<(), String> {
+    app_handle
+        .emit(NAVIGATION_BLOCKED_EVENT, payload)
+        .map_err(|e| e.to_string())
+}
+
+pub fn emit_downloads_updated<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    state: &AppState,
+) -> Result<(), String> {
+    let downloads = state
+        .browser_engine
+        .get_downloads()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(to_download_snapshot)
+        .collect::<Vec<_>>();
+    app_handle
+        .emit(DOWNLOADS_UPDATED_EVENT, downloads)
         .map_err(|e| e.to_string())
 }
 
@@ -183,17 +283,20 @@ pub async fn remove_history_entry<R: Runtime>(
 // Protocol handling commands
 
 #[tauri::command]
-pub fn resolve_protocol_url<R: Runtime>(
+pub async fn resolve_protocol_url<R: Runtime>(
     url: String,
     state: State<'_, AppState>,
     _app_handle: AppHandle<R>,
 ) -> Result<String, String> {
-    let _protocol_handler = state.protocol_handler.lock().map_err(|e| e.to_string())?;
-
-    // Since we can't make this async, we'll just return the URL as is
-    // This is a simplified version - in a real app, you'd want to handle this differently
-    // or ensure the handler doesn't need to be async
-    Ok(url)
+    let handler = state
+        .protocol_handler
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    handler
+        .resolve_url(url.trim())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -207,15 +310,25 @@ pub async fn probe_runtime_url<R: Runtime>(
         return Ok(false);
     }
 
-    let parsed = match url::Url::parse(candidate) {
+    let handler = state
+        .protocol_handler
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+    let resolved = handler
+        .resolve_url(candidate)
+        .await
+        .unwrap_or_else(|_| candidate.to_string());
+
+    let parsed = match url::Url::parse(&resolved) {
         Ok(parsed) => parsed,
         Err(_) => return Ok(false),
     };
 
     let available = match parsed.scheme() {
-        "ipfs" => probe_decentralized_url(&state, candidate, "ipfs").await?,
-        "ipns" => probe_decentralized_url(&state, candidate, "ipns").await?,
-        "http" | "https" => probe_http_url(candidate).await,
+        "ipfs" => probe_decentralized_url(&state, &resolved, "ipfs").await?,
+        "ipns" => probe_decentralized_url(&state, &resolved, "ipns").await?,
+        "http" | "https" => probe_http_url(&resolved).await,
         _ => false,
     };
 
@@ -306,28 +419,419 @@ pub async fn get_security_status<R: Runtime>(
 
 // Download management commands
 
+fn preferred_data_root() -> Result<PathBuf, String> {
+    if cfg!(target_os = "macos") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return Ok(PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("DecentralizedBrowser"));
+        }
+    }
+
+    if cfg!(target_os = "windows") {
+        if let Some(app_data) =
+            std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA"))
+        {
+            return Ok(PathBuf::from(app_data).join("DecentralizedBrowser"));
+        }
+    }
+
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(xdg).join("decentralized-browser"));
+    }
+
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("decentralized-browser"));
+    }
+
+    Err("Unable to resolve application data directory".to_string())
+}
+
+fn downloads_directory() -> Result<PathBuf, String> {
+    let dir = if let Some(home) = std::env::var_os("HOME") {
+        PathBuf::from(home).join("Downloads")
+    } else {
+        preferred_data_root()?.join("downloads")
+    };
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let trimmed = name.trim();
+    let filtered = trimmed
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+
+    if filtered.is_empty() {
+        "download.bin".to_string()
+    } else {
+        filtered
+    }
+}
+
+fn unique_download_destination(filename: &str) -> Result<PathBuf, String> {
+    let dir = downloads_directory()?;
+    let sanitized = sanitize_filename(filename);
+    let candidate = dir.join(&sanitized);
+    if !candidate.exists() {
+        return Ok(candidate);
+    }
+
+    let sanitized_path = PathBuf::from(&sanitized);
+    let stem = sanitized_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "download".to_string());
+    let ext = sanitized_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value))
+        .unwrap_or_default();
+
+    for index in 1..=9999 {
+        let next = dir.join(format!("{stem} ({index}){ext}"));
+        if !next.exists() {
+            return Ok(next);
+        }
+    }
+
+    Err("Unable to allocate a unique download path".to_string())
+}
+
+fn temp_download_path(destination: &PathBuf) -> PathBuf {
+    let file_name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download.bin");
+    destination.with_file_name(format!(".{}.part", file_name))
+}
+
+async fn cleanup_download_control(state: &AppState, download_id: &str) {
+    let mut controls = state.download_controls.lock().await;
+    controls.remove(download_id);
+}
+
+async fn run_download_task<R: Runtime>(
+    app_handle: AppHandle<R>,
+    download_id: String,
+    url: String,
+    destination: PathBuf,
+    cancel_rx: watch::Receiver<bool>,
+) {
+    let Some(state) = app_handle.try_state::<AppState>() else {
+        return;
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            let _ = state.browser_engine.fail_download(
+                &download_id,
+                format!("failed to build download client: {err}"),
+            );
+            let _ = emit_downloads_updated(&app_handle, &state);
+            cleanup_download_control(&state, &download_id).await;
+            return;
+        }
+    };
+
+    let response = match client.get(&url).send().await {
+        Ok(response) => response,
+        Err(err) => {
+            let _ = state
+                .browser_engine
+                .fail_download(&download_id, format!("download request failed: {err}"));
+            let _ = emit_downloads_updated(&app_handle, &state);
+            cleanup_download_control(&state, &download_id).await;
+            return;
+        }
+    };
+
+    if !response.status().is_success() {
+        let _ = state.browser_engine.fail_download(
+            &download_id,
+            format!("download failed with status {}", response.status()),
+        );
+        let _ = emit_downloads_updated(&app_handle, &state);
+        cleanup_download_control(&state, &download_id).await;
+        return;
+    }
+
+    let total_bytes = response.content_length();
+    let _ = state
+        .browser_engine
+        .update_download(&download_id, 0, total_bytes);
+    let _ = emit_downloads_updated(&app_handle, &state);
+
+    let temp_path = temp_download_path(&destination);
+    let mut file = match tokio::fs::File::create(&temp_path).await {
+        Ok(file) => file,
+        Err(err) => {
+            let _ = state
+                .browser_engine
+                .fail_download(&download_id, format!("failed to create file: {err}"));
+            let _ = emit_downloads_updated(&app_handle, &state);
+            cleanup_download_control(&state, &download_id).await;
+            return;
+        }
+    };
+
+    let mut received_bytes = 0u64;
+    let mut stream = response.bytes_stream();
+    while let Some(item) = stream.next().await {
+        if *cancel_rx.borrow() {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            let _ = state.browser_engine.cancel_download(&download_id);
+            let _ = emit_downloads_updated(&app_handle, &state);
+            cleanup_download_control(&state, &download_id).await;
+            return;
+        }
+
+        let chunk = match item {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let _ = tokio::fs::remove_file(&temp_path).await;
+                let _ = state
+                    .browser_engine
+                    .fail_download(&download_id, format!("download stream failed: {err}"));
+                let _ = emit_downloads_updated(&app_handle, &state);
+                cleanup_download_control(&state, &download_id).await;
+                return;
+            }
+        };
+
+        if let Err(err) = file.write_all(&chunk).await {
+            let _ = tokio::fs::remove_file(&temp_path).await;
+            let _ = state
+                .browser_engine
+                .fail_download(&download_id, format!("failed to write file: {err}"));
+            let _ = emit_downloads_updated(&app_handle, &state);
+            cleanup_download_control(&state, &download_id).await;
+            return;
+        }
+
+        received_bytes = received_bytes.saturating_add(chunk.len() as u64);
+        let _ = state
+            .browser_engine
+            .update_download(&download_id, received_bytes, total_bytes);
+        let _ = emit_downloads_updated(&app_handle, &state);
+    }
+
+    if let Err(err) = file.flush().await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        let _ = state
+            .browser_engine
+            .fail_download(&download_id, format!("failed to flush file: {err}"));
+        let _ = emit_downloads_updated(&app_handle, &state);
+        cleanup_download_control(&state, &download_id).await;
+        return;
+    }
+
+    if let Err(err) = tokio::fs::rename(&temp_path, &destination).await {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        let _ = state
+            .browser_engine
+            .fail_download(&download_id, format!("failed to finalize download: {err}"));
+        let _ = emit_downloads_updated(&app_handle, &state);
+        cleanup_download_control(&state, &download_id).await;
+        return;
+    }
+
+    let _ = state
+        .browser_engine
+        .complete_download(&download_id, destination.to_string_lossy().into_owned());
+    let _ = emit_downloads_updated(&app_handle, &state);
+    cleanup_download_control(&state, &download_id).await;
+}
+
 #[tauri::command]
 pub async fn start_download<R: Runtime>(
     url: String,
     filename: String,
     state: State<'_, AppState>,
-    _app_handle: AppHandle<R>,
+    app_handle: AppHandle<R>,
 ) -> Result<String, String> {
-    state
+    let candidate = url.trim();
+    if candidate.is_empty() {
+        return Err("url must not be empty".to_string());
+    }
+
+    {
+        let security_manager = state.security_manager.lock().map_err(|e| e.to_string())?;
+        let allowed = security_manager
+            .validate_url_security(candidate)
+            .map_err(|e| e.to_string())?;
+        if !allowed {
+            return Err(format!("download blocked by security policy: {candidate}"));
+        }
+    }
+
+    let destination = unique_download_destination(&filename)?;
+    let filename = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download.bin")
+        .to_string();
+
+    let download_id = state
         .browser_engine
-        .start_download(url, filename)
-        .map_err(|e| e.to_string())
+        .start_download(candidate.to_string(), filename.clone())
+        .map_err(|e| e.to_string())?;
+
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    {
+        let mut controls = state.download_controls.lock().await;
+        controls.insert(
+            download_id.clone(),
+            crate::app_state::DownloadControl {
+                url: candidate.to_string(),
+                filename,
+                destination: destination.clone(),
+                cancel: cancel_tx,
+            },
+        );
+    }
+
+    emit_downloads_updated(&app_handle, &state)?;
+
+    tauri::async_runtime::spawn(run_download_task(
+        app_handle,
+        download_id.clone(),
+        candidate.to_string(),
+        destination,
+        cancel_rx,
+    ));
+
+    Ok(download_id)
 }
 
 #[tauri::command]
 pub async fn get_downloads<R: Runtime>(
     state: State<'_, AppState>,
     _app_handle: AppHandle<R>,
-) -> Result<Vec<DownloadItem>, String> {
+) -> Result<Vec<DownloadSnapshot>, String> {
     state
         .browser_engine
         .get_downloads()
         .map_err(|e| e.to_string())
+        .map(|downloads| downloads.into_iter().map(to_download_snapshot).collect())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelDownloadRequest {
+    pub download_id: String,
+}
+
+#[tauri::command]
+pub async fn cancel_download<R: Runtime>(
+    request: CancelDownloadRequest,
+    state: State<'_, AppState>,
+    _app_handle: AppHandle<R>,
+) -> Result<(), String> {
+    let controls = state.download_controls.lock().await;
+    let control = controls
+        .get(request.download_id.trim())
+        .ok_or_else(|| format!("unknown download `{}`", request.download_id.trim()))?;
+    control.cancel.send(true).map_err(|_| {
+        format!(
+            "download `{}` is no longer active",
+            request.download_id.trim()
+        )
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealDownloadRequest {
+    pub download_id: String,
+}
+
+fn reveal_download_path(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-R", path])
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("open exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .args(["/select,", path])
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("explorer exited with status {status}"))
+                }
+            })
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        let parent = PathBuf::from(path)
+            .parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| "download path does not have a parent directory".to_string())?;
+        Command::new("xdg-open")
+            .arg(parent)
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("xdg-open exited with status {status}"))
+                }
+            })
+    }
+}
+
+#[tauri::command]
+pub async fn reveal_download<R: Runtime>(
+    request: RevealDownloadRequest,
+    state: State<'_, AppState>,
+    _app_handle: AppHandle<R>,
+) -> Result<(), String> {
+    let download = state
+        .browser_engine
+        .get_downloads()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|download| download.id == request.download_id.trim())
+        .ok_or_else(|| format!("unknown download `{}`", request.download_id.trim()))?;
+    let path = download
+        .file_path
+        .ok_or_else(|| "download file is not available yet".to_string())?;
+    reveal_download_path(&path)
 }
 
 // Cookie management commands
@@ -522,20 +1026,13 @@ impl Default for BrowserSettings {
             homepage: DEFAULT_HOMEPAGE.to_string(),
             privacy_settings: PrivacySettings::default(),
             ipfs_gateway: "builtin://ipfs".to_string(),
-            ens_resolver: Some("https://eth.limo".to_string()),
+            ens_resolver: Some("https://cloudflare-eth.com".to_string()),
         }
     }
 }
 
 fn settings_storage_path() -> Result<PathBuf, String> {
-    let base = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| "Unable to resolve settings directory".to_string())?;
-
-    let mut dir = base;
-    dir.push(".advatar");
+    let mut dir = preferred_data_root()?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     dir.push("browser-settings.json");
     Ok(dir)
@@ -1009,6 +1506,14 @@ mod tests {
     #[test]
     fn browser_settings_default_homepage_is_duckduckgo() {
         assert_eq!(BrowserSettings::default().homepage, DEFAULT_HOMEPAGE);
+    }
+
+    #[test]
+    fn browser_settings_default_ens_resolver_matches_runtime_rpc_endpoint() {
+        assert_eq!(
+            BrowserSettings::default().ens_resolver.as_deref(),
+            Some("https://cloudflare-eth.com")
+        );
     }
 
     #[test]

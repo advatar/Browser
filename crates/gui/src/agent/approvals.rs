@@ -155,6 +155,7 @@ mod tests {
             mcp_config,
             agent_apps: Arc::new(AgentAppRegistry::empty()),
             agent_app_schedules: Arc::new(AgentAppScheduleRegistry::empty()),
+            download_controls: Arc::new(AsyncMutex::new(std::collections::HashMap::new())),
         };
         let broker = state.approval_broker.clone();
         let app = Builder::default()

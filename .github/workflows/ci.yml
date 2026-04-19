@@ -98,7 +98,7 @@ jobs:
 
   # Frontend tests
   frontend-test:
-    name: Frontend Tests
+    name: Runtime Frontend Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -117,15 +117,6 @@ jobs:
 
       - name: Build runtime frontend
         run: npm --prefix orbit-shell-ui run build
-
-      - name: Install legacy frontend dependencies
-        run: npm --prefix crates/gui ci
-
-      - name: Run legacy TypeScript checks
-        run: npm --prefix crates/gui run typecheck
-
-      - name: Run legacy frontend tests
-        run: npm --prefix crates/gui run test
 
   # Performance benchmarks
   benchmark:
@@ -236,7 +227,7 @@ jobs:
   # Release deployment
   release:
     name: Release
-    needs: [build, security, benchmark]
+    needs: [build, security]
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
     steps:

@@ -87,9 +87,11 @@ pub struct DownloadItem {
     pub received_bytes: u64,
     pub state: DownloadState,
     pub start_time: u64,
+    pub completed_time: Option<u64>,
+    pub file_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DownloadState {
     InProgress,
     Completed,
@@ -125,6 +127,25 @@ impl BrowserEngine {
         }
 
         Ok(tab_id)
+    }
+
+    pub fn ensure_tab(&self, tab_id: &str, url: &str) -> Result<()> {
+        let mut tabs = self
+            .tabs
+            .lock()
+            .map_err(|_| anyhow!("Failed to lock tabs"))?;
+        tabs.entry(tab_id.to_string())
+            .or_insert_with(|| Tab::new(tab_id.to_string(), url.to_string()));
+        Ok(())
+    }
+
+    pub fn set_active_tab_id(&self, tab_id: Option<String>) -> Result<()> {
+        let mut active_id = self
+            .active_tab_id
+            .lock()
+            .map_err(|_| anyhow!("Failed to lock active tab"))?;
+        *active_id = tab_id;
+        Ok(())
     }
 
     /// Close a tab
@@ -347,6 +368,8 @@ impl BrowserEngine {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            completed_time: None,
+            file_path: None,
         };
 
         let download_id = download.id.clone();
@@ -371,16 +394,52 @@ impl BrowserEngine {
                 if let Some(total) = total_bytes {
                     download.total_bytes = Some(total);
                 }
-
-                // Check if download is complete
-                if let Some(total) = download.total_bytes {
-                    if received_bytes >= total {
-                        download.state = DownloadState::Completed;
-                    }
+                if !matches!(
+                    download.state,
+                    DownloadState::Cancelled | DownloadState::Failed(_)
+                ) {
+                    download.state = DownloadState::InProgress;
                 }
             }
         }
         Ok(())
+    }
+
+    pub fn complete_download(&self, download_id: &str, file_path: String) -> Result<()> {
+        if let Ok(mut downloads) = self.downloads.lock() {
+            if let Some(download) = downloads.iter_mut().find(|d| d.id == download_id) {
+                download.state = DownloadState::Completed;
+                download.file_path = Some(file_path);
+                download.completed_time = Some(unix_timestamp());
+                if let Some(total) = download.total_bytes {
+                    download.received_bytes = total;
+                }
+                return Ok(());
+            }
+        }
+        Err(anyhow!("Download not found: {}", download_id))
+    }
+
+    pub fn fail_download(&self, download_id: &str, error: String) -> Result<()> {
+        if let Ok(mut downloads) = self.downloads.lock() {
+            if let Some(download) = downloads.iter_mut().find(|d| d.id == download_id) {
+                download.state = DownloadState::Failed(error);
+                download.completed_time = Some(unix_timestamp());
+                return Ok(());
+            }
+        }
+        Err(anyhow!("Download not found: {}", download_id))
+    }
+
+    pub fn cancel_download(&self, download_id: &str) -> Result<()> {
+        if let Ok(mut downloads) = self.downloads.lock() {
+            if let Some(download) = downloads.iter_mut().find(|d| d.id == download_id) {
+                download.state = DownloadState::Cancelled;
+                download.completed_time = Some(unix_timestamp());
+                return Ok(());
+            }
+        }
+        Err(anyhow!("Download not found: {}", download_id))
     }
 
     /// Get downloads
@@ -406,10 +465,8 @@ impl BrowserEngine {
             .map_err(|_| anyhow!("Failed to lock history"))?;
         let now = unix_timestamp();
         let summary = normalize_summary(summary);
-        let derived_keywords = merge_keywords(
-            keywords,
-            extract_keywords(&url, &title, summary.as_deref()),
-        );
+        let derived_keywords =
+            merge_keywords(keywords, extract_keywords(&url, &title, summary.as_deref()));
 
         if let Some(existing) = history.iter_mut().find(|entry| entry.url == url) {
             if increment_visit {
@@ -692,7 +749,10 @@ mod tests {
         let engine = BrowserEngine::new();
 
         engine
-            .add_to_history("https://docs.example.com/mcp".to_string(), "MCP Transport Notes".to_string())
+            .add_to_history(
+                "https://docs.example.com/mcp".to_string(),
+                "MCP Transport Notes".to_string(),
+            )
             .unwrap();
         engine
             .enrich_history_entry(
@@ -706,7 +766,10 @@ mod tests {
         let matches = engine.search_history("websocket transport", 5).unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].entry.url, "https://docs.example.com/mcp");
-        assert!(matches[0].matched_fields.iter().any(|field| field == "summary"));
+        assert!(matches[0]
+            .matched_fields
+            .iter()
+            .any(|field| field == "summary"));
     }
 
     #[test]
@@ -750,5 +813,49 @@ mod tests {
         assert!(navigation::is_valid_url("ipfs://QmHash"));
         assert!(navigation::is_valid_url("ens://example.eth"));
         assert!(!navigation::is_valid_url("invalid"));
+    }
+
+    #[test]
+    fn test_download_lifecycle() {
+        let engine = BrowserEngine::new();
+        let download_id = engine
+            .start_download(
+                "https://example.com/file.zip".to_string(),
+                "file.zip".to_string(),
+            )
+            .unwrap();
+
+        engine
+            .update_download(&download_id, 128, Some(512))
+            .unwrap();
+        let snapshot = engine.get_downloads().unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].received_bytes, 128);
+        assert_eq!(snapshot[0].total_bytes, Some(512));
+        assert_eq!(snapshot[0].state, DownloadState::InProgress);
+
+        engine
+            .complete_download(&download_id, "/tmp/file.zip".to_string())
+            .unwrap();
+        let snapshot = engine.get_downloads().unwrap();
+        assert_eq!(snapshot[0].state, DownloadState::Completed);
+        assert_eq!(snapshot[0].file_path.as_deref(), Some("/tmp/file.zip"));
+        assert!(snapshot[0].completed_time.is_some());
+    }
+
+    #[test]
+    fn test_cancel_download_marks_terminal_state() {
+        let engine = BrowserEngine::new();
+        let download_id = engine
+            .start_download(
+                "https://example.com/file.zip".to_string(),
+                "file.zip".to_string(),
+            )
+            .unwrap();
+
+        engine.cancel_download(&download_id).unwrap();
+        let snapshot = engine.get_downloads().unwrap();
+        assert_eq!(snapshot[0].state, DownloadState::Cancelled);
+        assert!(snapshot[0].completed_time.is_some());
     }
 }

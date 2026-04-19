@@ -59,6 +59,10 @@ commands.allow = [
   "probe_runtime_url",
   "update_security_settings",
   "get_security_status",
+  "start_download",
+  "get_downloads",
+  "cancel_download",
+  "reveal_download",
 
   "report_error",
   "track_usage",

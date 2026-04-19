@@ -5,23 +5,19 @@
 [![TypeScript](https://img.shields.io/badge/typescript-5.0+-blue.svg)](https://www.typescriptlang.org)
 [![Build Status](https://github.com/advatar/browser/workflows/CI/badge.svg)](https://github.com/advatar/browser/actions)
 
-A fully decentralized web browser built with Rust and modern web technologies, designed to provide true digital sovereignty without relying on centralized infrastructure. This browser fetches content from IPFS, interacts directly with blockchains, and maintains user privacy while delivering a familiar browsing experience.
+A desktop browser built with Rust, Tauri, and a dedicated runtime UI, focused on privacy-first browsing and native decentralized protocol support. The current runtime resolves `ipfs://` and `ipns://` content through the embedded node, supports ENS resolution through a configurable RPC endpoint, and ships with release telemetry disabled by default.
 
 ## 🚀 Project Status
 
-**Current Status: Production Ready** ✅
+**Current Status: Production Hardening**
 
-This project is **feature-complete** and ready for production use! All major components have been implemented and tested:
+The codebase is in active hardening rather than "production ready". The supported runtime path today is the Rust/Tauri shell in `crates/gui` paired with the React UI in `orbit-shell-ui`, and the current work focuses on:
 
-- ✅ **Core Browser Engine** - WebView, navigation, tab management, bookmarks, history
-- ✅ **Blockchain Integration** - Substrate/Polkadot client, wallet, transactions, chain sync
-- ✅ **Decentralized Protocols** - IPFS, IPNS, ENS resolution with caching
-- ✅ **P2P Networking** - libp2p integration with DHT and peer discovery
-- ✅ **User Interface** - Modern Tauri-based GUI with wallet UI and settings
-- ✅ **Security & Privacy** - TLS validation, certificate management, tracking protection, Tor integration
-- ✅ **Testing & Optimization** - Comprehensive unit/integration tests, performance optimization
-- ✅ **Packaging & Distribution** - Cross-platform installers for macOS, Windows, Linux
-- ✅ **Analytics & Monitoring** - Telemetry, error reporting, performance metrics, security alerts
+- Runtime-enforced navigation security checks
+- Native page-load and tab-state events instead of timer-based UI state
+- Background download execution with backend event updates
+- Release logging and telemetry disabled by default unless explicitly enabled
+- CI coverage centered on the supported runtime frontend instead of the broken legacy npm lane
 
 📋 **Detailed Progress**: See [CHECKLIST.md](CHECKLIST.md) for the complete implementation checklist with technical details.
 
@@ -31,10 +27,10 @@ This project is **feature-complete** and ready for production use! All major com
 
 This project aims to create a browser that operates without any single point of failure, where:
 
-- **No centralized dependencies**: Content resolution, asset downloads, and transactions work without vendor-hosted gateways, RPC services, or DNS servers
+- **Minimize centralized dependencies**: IPFS and IPNS content is served from the embedded node, while ENS resolution can use a configurable RPC endpoint when required
 - **End-to-end verifiability**: Every byte is content-addressed (IPFS CID or blockchain Merkle proof) for offline verification
 - **Local key sovereignty**: Wallet keys never leave the device; all signing happens locally or via hardware wallets
-- **Privacy by design**: HTTP(S) and DNS gateways are optional plugins, disabled by default
+- **Privacy by design**: release telemetry is disabled by default, verbose runtime logging is opt-in, and tracker blocking is enforced at navigation time
 
 ## 🏗️ Architecture
 
@@ -76,7 +72,7 @@ graph TD
 - **⚡ Multi-Blockchain Support**: Integrated light clients for Ethereum, Bitcoin, and Substrate-based chains
 - **🔐 Secure Wallet Management**: Hardware wallet support with local key storage and signing
 - **🌐 P2P Networking**: libp2p-based networking stack with Kademlia DHT and Gossipsub
-- **🔒 Privacy-First Design**: No telemetry, optional Tor support, and local-first architecture
+- **🔒 Privacy-First Design**: Release telemetry/logging is opt-in, Tor remains optional, and the runtime favors local-first protocol handling
 - **🎨 Modern UI**: Cross-platform desktop application built with Tauri and TypeScript
 - **🧪 Comprehensive Testing**: Unit tests, integration tests, and end-to-end testing with Playwright
 
@@ -213,18 +209,18 @@ browser/
    cargo clippy -- -D warnings
    ```
 
-2. **Frontend Development** (TypeScript)
+2. **Runtime Frontend Development** (TypeScript)
    ```bash
-   cd crates/gui
+   cd orbit-shell-ui
    
    # Start development server
    npm run dev
    
-   # Run type checking
-   npm run typecheck
-   
-   # Run linting
-   npm run lint
+   # Run tests
+   npm run test
+
+   # Build the runtime bundle consumed by Tauri
+   npm run build
    ```
 
 3. **Integration Testing**

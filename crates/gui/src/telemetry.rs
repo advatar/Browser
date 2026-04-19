@@ -173,7 +173,7 @@ impl TelemetryManager {
     pub fn new() -> Self {
         let update_config = Self::load_update_config();
         Self {
-            enabled: true,
+            enabled: cfg!(debug_assertions),
             session_id: uuid::Uuid::new_v4().to_string(),
             error_reports: Arc::new(Mutex::new(Vec::new())),
             usage_stats: Arc::new(Mutex::new(Vec::new())),

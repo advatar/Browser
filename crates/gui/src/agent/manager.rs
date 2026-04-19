@@ -451,16 +451,8 @@ impl AgentManager {
         let (mut runtime, metered_model) = match runtime_result {
             Ok(result) => result,
             Err(err) => {
-                self.finish_run_summary(
-                    &run_id,
-                    AgentRunStatus::Failed,
-                    0,
-                    false,
-                    0,
-                    false,
-                    None,
-                )
-                .await;
+                self.finish_run_summary(&run_id, AgentRunStatus::Failed, 0, false, 0, false, None)
+                    .await;
                 let _ = self.emit_run_event(
                     &run_id,
                     AgentRunEventPayload::Failed {
@@ -663,8 +655,13 @@ impl AgentManager {
         let mut builder = AgentRuntime::builder(model)
             .with_config(config)
             .with_capabilities(capabilities)
-            .with_approval_handler(self.approval_handler.clone())
-            .with_dom_executor(Arc::new(GuiDomExecutor::new(self.app_handle.clone())));
+            .with_approval_handler(self.approval_handler.clone());
+
+        #[cfg(target_os = "macos")]
+        {
+            builder =
+                builder.with_dom_executor(Arc::new(GuiDomExecutor::new(self.app_handle.clone())));
+        }
 
         if let Some(callback) = event_callback {
             builder = builder.with_event_callback(callback);
@@ -697,11 +694,14 @@ impl AgentManager {
             Arc::new(NavigateTool::new(self.app_handle.clone())),
             Some(CapabilityKind::Navigate),
         ));
-        tools.push((Arc::new(DomQueryTool::new(self.app_handle.clone())), None));
-        tools.push((
-            Arc::new(PageSnapshotTool::new(self.app_handle.clone())),
-            None,
-        ));
+        #[cfg(target_os = "macos")]
+        {
+            tools.push((Arc::new(DomQueryTool::new(self.app_handle.clone())), None));
+            tools.push((
+                Arc::new(PageSnapshotTool::new(self.app_handle.clone())),
+                None,
+            ));
+        }
         tools.push((Arc::new(TabsTool::new(self.browser_engine.clone())), None));
         tools.push((
             Arc::new(WalletInfoTool::new(

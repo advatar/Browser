@@ -6,7 +6,7 @@
 use afm_node::AfmNodeConfig;
 use ai_agent::McpToolDescription;
 use serde::Deserialize;
-use std::fs::{OpenOptions, create_dir_all};
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,8 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tauri::Manager; // bring Manager trait into scope
 use tauri::{
-    Runtime, WebviewWindowBuilder,
     menu::{IsMenuItem, Menu, MenuItem, Submenu},
+    Runtime, WebviewWindowBuilder,
 };
 use tauri_plugin_dialog;
 use tokio::sync::Mutex as AsyncMutex;
@@ -42,18 +42,66 @@ use gui::wallet_store::WalletStore;
 const MAIN_WEBVIEW_LABEL: &str = "main";
 const CONTENT_WEBVIEW_PREFIX: &str = "content-tab-";
 
+fn runtime_logging_enabled() -> bool {
+    if cfg!(debug_assertions) {
+        return true;
+    }
+
+    matches!(
+        std::env::var("BROWSER_DEBUG_LOG"),
+        Ok(value)
+            if matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+    )
+}
+
+fn application_logs_dir() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        if cfg!(target_os = "macos") {
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Logs")
+                .join("DecentralizedBrowser");
+        }
+
+        if let Some(xdg_state) = std::env::var_os("XDG_STATE_HOME") {
+            return PathBuf::from(xdg_state)
+                .join("decentralized-browser")
+                .join("logs");
+        }
+
+        return PathBuf::from(home)
+            .join(".local")
+            .join("state")
+            .join("decentralized-browser")
+            .join("logs");
+    }
+
+    if let Some(app_data) = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA"))
+    {
+        return PathBuf::from(app_data)
+            .join("DecentralizedBrowser")
+            .join("Logs");
+    }
+
+    PathBuf::from(".")
+        .join(".decentralized-browser")
+        .join("logs")
+}
+
 fn log_path() -> PathBuf {
-    let mut base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.push("Library/Logs/DecentralizedBrowser");
-    // Ensure directory exists
+    let mut base = application_logs_dir();
     let _ = create_dir_all(&base);
     base.push("gui.log");
     base
 }
 
 fn log_startup(msg: &str) {
+    if !runtime_logging_enabled() {
+        return;
+    }
     let path = log_path();
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(file, "{} | {}", chrono_like_timestamp(), msg);
@@ -61,7 +109,13 @@ fn log_startup(msg: &str) {
 }
 
 fn log_command(cmd: &str, details: &str) {
-    log_startup(&format!("{} | {}", cmd, details));
+    let compact = details.split_whitespace().collect::<Vec<_>>().join(" ");
+    let truncated = if compact.len() > 240 {
+        format!("{}...", &compact[..240])
+    } else {
+        compact
+    };
+    log_startup(&format!("{} | {}", cmd, truncated));
 }
 
 fn protocol_response(
@@ -75,6 +129,28 @@ fn protocol_response(
         .header(tauri::http::header::CACHE_CONTROL, "no-store")
         .body(body)
         .expect("valid protocol response")
+}
+
+fn protocol_response_with_security_headers<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    status: tauri::http::StatusCode,
+    content_type: &str,
+    body: Vec<u8>,
+) -> tauri::http::Response<Vec<u8>> {
+    let mut builder = tauri::http::Response::builder()
+        .status(status)
+        .header(tauri::http::header::CONTENT_TYPE, content_type)
+        .header(tauri::http::header::CACHE_CONTROL, "no-store");
+
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        if let Ok(security_manager) = state.security_manager.lock() {
+            for (name, value) in security_manager.get_privacy_headers() {
+                builder = builder.header(name, value);
+            }
+        }
+    }
+
+    builder.body(body).expect("valid protocol response")
 }
 
 fn protocol_error_response(
@@ -118,7 +194,12 @@ async fn build_decentralized_protocol_response<R: Runtime>(
     {
         Ok(content) => {
             let body = if head_only { Vec::new() } else { content.data };
-            protocol_response(tauri::http::StatusCode::OK, &content.content_type, body)
+            protocol_response_with_security_headers(
+                &app_handle,
+                tauri::http::StatusCode::OK,
+                &content.content_type,
+                body,
+            )
         }
         Err(err) => {
             log_startup(&format!(
@@ -190,6 +271,130 @@ fn parse_external_url(url: &str) -> Result<url::Url, String> {
     url::Url::parse(url.trim())
         .or_else(|_| url::Url::parse(&format!("https://{}", url.trim())))
         .map_err(|e| format!("Invalid URL: {e}"))
+}
+
+fn ensure_browser_engine_tab(
+    state: &AppState,
+    tab_id: &str,
+    url: &str,
+    active: bool,
+) -> Result<(), String> {
+    state
+        .browser_engine
+        .ensure_tab(tab_id, url)
+        .map_err(|err| err.to_string())?;
+    if active {
+        state
+            .browser_engine
+            .set_active_tab_id(Some(tab_id.to_string()))
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn validate_runtime_navigation<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    url: &str,
+) -> Result<(), String> {
+    if is_internal_url(url) {
+        return Ok(());
+    }
+
+    let candidate = match url::Url::parse(url.trim()) {
+        Ok(parsed) => parsed,
+        Err(_) => parse_external_url(url)?,
+    };
+
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+    let security_manager = state.security_manager.lock().map_err(|e| e.to_string())?;
+    let allowed = security_manager
+        .validate_url_security(candidate.as_str())
+        .map_err(|e| e.to_string())?;
+    if allowed {
+        Ok(())
+    } else {
+        Err(format!(
+            "navigation blocked by security policy: {}",
+            candidate.as_str()
+        ))
+    }
+}
+
+fn emit_blocked_navigation<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    tab_id: Option<&str>,
+    url: &str,
+    reason: &str,
+) {
+    let _ = emit_navigation_blocked(
+        app_handle,
+        &NavigationBlockedEvent {
+            tab_id: tab_id.map(str::to_string),
+            url: url.to_string(),
+            reason: reason.to_string(),
+        },
+    );
+    log_command(
+        "navigation_blocked",
+        &format!(
+            "tab_id={} url={} reason={reason}",
+            tab_id.unwrap_or("<none>"),
+            url
+        ),
+    );
+}
+
+fn emit_runtime_tab_state<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    tab_id: &str,
+    url: Option<&str>,
+    title: Option<&str>,
+    loading: Option<bool>,
+) {
+    let _ = emit_tab_state_updated(
+        app_handle,
+        &TabStateUpdate {
+            tab_id: tab_id.to_string(),
+            url: url.map(str::to_string),
+            title: title.map(str::to_string),
+            loading,
+        },
+    );
+}
+
+fn sync_runtime_tab_event<R: Runtime>(
+    app_handle: &tauri::AppHandle<R>,
+    tab_id: &str,
+    url: &str,
+    loading: bool,
+    record_history: bool,
+) -> Result<(), String> {
+    let state = app_handle
+        .try_state::<AppState>()
+        .ok_or_else(|| "application state unavailable".to_string())?;
+
+    ensure_browser_engine_tab(&state, tab_id, url, true)?;
+    state
+        .browser_engine
+        .update_tab(tab_id, None, Some(url.to_string()), Some(loading))
+        .map_err(|err| err.to_string())?;
+
+    if let Ok(mut current_url) = state.current_url.lock() {
+        *current_url = url.to_string();
+    }
+
+    if record_history && !is_internal_url(url) {
+        state
+            .browser_engine
+            .add_to_history(url.to_string(), url.to_string())
+            .map_err(|err| err.to_string())?;
+        emit_history_updated(app_handle, &state)?;
+    }
+
+    emit_runtime_tab_state(app_handle, tab_id, Some(url), None, Some(loading));
+    Ok(())
 }
 
 fn spawn_agent_app_scheduler<R: Runtime>(app_handle: tauri::AppHandle<R>) {
@@ -316,6 +521,9 @@ fn ensure_tab_webview<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| "application state unavailable".to_string())?;
 
+    let initial_browser_url = initial_url.unwrap_or("about:blank");
+    ensure_browser_engine_tab(&state, tab_id, initial_browser_url, false)?;
+
     let existing_label = read_tab_label(&state, tab_id)?;
     if let Some(existing_label) = &existing_label {
         if let Some(existing) = app_handle.get_webview(existing_label) {
@@ -349,6 +557,7 @@ fn ensure_tab_webview<R: Runtime>(
     );
 
     let initial_webview_url = if let Some(url) = initial_url {
+        validate_runtime_navigation(app_handle, url)?;
         if is_internal_url(url) {
             tauri::WebviewUrl::External(
                 url::Url::parse("about:blank")
@@ -383,13 +592,31 @@ fn ensure_tab_webview<R: Runtime>(
 
     let label_for_navigation = label.clone();
     let label_for_page_load = label.clone();
+    let app_handle_for_navigation = app_handle.clone();
+    let app_handle_for_page_load = app_handle.clone();
+    let tab_id_for_navigation = tab_id.to_string();
+    let tab_id_for_page_load = tab_id.to_string();
     let builder = WebviewBuilder::new(&label, initial_webview_url)
         .on_navigation(move |url| {
-            log_command(
-                "content_tab_navigation",
-                &format!("label={label_for_navigation} allowed url={url}"),
-            );
-            true
+            let candidate = url.as_str();
+            match validate_runtime_navigation(&app_handle_for_navigation, candidate) {
+                Ok(()) => {
+                    log_command(
+                        "content_tab_navigation",
+                        &format!("label={label_for_navigation} allowed url={candidate}"),
+                    );
+                    true
+                }
+                Err(reason) => {
+                    emit_blocked_navigation(
+                        &app_handle_for_navigation,
+                        Some(&tab_id_for_navigation),
+                        candidate,
+                        &reason,
+                    );
+                    false
+                }
+            }
         })
         .on_page_load(move |_webview, payload| {
             let event_name = match payload.event() {
@@ -403,6 +630,33 @@ fn ensure_tab_webview<R: Runtime>(
                     payload.url()
                 ),
             );
+
+            let url = payload.url();
+            let update = match payload.event() {
+                PageLoadEvent::Started => sync_runtime_tab_event(
+                    &app_handle_for_page_load,
+                    &tab_id_for_page_load,
+                    url.as_str(),
+                    true,
+                    false,
+                ),
+                PageLoadEvent::Finished => sync_runtime_tab_event(
+                    &app_handle_for_page_load,
+                    &tab_id_for_page_load,
+                    url.as_str(),
+                    false,
+                    true,
+                ),
+            };
+
+            if let Err(err) = update {
+                log_command(
+                    "content_tab_page_load",
+                    &format!(
+                        "label={label_for_page_load} failed to sync tab state event={event_name} err={err}"
+                    ),
+                );
+            }
         });
 
     let child = match window.add_child(
@@ -848,6 +1102,7 @@ fn main() {
             mcp_config: mcp_config.clone(),
             agent_apps: agent_apps.clone(),
             agent_app_schedules: agent_app_schedules.clone(),
+            download_controls: Arc::new(AsyncMutex::new(std::collections::HashMap::new())),
         })
         .setup(|app| {
             log_startup("setup: entered");
@@ -954,6 +1209,10 @@ fn main() {
             clear_history,
             search_history,
             remove_history_entry,
+            start_download,
+            get_downloads,
+            cancel_download,
+            reveal_download,
             resolve_protocol_url,
             probe_runtime_url,
             update_security_settings,
@@ -1272,6 +1531,13 @@ async fn activate_tab_webview<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| "application state unavailable".to_string())?;
 
+    ensure_browser_engine_tab(
+        &state,
+        tab_id,
+        request.initial_url.as_deref().unwrap_or("about:blank"),
+        true,
+    )?;
+
     if let Some(url) = &request.initial_url {
         if let Ok(mut current_url) = state.current_url.lock() {
             *current_url = url.clone();
@@ -1359,6 +1625,7 @@ async fn close_tab_webview<R: Runtime>(
             .lock()
             .map_err(|_| "active tab mutex poisoned".to_string())?
             .take();
+        let _ = state.browser_engine.set_active_tab_id(None);
     }
 
     if let Some(label) = removed_label {
@@ -1405,10 +1672,6 @@ async fn navigate_to<R: Runtime>(
         .try_state::<AppState>()
         .ok_or_else(|| "application state unavailable".to_string())?;
 
-    if let Ok(mut current_url) = state.current_url.lock() {
-        *current_url = request.url.clone();
-    }
-
     let target_tab_id = if let Some(tab_id) = request.tab_id.as_ref() {
         if tab_id.trim().is_empty() {
             log_command("navigate_to", "invalid request: empty tab_id");
@@ -1427,6 +1690,12 @@ async fn navigate_to<R: Runtime>(
             active_tab.as_deref().unwrap_or("<none>")
         ),
     );
+
+    if let Ok(mut current_url) = state.current_url.lock() {
+        *current_url = request.url.clone();
+    }
+
+    ensure_browser_engine_tab(&state, &target_tab_id, &request.url, true)?;
 
     let webview = ensure_tab_webview(&app_handle, &target_tab_id, Some(&request.url))?;
     let target_label =
@@ -1456,12 +1725,6 @@ async fn navigate_to<R: Runtime>(
         );
         err
     })?;
-
-    state
-        .browser_engine
-        .add_to_history(target_url, request.url.clone())
-        .map_err(|err| err.to_string())?;
-    emit_history_updated(&app_handle, &state)?;
 
     if active_tab.as_deref() == Some(target_tab_id.as_str()) {
         log_command(
@@ -1718,6 +1981,7 @@ mod tests {
             mcp_config,
             agent_apps: Arc::new(AgentAppRegistry::empty()),
             agent_app_schedules: Arc::new(AgentAppScheduleRegistry::empty()),
+            download_controls: Arc::new(AsyncMutex::new(std::collections::HashMap::new())),
         };
 
         let url = state.current_url.lock().unwrap();

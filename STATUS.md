@@ -15,10 +15,16 @@
 - Remaining follow-up is manual smoke from `VALIDATE.md`.
 - The Tauri/Vite dev stack has been cold-restarted after clearing build artifacts, and the fresh dev binary is running.
 - `ipfs://` and `ipns://` navigation now resolves through the embedded browser node instead of rewriting through a public gateway.
+- Production hardening changes are implemented and validated with `cargo test -p gui`, `npm --prefix orbit-shell-ui run test`, and `npm --prefix orbit-shell-ui run build`.
 
 ## Active Task
 
-- [x] Perform a clean restart of the Tauri/Vite dev stack so updated permissions and runtime UI state are loaded from a fresh process.
-- [x] Make the browser resolve `ipfs://` and `ipns://` URLs internally instead of rewriting them to centralized HTTP gateways.
-- [x] Show only home-screen decentralized entries that actually resolve through the browser runtime.
-- [x] Restore the Tauri UI permission for the home-page runtime probe so curated ENS/IPFS entries can render again.
+## Production Hardening
+
+- [x] Enforce navigation security policy in the runtime instead of treating it as advisory state.
+- [x] Remove sensitive IPC payload logging from release builds and make telemetry/logging opt-in for shipped binaries.
+- [x] Replace timer-based page state in the runtime UI with native tab/page-load events from Tauri.
+- [x] Turn downloads into a real background subsystem with event updates and only expose supported actions in the UI.
+- [x] Gate browser automation capabilities by platform so unsupported desktop targets do not advertise broken agent tools.
+- [x] Standardize CI on the supported runtime/frontend path and stop relying on the broken legacy frontend npm lane.
+- [x] Align docs and defaults with the actual runtime architecture, including decentralized protocol handling and telemetry behavior.

@@ -1,12 +1,13 @@
 use crate::wallet_store::WalletStore;
 use afm_node::{AfmNodeConfig, AfmNodeController, AfmNodeHandle};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{watch, Mutex as AsyncMutex};
 
 use crate::agent::{AgentManager, ApprovalBroker, McpServerRegistry};
-use crate::agent_apps::AgentAppRegistry;
 use crate::agent_app_schedules::AgentAppScheduleRegistry;
+use crate::agent_apps::AgentAppRegistry;
 use crate::browser_engine::BrowserEngine;
 use crate::mcp_profiles::McpConfigService;
 use crate::protocol_handlers::ProtocolHandler;
@@ -25,6 +26,14 @@ impl ContentWebviewBounds {
     pub fn is_visible(&self) -> bool {
         self.width > 1.0 && self.height > 1.0
     }
+}
+
+#[derive(Clone)]
+pub struct DownloadControl {
+    pub url: String,
+    pub filename: String,
+    pub destination: PathBuf,
+    pub cancel: watch::Sender<bool>,
 }
 
 pub struct AppState {
@@ -48,4 +57,5 @@ pub struct AppState {
     pub mcp_config: Arc<McpConfigService>,
     pub agent_apps: Arc<AgentAppRegistry>,
     pub agent_app_schedules: Arc<AgentAppScheduleRegistry>,
+    pub download_controls: Arc<AsyncMutex<HashMap<String, DownloadControl>>>,
 }
