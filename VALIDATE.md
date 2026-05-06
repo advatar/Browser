@@ -32,8 +32,14 @@ cd crates/gui
 # Developer packaging (unsigned local build is allowed)
 make dmg
 
+# Local signed packaging (uses MACOS_SIGNING_IDENTITY/APPLE_SIGNING_IDENTITY, or the first installed Developer ID/Apple Development identity)
+make dmg-signed
+
 # Production packaging (requires valid signature + notarization ticket)
-make dmg-prod
+MACOS_SIGNING_IDENTITY="Developer ID Application: Example Corp (TEAMID)" NOTARYTOOL_PROFILE="notary-profile" make dmg-prod
+
+# Alternate production notary credentials:
+# APPLE_ID="developer@example.com" APPLE_PASSWORD="app-specific-password" APPLE_TEAM_ID="TEAMID" make dmg-prod
 ```
 
 ## Manual Smoke

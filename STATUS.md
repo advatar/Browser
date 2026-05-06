@@ -19,6 +19,12 @@
 
 ## Active Task
 
+## Signed DMG Distribution
+
+- [x] Create a signed macOS DMG with the available local Apple Development identity.
+- [x] Verify the packaged app/DMG locally and record the output artifact.
+- [x] Gate production DMG builds on Developer ID signing and notarization credentials.
+
 ## Production Hardening
 
 - [x] Enforce navigation security policy in the runtime instead of treating it as advisory state.

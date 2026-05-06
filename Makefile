@@ -3,6 +3,7 @@
 NPM ?= npm
 PNPM ?= pnpm
 CARGO ?= cargo
+TAURI ?= ./node_modules/.bin/tauri
 GUI_CRATE := gui
 GUI_DIR := crates/$(GUI_CRATE)
 ORBIT_UI_DIR := orbit-shell-ui
@@ -16,8 +17,7 @@ MARKETPLACE_PKG := @browser/afm-marketplace
 .PHONY: deps tauri-cli dev frontend-build build afm-node afm-node-check zkvm router registry pipelines marketplace workspace-install env-templates
 
 deps: workspace-install
-	$(NPM) --prefix $(ORBIT_UI_DIR) install
-	$(NPM) --prefix $(GUI_DIR) install
+	$(NPM) --prefix $(ORBIT_UI_DIR) ci
 
 workspace-install:
 	$(PNPM) install --ignore-scripts
@@ -26,17 +26,20 @@ tauri-cli:
 	$(CARGO) install tauri-cli --version '^2' --locked
 
 dev: deps
-	cd $(GUI_DIR) && $(CARGO) tauri dev
+	cd $(GUI_DIR) && $(TAURI) dev
 
 frontend-build: deps
 	$(NPM) --prefix $(ORBIT_UI_DIR) run build
 
 build: frontend-build
-	cd $(GUI_DIR) && $(CARGO) tauri build
+	cd $(GUI_DIR) && $(TAURI) build
 
-.PHONY: dmg dmg-prod
+.PHONY: dmg dmg-signed dmg-prod
 dmg: frontend-build
 	./scripts/package-macos-dmg.sh
+
+dmg-signed: frontend-build
+	STRICT_SIGNING=1 SIGN_DMG=1 ./scripts/package-macos-dmg.sh
 
 dmg-prod: frontend-build
 	PROD_RELEASE=1 ./scripts/package-macos-dmg.sh
