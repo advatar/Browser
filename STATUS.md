@@ -40,6 +40,7 @@
 - [x] Show Tor routing status feedback in Settings (#33).
 - [x] Improve Copilot run detail summaries and top-up confirmation (#40, #41).
 - [x] Populate Site Info with backend security audit and certificate data (#36).
+- [x] Add wallet connection and management dialog (#16).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 
