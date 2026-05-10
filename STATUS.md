@@ -48,7 +48,7 @@
 - [x] Decompose CopilotPanel into focused section components (#37).
 - [x] Add conversational Copilot interaction model (#39).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
-- Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
+- All walkthrough follow-ups created from `walkthrough.md` are fixed and closed in GitHub issues #7-#48.
 
 ## Signed DMG Distribution
 
