@@ -36,6 +36,7 @@
 - [x] Centralize and test native content bounds calibration (#25).
 - [x] Resolve command palette URL-vs-command precedence (#35).
 - [x] Add keyboard shortcut discovery dialog and command (#42).
+- [x] Remove leftover Vite scaffold CSS and Lovable package metadata (#47, #48).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 
