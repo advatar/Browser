@@ -39,6 +39,7 @@
 - [x] Remove leftover Vite scaffold CSS and Lovable package metadata (#47, #48).
 - [x] Show Tor routing status feedback in Settings (#33).
 - [x] Improve Copilot run detail summaries and top-up confirmation (#40, #41).
+- [x] Populate Site Info with backend security audit and certificate data (#36).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 

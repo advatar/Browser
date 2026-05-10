@@ -379,6 +379,7 @@ async fn probe_http_url(url: &str) -> bool {
 pub struct SecurityStatus {
     pub is_secure: bool,
     pub certificate_valid: bool,
+    pub certificate_info: Option<CertificateInfo>,
     pub privacy_settings: PrivacySettings,
     pub blocked_requests: u32,
 }
@@ -410,6 +411,7 @@ pub async fn get_security_status<R: Runtime>(
     Ok(SecurityStatus {
         is_secure,
         certificate_valid: security_manager.certificate_status_for_url(&url, is_secure),
+        certificate_info: security_manager.certificate_info_for_url(&url),
         privacy_settings: security_manager.privacy_settings.clone(),
         blocked_requests: security_manager
             .blocked_request_count()

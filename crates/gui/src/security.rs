@@ -167,6 +167,18 @@ impl SecurityManager {
         is_secure
     }
 
+    pub fn certificate_info_for_url(&self, url: &str) -> Option<CertificateInfo> {
+        let parsed = Url::parse(url).ok()?;
+        if parsed.scheme() != "https" {
+            return None;
+        }
+        let domain = parsed.host_str()?;
+        self.certificates
+            .lock()
+            .ok()
+            .and_then(|certificates| certificates.get(domain).cloned())
+    }
+
     /// Validate URL security
     pub fn validate_url_security(&self, url: &str) -> Result<bool> {
         let parsed_url = Url::parse(url)?;
@@ -644,6 +656,32 @@ mod tests {
         let cookies = manager.get_cookies("example.com").unwrap();
         assert_eq!(cookies.len(), 1);
         assert_eq!(cookies[0].name, "test");
+    }
+
+    #[test]
+    fn test_certificate_lookup_by_url() {
+        let manager = SecurityManager::new();
+        let cert = CertificateInfo {
+            subject: "example.com".to_string(),
+            issuer: "Example CA".to_string(),
+            valid_from: 1,
+            valid_to: u64::MAX,
+            fingerprint: "abc123".to_string(),
+            is_valid: true,
+            is_trusted: true,
+        };
+
+        manager
+            .validate_certificate("example.com", cert)
+            .expect("certificate validation should run");
+
+        let found = manager
+            .certificate_info_for_url("https://example.com/path")
+            .expect("certificate should be available for https host");
+        assert_eq!(found.issuer, "Example CA");
+        assert!(manager
+            .certificate_info_for_url("http://example.com/path")
+            .is_none());
     }
 
     #[test]
