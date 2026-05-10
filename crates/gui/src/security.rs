@@ -4,7 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
 
 /// Content Security Policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,10 +162,7 @@ impl SecurityManager {
 
         if let Ok(certs) = self.certificates.lock() {
             if let Some(cert) = certs.get(domain) {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                let now = unix_now_secs();
                 let within_validity = cert.valid_from <= now && cert.valid_to >= now;
                 let matches_domain = cert.subject.contains(domain);
                 return within_validity && matches_domain && cert.is_valid && cert.is_trusted;
@@ -286,10 +291,7 @@ impl SecurityManager {
         }
 
         // Basic validation
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = unix_now_secs();
 
         if cert_info.valid_from > now || cert_info.valid_to < now {
             return Ok(false);
@@ -322,10 +324,7 @@ impl SecurityManager {
         if let Ok(cookies) = self.cookies.lock() {
             if let Some(domain_cookies) = cookies.get(domain) {
                 // Filter expired cookies
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                let now = unix_now_secs();
 
                 let valid_cookies: Vec<Cookie> = domain_cookies
                     .iter()

@@ -815,7 +815,9 @@ fn apply_bounds_to_active_webview<R: Runtime>(
         return Ok(());
     }
 
-    let bounds = bounds.expect("desired visible bounds are present");
+    let Some(bounds) = bounds else {
+        return Err("content bounds unexpectedly unavailable while visible".to_string());
+    };
     let should_set_bounds = last_bounds_slot.as_ref() != Some(&bounds);
     if should_set_bounds {
         let rect = Rect {
@@ -877,8 +879,11 @@ fn create_browser_window<R: Runtime>(
 
     let initial_webview_url = if cfg!(debug_assertions) {
         tauri::WebviewUrl::External(
-            url::Url::parse("http://localhost:5174")
-                .unwrap_or_else(|_| url::Url::parse("about:blank").expect("invalid fallback URL")),
+            url::Url::parse("http://localhost:5174").unwrap_or_else(|_| {
+                url::Url::parse("about:blank").unwrap_or_else(|_| {
+                    url::Url::parse("data:text/plain,about:blank").expect("static fallback URL")
+                })
+            }),
         )
     } else {
         tauri::WebviewUrl::App("index.html".into())
@@ -1049,7 +1054,9 @@ fn main() {
                 Ok(service) => service,
                 Err(reset_err) => {
                     log_startup(&format!("failed to reset MCP profiles: {reset_err}"));
-                    McpConfigService::load().expect("reinitialised MCP profiles")
+                    McpConfigService::load().unwrap_or_else(|reload_err| {
+                        panic!("failed to load MCP profiles after reset attempt: {reload_err}")
+                    })
                 }
             }
         }

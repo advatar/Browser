@@ -400,8 +400,16 @@ impl GatewayKeys {
             .map_err(|err| anyhow!("decoding key error: {err}"))?;
 
         let point = verifying_key.to_encoded_point(false);
-        let x = URL_SAFE_NO_PAD.encode(point.x().unwrap());
-        let y = URL_SAFE_NO_PAD.encode(point.y().unwrap());
+        let x = URL_SAFE_NO_PAD.encode(
+            point
+                .x()
+                .ok_or_else(|| anyhow!("generated P-256 key missing x coordinate"))?,
+        );
+        let y = URL_SAFE_NO_PAD.encode(
+            point
+                .y()
+                .ok_or_else(|| anyhow!("generated P-256 key missing y coordinate"))?,
+        );
         let kid = format!("ag-{}", Uuid::new_v4().simple());
 
         let jwk = json!({

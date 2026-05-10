@@ -292,7 +292,7 @@ class BrowserEngine {
     // Add new tab button
     const newTabButton = document.createElement('div');
     newTabButton.className = 'new-tab-button';
-    newTabButton.innerHTML = '+';
+    newTabButton.textContent = '+';
     newTabButton.onclick = () => this.createTab('about:home');
     tabBar.appendChild(newTabButton);
   }
@@ -443,15 +443,19 @@ class WalletManager {
     if (!walletButton) return;
 
     if (this.walletInfo?.is_connected) {
-      walletButton.innerHTML = `
-        <div class="wallet-connected">
-          <div class="wallet-address">${this.formatAddress(this.walletInfo.address)}</div>
-          <div class="wallet-balance">${this.walletInfo.balance}</div>
-        </div>
-      `;
+      const connected = document.createElement('div');
+      connected.className = 'wallet-connected';
+      const address = document.createElement('div');
+      address.className = 'wallet-address';
+      address.textContent = this.formatAddress(this.walletInfo.address);
+      const balance = document.createElement('div');
+      balance.className = 'wallet-balance';
+      balance.textContent = this.walletInfo.balance;
+      connected.replaceChildren(address, balance);
+      walletButton.replaceChildren(connected);
       walletButton.className = 'wallet-button connected';
     } else {
-      walletButton.innerHTML = 'Connect Wallet';
+      walletButton.textContent = 'Connect Wallet';
       walletButton.className = 'wallet-button disconnected';
     }
   }
@@ -522,7 +526,7 @@ class SettingsManager {
           <h3>General</h3>
           <label>
             Default Search Engine:
-            <select id="search-engine" value="${this.settings.default_search_engine}">
+            <select id="search-engine" value="${this.htmlEscape(this.settings.default_search_engine)}">
               <option value="duckduckgo">DuckDuckGo</option>
               <option value="google">Google</option>
               <option value="bing">Bing</option>
@@ -530,7 +534,7 @@ class SettingsManager {
           </label>
           <label>
             Homepage:
-            <input type="text" id="homepage" value="${this.settings.homepage}">
+            <input type="text" id="homepage" value="${this.htmlEscape(this.settings.homepage)}">
           </label>
         </div>
 
@@ -558,11 +562,11 @@ class SettingsManager {
           <h3>Decentralized Web</h3>
           <label>
             IPFS Gateway:
-            <input type="text" id="ipfs-gateway" value="${this.settings.ipfs_gateway}">
+            <input type="text" id="ipfs-gateway" value="${this.htmlEscape(this.settings.ipfs_gateway)}">
           </label>
           <label>
             ENS Resolver:
-            <input type="text" id="ens-resolver" value="${this.settings.ens_resolver || ''}">
+            <input type="text" id="ens-resolver" value="${this.htmlEscape(this.settings.ens_resolver || '')}">
           </label>
         </div>
 
@@ -1672,10 +1676,12 @@ class AppLauncher {
   }
 
   private renderCard(app: AgentAppSummary): string {
+    const appId = this.htmlEscape(app.id);
+    const heroColor = this.safeAccentColor(app.heroColor);
     const quickPrompts = app.quickPrompts
       .map(
         (prompt) => `
-        <button type="button" data-action="quick-prompt" data-app-id="${app.id}" data-prompt="${this.htmlEscape(prompt)}">
+        <button type="button" data-action="quick-prompt" data-app-id="${appId}" data-prompt="${this.htmlEscape(prompt)}">
           ${this.htmlEscape(prompt)}
         </button>
       `,
@@ -1688,30 +1694,30 @@ class AppLauncher {
     const defaultValue = app.defaultInput || '';
 
     return `
-      <article class="app-card" data-app-id="${app.id}" style="border-top: 3px solid ${app.heroColor || '#0f172a'}">
+      <article class="app-card" data-app-id="${appId}" style="border-top: 3px solid ${heroColor}">
         <h4>${this.htmlEscape(app.name)}</h4>
         <small>${this.htmlEscape(app.tagline)}</small>
         <p>${this.htmlEscape(app.description)}</p>
         <div class="app-tags">${chips}</div>
-        <textarea data-app-input="${app.id}" placeholder="${this.htmlEscape(placeholder)}">${this.htmlEscape(defaultValue)}</textarea>
+        <textarea data-app-input="${appId}" placeholder="${this.htmlEscape(placeholder)}">${this.htmlEscape(defaultValue)}</textarea>
         <div class="app-quick-prompts">
           ${quickPrompts}
         </div>
         <footer>
-          <button type="button" data-action="launch-app" data-app-id="${app.id}">Launch</button>
+          <button type="button" data-action="launch-app" data-app-id="${appId}">Launch</button>
         </footer>
       </article>
     `;
   }
 
   private getInputValue(appId: string): string {
-    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${appId}"]`);
+    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${this.cssEscape(appId)}"]`);
     const input = card?.querySelector<HTMLTextAreaElement>('textarea[data-app-input]');
     return input?.value || '';
   }
 
   private setInputValue(appId: string, value: string): void {
-    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${appId}"]`);
+    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${this.cssEscape(appId)}"]`);
     const input = card?.querySelector<HTMLTextAreaElement>('textarea[data-app-input]');
     if (input) {
       input.value = value;
@@ -1719,7 +1725,7 @@ class AppLauncher {
   }
 
   private setCardBusy(appId: string, busy: boolean): void {
-    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${appId}"]`);
+    const card = this.panel?.querySelector<HTMLElement>(`.app-card[data-app-id="${this.cssEscape(appId)}"]`);
     if (card) {
       card.dataset.busy = busy ? 'true' : 'false';
     }
@@ -1758,7 +1764,7 @@ class AppLauncher {
     this.resultEl.innerHTML = `
       <h5>${this.htmlEscape(app.name)}</h5>
       <p>${this.htmlEscape(answer)}</p>
-      <small style="color:#475467;">${response.tokens_used} tokens • ${new Date().toLocaleTimeString()}</small>
+      <small style="color:#475467;">${this.htmlEscape(String(response.tokens_used))} tokens • ${new Date().toLocaleTimeString()}</small>
     `;
   }
 
@@ -1766,6 +1772,18 @@ class AppLauncher {
     const div = document.createElement('div');
     div.textContent = value;
     return div.innerHTML;
+  }
+
+  private safeAccentColor(value?: string | null): string {
+    if (!value) return '#0f172a';
+    return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value) ? value : '#0f172a';
+  }
+
+  private cssEscape(value: string): string {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+      return CSS.escape(value);
+    }
+    return value.replace(/["\\]/g, '\\$&');
   }
 }
 
@@ -2031,23 +2049,37 @@ function showBookmarks(): void {
     const panel = document.getElementById('bookmarks-panel');
     if (!panel) return;
 
-    panel.innerHTML = `
-      <div class="bookmarks-content">
-        <h2>Bookmarks</h2>
-        <div class="bookmarks-list">
-          ${bookmarks.map(bookmark => `
-            <div class="bookmark-item">
-              <div class="bookmark-title">${bookmark.title}</div>
-              <div class="bookmark-url">${bookmark.url}</div>
-              <div class="bookmark-actions">
-                <button onclick="protocolManager.navigateToUrl('${bookmark.url}')">Visit</button>
-                <button onclick="removeBookmark('${bookmark.id}')">Remove</button>
-              </div>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `;
+    const content = document.createElement('div');
+    content.className = 'bookmarks-content';
+    const heading = document.createElement('h2');
+    heading.textContent = 'Bookmarks';
+    const list = document.createElement('div');
+    list.className = 'bookmarks-list';
+    bookmarks.forEach((bookmark) => {
+      const item = document.createElement('div');
+      item.className = 'bookmark-item';
+      const title = document.createElement('div');
+      title.className = 'bookmark-title';
+      title.textContent = bookmark.title;
+      const url = document.createElement('div');
+      url.className = 'bookmark-url';
+      url.textContent = bookmark.url;
+      const actions = document.createElement('div');
+      actions.className = 'bookmark-actions';
+      const visitButton = document.createElement('button');
+      visitButton.type = 'button';
+      visitButton.textContent = 'Visit';
+      visitButton.onclick = () => protocolManager.navigateToUrl(bookmark.url);
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.textContent = 'Remove';
+      removeButton.onclick = () => removeBookmark(bookmark.id);
+      actions.replaceChildren(visitButton, removeButton);
+      item.replaceChildren(title, url, actions);
+      list.appendChild(item);
+    });
+    content.replaceChildren(heading, list);
+    panel.replaceChildren(content);
     panel.style.display = 'block';
   });
 }
@@ -2063,24 +2095,40 @@ function showHistory(): void {
     const panel = document.getElementById('history-panel');
     if (!panel) return;
 
-    panel.innerHTML = `
-      <div class="history-content">
-        <h2>History</h2>
-        <div class="history-list">
-          ${history.map(entry => `
-            <div class="history-item">
-              <div class="history-title">${entry.title}</div>
-              <div class="history-url">${entry.url}</div>
-              <div class="history-timestamp">${new Date(entry.timestamp * 1000).toLocaleString()}</div>
-              <button onclick="protocolManager.navigateToUrl('${entry.url}')">Visit</button>
-            </div>
-          `).join('')}
-        </div>
-        <div class="history-actions">
-          <button onclick="clearHistory()">Clear History</button>
-        </div>
-      </div>
-    `;
+    const content = document.createElement('div');
+    content.className = 'history-content';
+    const heading = document.createElement('h2');
+    heading.textContent = 'History';
+    const list = document.createElement('div');
+    list.className = 'history-list';
+    history.forEach((entry) => {
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      const title = document.createElement('div');
+      title.className = 'history-title';
+      title.textContent = entry.title;
+      const url = document.createElement('div');
+      url.className = 'history-url';
+      url.textContent = entry.url;
+      const timestamp = document.createElement('div');
+      timestamp.className = 'history-timestamp';
+      timestamp.textContent = new Date(entry.timestamp * 1000).toLocaleString();
+      const visitButton = document.createElement('button');
+      visitButton.type = 'button';
+      visitButton.textContent = 'Visit';
+      visitButton.onclick = () => protocolManager.navigateToUrl(entry.url);
+      item.replaceChildren(title, url, timestamp, visitButton);
+      list.appendChild(item);
+    });
+    const actions = document.createElement('div');
+    actions.className = 'history-actions';
+    const clearButton = document.createElement('button');
+    clearButton.type = 'button';
+    clearButton.textContent = 'Clear History';
+    clearButton.onclick = () => clearHistory();
+    actions.appendChild(clearButton);
+    content.replaceChildren(heading, list, actions);
+    panel.replaceChildren(content);
     panel.style.display = 'block';
   });
 }
@@ -2114,6 +2162,16 @@ function escapeHtml(value: string): string {
   const div = document.createElement('div');
   div.textContent = value;
   return div.innerHTML;
+}
+
+function safeExternalUrl(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return ['https:', 'http:', 'ipfs:'].includes(parsed.protocol) ? parsed.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function renderUpdateBanner(info: UpdateStatusPayload): void {
@@ -2239,7 +2297,12 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
     : '';
 
   const releaseNotesLink = !info.release_notes_text && info.release_notes
-    ? `<div style="font-size: 13px; margin-bottom: 6px;"><a href="${encodeURI(info.release_notes)}" target="_blank" rel="noreferrer" style="color: #e0f2fe;">View release notes</a></div>`
+    ? (() => {
+        const href = safeExternalUrl(info.release_notes);
+        return href
+          ? `<div style="font-size: 13px; margin-bottom: 6px;"><a href="${escapeHtml(href)}" target="_blank" rel="noreferrer" style="color: #e0f2fe;">View release notes</a></div>`
+          : '';
+      })()
     : '';
 
   banner.innerHTML = `
@@ -2266,7 +2329,7 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
   const downloadButton = document.getElementById('update-download-button');
   if (downloadButton) {
     downloadButton.onclick = () => {
-      const target = info.download_url ?? info.ipfs_uri;
+      const target = safeExternalUrl(info.download_url) ?? safeExternalUrl(info.ipfs_uri);
       if (target) {
         window.open(target, '_blank');
       } else {

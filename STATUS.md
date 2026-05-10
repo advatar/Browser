@@ -19,6 +19,10 @@
 
 ## Active Task
 
+## Code Review Gap Closure
+
+- [x] Harden static review follow-ups: DOM injection sinks and panic/unsafe hotspots (#6).
+
 ## Walkthrough UX Remediation
 
 - [x] Create GitHub issues for all 42 findings in `walkthrough.md` (#7-#48).
