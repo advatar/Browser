@@ -27,6 +27,7 @@
 - [x] Fix tab affordance follow-ups: drag-drop insertion feedback, discoverable overflow controls, and stronger active tab state (#9-#11).
 - [x] Fix tab-close focus management for keyboard users (#44).
 - [x] Fix settings walkthrough cluster: distinct system theme state, explicit settings save/revert/reset flow, and batched backend sync (#15, #31, #32, #45).
+- [x] Consolidate repeated NavigationBar tooltip providers (#17).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 
