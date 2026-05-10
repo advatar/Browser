@@ -31,6 +31,7 @@
 - [x] Fix downloads sidebar search and indeterminate progress affordances (#18, #21).
 - [x] Fix bookmark edit action and durable bookmark persistence (#19, #20).
 - [x] Optimize History and Downloads store subscriptions (#46).
+- [x] Animate sidebar collapse and expand width changes (#22).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 
