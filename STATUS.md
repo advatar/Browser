@@ -34,6 +34,7 @@
 - [x] Animate sidebar collapse and expand width changes (#22).
 - [x] Fix content/homepage loading resilience: richer page loading feedback, user-facing webview errors, homepage fallback content, and probe skeleton/timeout (#23, #24, #26, #27).
 - [x] Centralize and test native content bounds calibration (#25).
+- [x] Resolve command palette URL-vs-command precedence (#35).
 - [x] Run focused frontend validation for the completed walkthrough fixes.
 - Remaining walkthrough follow-ups are tracked in the open GitHub issues from #8-#48.
 
