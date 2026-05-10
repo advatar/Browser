@@ -19,6 +19,13 @@
 
 ## Active Task
 
+## Walkthrough UX Remediation
+
+- [x] Create GitHub issues for all 42 findings in `walkthrough.md` (#7-#48).
+- [x] Fix P0 walkthrough blockers first: status bar production state, security indicator state, dead developer tools control, standard shortcuts, inline agent approvals, and command-palette settings action.
+- [x] Run focused frontend validation for the completed P0 fixes.
+- [ ] Continue P1 walkthrough remediation after the initial P0 batch.
+
 ## Signed DMG Distribution
 
 - [x] Create a signed macOS DMG with the available local Apple Development identity.
