@@ -1849,6 +1849,43 @@ fn resolve_scoped_webview<R: Runtime>(
     active_tab_webview(app_handle)
 }
 
+#[derive(Clone, Copy)]
+enum StaticContentScript {
+    HistoryBack,
+    HistoryForward,
+    StopLoading,
+}
+
+impl StaticContentScript {
+    fn source(self) -> &'static str {
+        match self {
+            Self::HistoryBack => "history.back();",
+            Self::HistoryForward => "history.forward();",
+            Self::StopLoading => "window.stop();",
+        }
+    }
+
+    fn error_label(self) -> &'static str {
+        match self {
+            Self::HistoryBack => "go back",
+            Self::HistoryForward => "go forward",
+            Self::StopLoading => "stop loading",
+        }
+    }
+}
+
+fn run_static_content_script<R: Runtime>(
+    webview: &tauri::webview::Webview<R>,
+    script: StaticContentScript,
+) -> Result<(), String> {
+    // Only allow audited built-in navigation scripts here. User/model-provided
+    // JavaScript belongs in the structured automation bridge, which JSON-encodes
+    // selector/text inputs before evaluating them.
+    webview
+        .eval(script.source())
+        .map_err(|e| format!("Failed to {}: {e}", script.error_label()))
+}
+
 #[tauri::command]
 async fn content_go_back<R: Runtime>(
     request: TabScopedRequest,
@@ -1856,9 +1893,7 @@ async fn content_go_back<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
-        webview
-            .eval("history.back();")
-            .map_err(|e| format!("Failed to go back: {e}"))?;
+        run_static_content_script(&webview, StaticContentScript::HistoryBack)?;
     }
 
     Ok(())
@@ -1871,9 +1906,7 @@ async fn content_go_forward<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
-        webview
-            .eval("history.forward();")
-            .map_err(|e| format!("Failed to go forward: {e}"))?;
+        run_static_content_script(&webview, StaticContentScript::HistoryForward)?;
     }
 
     Ok(())
@@ -1901,9 +1934,7 @@ async fn content_stop<R: Runtime>(
     app_handle: tauri::AppHandle<R>,
 ) -> Result<(), String> {
     if let Some(webview) = resolve_scoped_webview(&app_handle, &request)? {
-        webview
-            .eval("window.stop();")
-            .map_err(|e| format!("Failed to stop loading: {e}"))?;
+        run_static_content_script(&webview, StaticContentScript::StopLoading)?;
     }
 
     Ok(())

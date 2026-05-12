@@ -88,6 +88,10 @@ impl Default for CapabilityLimit {
     }
 }
 
+/// Runtime allowance counter for a capability grant.
+///
+/// This is not bearer credential material: it carries only quota state and
+/// revocation status for the current run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CapabilityToken {
     limit: CapabilityLimit,

@@ -1,5 +1,13 @@
 # Validate
 
+## Workspace Ownership
+
+- Root `Cargo.toml` owns the Rust workspace and release checks for shared crates.
+- `crates/gui` owns the Tauri shell and legacy placeholder frontend.
+- `orbit-shell-ui` owns the active runtime React frontend used by Tauri builds.
+- `apps/afm-marketplace` plus `services/router`, `services/registry`, and `services/pipelines` are the pnpm-managed AFM JavaScript workspace.
+- `swift/Packages/AFMRunner` and `swift/Packages/AttestationKit` are independent Swift package surfaces.
+
 ## Unit + Lint
 
 ```bash

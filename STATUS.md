@@ -19,6 +19,16 @@
 
 ## Active Task
 
+## REVIEW.md Remediation
+
+- [x] Resolve high dynamic execution review finding.
+- [x] Complete secret/config material audit and document ownership.
+- [x] Gate or document debug/CORS/insecure-transport scanner hits.
+- [x] Remove or classify remaining HTML injection scanner hits.
+- [x] Document nested manifest and package-manager ownership.
+- [x] Harden runtime failure shortcuts identified in review evidence.
+- [x] Run local validation and commit remediation.
+
 ## Code Review Gap Closure
 
 - [x] Harden static review follow-ups: DOM injection sinks and panic/unsafe hotspots (#6).

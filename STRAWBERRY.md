@@ -19,7 +19,7 @@ That implies you need two hard technical primitives first:
 ## What your current code does today (with source evidence)
 
 ### 1) You already have “real tabs” as isolated native child webviews
-You create content tabs as child webviews in Rust (`ensure_tab_webview`), and you already execute JS into them for history/stop:
+You create content tabs as child webviews in Rust (`ensure_tab_webview`), and navigation controls already use audited static scripts:
 
 ```rust
 // crates/gui/src/main.rs
@@ -29,8 +29,8 @@ window.add_child(
   LogicalSize::new(0.0, 0.0),
 )?;
 ...
-webview.eval("history.back();")?;
-webview.eval("window.stop();")?;
+run_static_content_script(&webview, StaticContentScript::HistoryBack)?;
+run_static_content_script(&webview, StaticContentScript::StopLoading)?;
 ```
 
 That’s a great foundation for Strawberry-like UI automation.
@@ -68,7 +68,7 @@ This breaks Strawberry’s “credits only when AI acts.”  [oai_citation:5‡S
 This is the critical path. If you do nothing else, do this in order.
 
 ### Step 1 — Build a Webview Automation Bridge (request/response channel)
-You need a way to **run JS in the content webview AND get JSON back**. `eval()` alone won’t return values.
+You need a way to **run audited automation scripts in the content webview AND get JSON back**. Do not add ad hoc caller-provided JavaScript evaluation; route user/model inputs through structured automation commands that JSON-encode selectors and text before evaluation.
 
 Use the standard embedded-webview pattern: **inject a script + send results back via IPC** (Wry supports `window.ipc.postMessage(...)` when an IPC handler is configured).  [oai_citation:6‡Docs.rs](https://docs.rs/wry/latest/wry/struct.WebViewBuilder.html)  
 Tauri child webviews also support `initialization_script` in practice (and this is a common way to inject into additional webviews).  [oai_citation:7‡GitHub](https://github.com/tauri-apps/tauri/issues/10298)

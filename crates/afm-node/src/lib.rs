@@ -384,29 +384,27 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn node_lifecycle() {
+    async fn node_lifecycle() -> Result<(), AfmNodeError> {
         let controller = AfmNodeController::launch(AfmNodeConfig {
             data_dir: PathBuf::from("target/tests-afm-node"),
             ..AfmNodeConfig::default()
         })
-        .await
-        .expect("controller launches");
+        .await?;
 
         let handle = controller.handle();
         handle
             .submit_task(AfmTaskDescriptor::new("demo", json!({"kind": "test"})))
-            .await
-            .expect("task accepted");
+            .await?;
         handle
             .feed_gossip(GossipFrame {
                 topic: "status".into(),
                 bytes: vec![1, 2, 3],
             })
-            .await
-            .expect("gossip stored");
+            .await?;
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        controller.shutdown().await.expect("clean shutdown");
+        controller.shutdown().await?;
+        Ok(())
     }
 }

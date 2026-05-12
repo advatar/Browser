@@ -224,6 +224,21 @@ interface AgentRunResponsePayload {
   skill_id?: string | null;
 }
 
+type TrustedHtml = string & { readonly __trustedHtml: unique symbol };
+
+function trustedTemplate(html: string): TrustedHtml {
+  return html as TrustedHtml;
+}
+
+function renderTrustedHtml(container: Element, html: TrustedHtml): void {
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const fragment = document.createDocumentFragment();
+  Array.from(parsed.body.childNodes).forEach((node) => {
+    fragment.appendChild(document.importNode(node, true));
+  });
+  container.replaceChildren(fragment);
+}
+
 // Browser Engine Manager
 class BrowserEngine {
   tabs: Map<string, Tab> = new Map();
@@ -279,7 +294,7 @@ class BrowserEngine {
     const tabBar = document.getElementById('tab-bar');
     if (!tabBar) return;
 
-    tabBar.innerHTML = '';
+    tabBar.replaceChildren();
     
     this.tabs.forEach((tab, id) => {
       const tabElement = document.createElement('div');
@@ -301,7 +316,7 @@ class BrowserEngine {
     const historyList = document.getElementById('history-list');
     if (!historyList) return;
 
-    historyList.innerHTML = '';
+    historyList.replaceChildren();
     this.history.slice(0, 50).forEach(entry => {
       const li = document.createElement('li');
       const link = document.createElement('a');
@@ -355,15 +370,7 @@ class ProtocolManager {
   }
 
   private async getPageTitle(url: string): Promise<string> {
-    // Try to get the page title, fallback to URL
-    try {
-      const result = await invoke<string>('execute_script', { 
-        script: 'document.title || document.location.href' 
-      });
-      return result || url;
-    } catch {
-      return url;
-    }
+    return url;
   }
 
   private showError(message: string): void {
@@ -406,11 +413,11 @@ class SecurityManager {
 
     if (this.securityStatus.is_secure) {
       indicator.className = 'security-indicator secure';
-      indicator.innerHTML = '🔒';
+      indicator.textContent = '🔒';
       indicator.title = 'Secure connection';
     } else {
       indicator.className = 'security-indicator insecure';
-      indicator.innerHTML = '⚠️';
+      indicator.textContent = '⚠️';
       indicator.title = 'Insecure connection';
     }
   }
@@ -508,7 +515,7 @@ class SettingsManager {
     if (!panel) return;
 
     await Promise.all([this.ensureSettingsLoaded(), this.ensureMcpServersLoaded()]);
-    panel.innerHTML = this.generateSettingsHTML();
+    renderTrustedHtml(panel, trustedTemplate(this.generateSettingsHTML()));
     panel.style.display = 'block';
     this.toastContainer = panel.querySelector('#settings-toast-container');
     this.bindMcpEvents(panel);
@@ -589,8 +596,8 @@ class SettingsManager {
         </div>
 
         <div class="settings-actions">
-          <button onclick="settingsManager.saveSettings()">Save</button>
-          <button onclick="settingsManager.closeSettings()">Cancel</button>
+          <button type="button" data-action="save-settings">Save</button>
+          <button type="button" data-action="close-settings">Cancel</button>
         </div>
       </div>
     `;
@@ -965,6 +972,12 @@ class SettingsManager {
       case 'save-mcp':
         void this.saveMcpServers();
         break;
+      case 'save-settings':
+        void this.saveSettings();
+        break;
+      case 'close-settings':
+        this.closeSettings();
+        break;
       case 'test-mcp':
         void this.testMcpServer(index);
         break;
@@ -1269,7 +1282,7 @@ class SettingsManager {
   private refreshMcpSection(): void {
     const section = document.getElementById('mcp-server-section');
     if (section) {
-      section.innerHTML = this.renderMcpSection();
+      renderTrustedHtml(section, trustedTemplate(this.renderMcpSection()));
     }
   }
 
@@ -1636,7 +1649,10 @@ class AppLauncher {
     } catch (error) {
       console.error('Failed to load agent apps', error);
       if (this.listEl) {
-        this.listEl.innerHTML = '<p class="mcp-kv-empty">Unable to load agent apps.</p>';
+        const empty = document.createElement('p');
+        empty.className = 'mcp-kv-empty';
+        empty.textContent = 'Unable to load agent apps.';
+        this.listEl.replaceChildren(empty);
       }
     }
   }
@@ -1669,10 +1685,13 @@ class AppLauncher {
   private renderList(): void {
     if (!this.listEl) return;
     if (!this.apps.length) {
-      this.listEl.innerHTML = '<p class="mcp-kv-empty">No agent apps configured yet.</p>';
+      const empty = document.createElement('p');
+      empty.className = 'mcp-kv-empty';
+      empty.textContent = 'No agent apps configured yet.';
+      this.listEl.replaceChildren(empty);
       return;
     }
-    this.listEl.innerHTML = this.apps.map((app) => this.renderCard(app)).join('');
+    renderTrustedHtml(this.listEl, trustedTemplate(this.apps.map((app) => this.renderCard(app)).join('')));
   }
 
   private renderCard(app: AgentAppSummary): string {
@@ -1754,18 +1773,18 @@ class AppLauncher {
   private showResult(app: AgentAppSummary, response: AgentRunResponsePayload | null, error?: string): void {
     if (!this.resultEl) return;
     if (error || !response) {
-      this.resultEl.innerHTML = `
+      renderTrustedHtml(this.resultEl, trustedTemplate(`
         <h5>${this.htmlEscape(app.name)}</h5>
         <p style="color: #b42318;">${this.htmlEscape(error || 'Unknown error')}</p>
-      `;
+      `));
       return;
     }
     const answer = response.agent?.final_answer?.trim() || 'No final answer returned.';
-    this.resultEl.innerHTML = `
+    renderTrustedHtml(this.resultEl, trustedTemplate(`
       <h5>${this.htmlEscape(app.name)}</h5>
       <p>${this.htmlEscape(answer)}</p>
       <small style="color:#475467;">${this.htmlEscape(String(response.tokens_used))} tokens • ${new Date().toLocaleTimeString()}</small>
-    `;
+    `));
   }
 
   private htmlEscape(value: string): string {
@@ -2023,15 +2042,15 @@ function handleAddressBarSubmit(): void {
 }
 
 function handleBackButton(): void {
-  invoke('execute_script', { script: 'history.back()' });
+  invoke('content_go_back', { request: {} });
 }
 
 function handleForwardButton(): void {
-  invoke('execute_script', { script: 'history.forward()' });
+  invoke('content_go_forward', { request: {} });
 }
 
 function handleRefreshButton(): void {
-  invoke('execute_script', { script: 'location.reload()' });
+  invoke('content_reload', { request: {} });
 }
 
 function toggleBookmark(): void {
@@ -2198,7 +2217,7 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
       style.zIndex = '9999';
       style.fontFamily = 'system-ui, sans-serif';
 
-      banner.innerHTML = `
+      renderTrustedHtml(banner, trustedTemplate(`
         <div class="update-banner-content">
           <div style="font-weight: 600; font-size: 16px; margin-bottom: 6px;">
             Update v${escapeHtml(info.applied_version)} installed
@@ -2218,7 +2237,7 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
             ">Dismiss</button>
           </div>
         </div>
-      `;
+      `));
 
       const dismissButton = document.getElementById('update-dismiss-button');
       if (dismissButton) {
@@ -2305,7 +2324,7 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
       })()
     : '';
 
-  banner.innerHTML = `
+  renderTrustedHtml(banner, trustedTemplate(`
     <div class="update-banner-content">
       <div style="font-weight: 600; font-size: 16px; margin-bottom: 6px;">
         ${isSecurity ? 'Security update available' : 'Update available'} · v${escapeHtml(info.latest_version)}
@@ -2319,7 +2338,7 @@ function renderUpdateBanner(info: UpdateStatusPayload): void {
         ${actions.join('')}
       </div>
     </div>
-  `;
+  `));
 
   const dismissButton = document.getElementById('update-dismiss-button');
   if (dismissButton) {

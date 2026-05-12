@@ -218,15 +218,15 @@ mod tests {
     use tempfile::tempdir;
 
     #[tokio::test]
-    async fn writes_artifacts() {
-        let tmp = tempdir().unwrap();
+    async fn writes_artifacts() -> Result<(), Box<dyn std::error::Error>> {
+        let tmp = tempdir()?;
         let program_dir = tmp.path().join("program");
         let artifacts_dir = tmp.path().join("artifacts");
-        std::fs::create_dir_all(&program_dir).unwrap();
+        std::fs::create_dir_all(&program_dir)?;
         let program_path = program_dir.join("demo.bin");
         let input_path = program_dir.join("demo.input");
-        std::fs::write(&program_path, b"program").unwrap();
-        std::fs::write(&input_path, b"input").unwrap();
+        std::fs::write(&program_path, b"program")?;
+        std::fs::write(&input_path, b"input")?;
 
         let host = ZkvmHost::new(ZkvmHostConfig {
             backend: ProverBackend::RiscZero,
@@ -235,10 +235,11 @@ mod tests {
         });
 
         let request = ZkvmProofRequest::new("job-123", "demo.bin", "demo.input");
-        let artifacts = host.generate_proof(&request).await.unwrap();
+        let artifacts = host.generate_proof(&request).await?;
 
         assert!(artifacts.proof_path.exists());
         assert!(artifacts.journal_path.exists());
         assert!(artifacts.manifest_path.exists());
+        Ok(())
     }
 }
