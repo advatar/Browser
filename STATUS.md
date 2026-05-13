@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## Architecture Review: ZK, AI, and iOS Feasibility
+
+- [ ] Review project implementation for correctness risks and architecture gaps.
+- [ ] Identify zero-knowledge proof opportunities.
+- [ ] Identify stronger AI integration opportunities.
+- [ ] Assess iOS feasibility from the current Tauri/Rust architecture.
+- [ ] Run local validation commands for the reviewed codebase.
+
 ## REVIEW.md Remediation
 
 - [x] Resolve high dynamic execution review finding.
