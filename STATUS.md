@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## iOS Xcode Integration
+
+- [ ] Inspect the new `swift/dBrowser` Xcode project structure.
+- [ ] Integrate the existing browser runtime experience into the Swift app shell.
+- [ ] Add focused tests for the iOS integration layer.
+- [ ] Run local Swift/Xcode and relevant frontend validation.
+- [ ] Commit only files touched for this integration.
+
 ## Architecture Review: ZK, AI, and iOS Feasibility
 
 - [x] Review project implementation for correctness risks and architecture gaps.
