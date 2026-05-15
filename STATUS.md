@@ -21,11 +21,11 @@
 
 ## iOS Xcode Integration
 
-- [ ] Inspect the new `swift/dBrowser` Xcode project structure.
-- [ ] Integrate the existing browser runtime experience into the Swift app shell.
-- [ ] Add focused tests for the iOS integration layer.
-- [ ] Run local Swift/Xcode and relevant frontend validation.
-- [ ] Commit only files touched for this integration.
+- [x] Inspect the new `swift/dBrowser` Xcode project structure.
+- [x] Integrate the existing browser runtime experience into the Swift app shell.
+- [x] Add focused tests for the iOS integration layer.
+- [x] Run local Swift/Xcode and relevant frontend validation.
+- [x] Commit only files touched for this integration.
 
 ## Architecture Review: ZK, AI, and iOS Feasibility
 
