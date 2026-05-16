@@ -31,8 +31,8 @@
 - [x] Bind Avalanche snapshots into the shared chain trust registry/runtime status.
 - [x] Add focused Swift unit tests for routing, finality status, proof verification, fallback, service contract, registry updates, and runtime refresh.
 - [x] Verify local service checks plus Swift tests/build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift Polkadot/Substrate Chain Trust Foundation Slice
 
