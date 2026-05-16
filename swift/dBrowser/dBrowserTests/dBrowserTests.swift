@@ -54,6 +54,16 @@ struct dBrowserTests {
         #expect(message.contains("decentralized name"))
     }
 
+    @Test func runtimeFeaturesExposeDetailedExplanations() {
+        for feature in MobileRuntimeFeature.allCases {
+            let explanation = feature.explanation
+            #expect(!explanation.overview.isEmpty)
+            #expect(!explanation.bridgeBehavior.isEmpty)
+            #expect(explanation.detailPoints.count >= 3)
+            #expect(explanation.detailPoints.allSatisfy { !$0.isEmpty })
+        }
+    }
+
     @MainActor
     @Test func runtimeBridgeResolvesDecentralizedAddresses() async {
         let bridge = MobileRuntimeBridge()

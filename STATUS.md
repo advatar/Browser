@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## Runtime Button Details
+
+- [x] Make runtime feature tiles clickable.
+- [x] Add deeper runtime feature explanations.
+- [x] Add focused tests for explanation coverage.
+- [x] Run local Swift/Xcode validation.
+- [x] Commit only files touched for this fix.
+
 ## iOS SwiftUI Compatibility Fix
 
 - [x] Move address-field input modifiers behind platform-safe SwiftUI branches.

@@ -103,6 +103,12 @@ struct BrowserBookmark: Identifiable, Equatable {
     let urlString: String
 }
 
+struct RuntimeFeatureExplanation: Equatable {
+    let overview: String
+    let bridgeBehavior: String
+    let detailPoints: [String]
+}
+
 enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case webBrowsing
     case tabs
@@ -148,6 +154,71 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
 
     var isAvailableOnMobile: Bool {
         true
+    }
+
+    var explanation: RuntimeFeatureExplanation {
+        switch self {
+        case .webBrowsing:
+            RuntimeFeatureExplanation(
+                overview: "Loads standard HTTP and HTTPS pages with native WKWebView while the app keeps browser state in Swift.",
+                bridgeBehavior: "This path is fully native on iOS and does not need the desktop Tauri runtime.",
+                detailPoints: [
+                    "Address-bar input is normalized before WebKit receives a request.",
+                    "Page title, loading, and back-forward state flow back into the tab model.",
+                    "Unsupported schemes are stopped before WebKit can attempt to open them directly."
+                ]
+            )
+        case .tabs:
+            RuntimeFeatureExplanation(
+                overview: "Tracks tabs, history, bookmarks, and toolbar commands inside the Swift shell.",
+                bridgeBehavior: "The current bridge stores this state in memory so the iOS app can run independently.",
+                detailPoints: [
+                    "Opening, closing, and activating tabs updates the same model used by the browser surface.",
+                    "History entries are deduplicated at the front of the list to avoid repeated reload noise.",
+                    "Toolbar actions are translated into typed web-view commands instead of stringly callbacks."
+                ]
+            )
+        case .decentralizedProtocols:
+            RuntimeFeatureExplanation(
+                overview: "Resolves IPFS, IPNS, ENS, and compatible wallet-style names into loadable mobile web URLs.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback through dweb.link and .limo; the contract can later swap to embedded Rust or a trusted remote resolver.",
+                detailPoints: [
+                    "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
+                    "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
+                    "Resolution results preserve a clear source, making it possible to show whether content came from native, gateway, or remote runtime resolution."
+                ]
+            )
+        case .copilot:
+            RuntimeFeatureExplanation(
+                overview: "Creates a mobile command surface for Copilot tasks tied to the active browsing context.",
+                bridgeBehavior: "The local bridge prepares deterministic run summaries and suggested actions; model execution can be connected to the desktop or cloud runtime later.",
+                detailPoints: [
+                    "Prompts can carry the active page URL so Copilot has a target for future page-context extraction.",
+                    "Suggested actions stay explicit so wallet and download operations can remain approval-gated.",
+                    "The bridge API is asynchronous, matching the shape needed for real model runs and cancellation."
+                ]
+            )
+        case .wallet:
+            RuntimeFeatureExplanation(
+                overview: "Models wallet connection state and spend-policy decisions for browser actions.",
+                bridgeBehavior: "The current iOS bridge is a local policy simulator; it does not custody production keys yet.",
+                detailPoints: [
+                    "Connect and disconnect actions update a typed wallet state object.",
+                    "Spend evaluation rejects invalid requests and requires explicit approval above the local policy limit.",
+                    "The same contract can be backed by Secure Enclave keys, WalletConnect, or a desktop wallet bridge."
+                ]
+            )
+        case .downloads:
+            RuntimeFeatureExplanation(
+                overview: "Starts, tracks, cancels, and completes browser downloads through native iOS networking.",
+                bridgeBehavior: "The bridge stores download items in Swift state and uses URLSession for real transfer work.",
+                detailPoints: [
+                    "Queued mode lets tests and future approval flows create download records without touching the network.",
+                    "Completed files are moved into the app temporary directory with the response filename when available.",
+                    "Cancellation and failures update typed states so the UI can avoid pretending unsupported actions worked."
+                ]
+            )
+        }
     }
 }
 

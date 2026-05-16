@@ -217,6 +217,7 @@ private struct BrowserRootLayout<Content: View>: View {
 
 private struct BrowserHomeView: View {
     @ObservedObject var browser: BrowserViewModel
+    @State private var selectedFeature: RuntimeFeatureState?
 
     var body: some View {
         ScrollView {
@@ -241,10 +242,15 @@ private struct BrowserHomeView: View {
                     }
                 }
 
-                RuntimeFeatureGrid(features: browser.runtimeFeatureStates)
+                RuntimeFeatureGrid(features: browser.runtimeFeatureStates) { feature in
+                    selectedFeature = feature
+                }
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
+        }
+        .sheet(item: $selectedFeature) { feature in
+            RuntimeFeatureDetailView(state: feature)
         }
     }
 }
@@ -266,31 +272,115 @@ private struct QuickActionButton: View {
 
 private struct RuntimeFeatureGrid: View {
     let features: [RuntimeFeatureState]
+    let onSelect: (RuntimeFeatureState) -> Void
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
             ForEach(features) { state in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: state.feature.systemImage)
-                        .frame(width: 24)
-                        .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(state.feature.title)
-                            .font(.headline)
-                        Text(state.status)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text(state.mode.title)
-                            .font(.caption)
+                Button {
+                    onSelect(state)
+                } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: state.feature.systemImage)
+                            .frame(width: 24)
                             .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(state.feature.title)
+                                .font(.headline)
+                            Text(state.status)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(state.mode.title)
+                                .font(.caption)
+                                .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "info.circle")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-                .padding(14)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .buttonStyle(.plain)
+                .accessibilityHint("Show runtime details")
             }
         }
+    }
+}
+
+private struct RuntimeFeatureDetailView: View {
+    let state: RuntimeFeatureState
+    @Environment(\.dismiss) private var dismiss
+
+    private var explanation: RuntimeFeatureExplanation {
+        state.feature.explanation
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: state.feature.systemImage)
+                        .font(.title2)
+                        .frame(width: 34, height: 34)
+                        .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(state.feature.title)
+                            .font(.title2.bold())
+                        Text("\(state.mode.title) - \(state.status)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close")
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Overview")
+                        .font(.headline)
+                    Text(explanation.overview)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Bridge Behavior")
+                        .font(.headline)
+                    Text(explanation.bridgeBehavior)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Details")
+                        .font(.headline)
+                    ForEach(explanation.detailPoints, id: \.self) { point in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "checkmark.circle")
+                                .foregroundStyle(Color.accentColor)
+                            Text(point)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 640, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
     }
 }
 
