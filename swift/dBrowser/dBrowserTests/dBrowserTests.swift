@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import MLXLMCommon
 @testable import dBrowser
 
 struct dBrowserTests {
@@ -80,6 +81,47 @@ struct dBrowserTests {
 
             #expect(["ipfs", "ipns", "ens"].contains(scheme))
         }
+    }
+
+    @Test func bundledLLMSelectsIPhoneSizedGemma4Model() {
+        let selection = BundledLLMSelection.recommended
+        let profile = selection.profile
+
+        #expect(profile.displayName == "Gemma 4 E2B IT 4-bit MLX")
+        #expect(profile.isRecommendedForIPhone)
+        #expect(profile.localDiskFootprintGB < 4)
+        #expect(profile.recommendedMinimumMemoryGB == 8)
+        #expect(profile.swiftPackageURL == "https://github.com/ml-explore/mlx-swift-lm")
+        #expect(profile.swiftPackageMinimumVersion == "3.31.3")
+        #expect(profile.swiftPackageProducts == ["MLXVLM", "MLXLMCommon"])
+        #expect(profile.loaderSupport.isRunnableWithCurrentSwiftLoader)
+        #expect(profile.readinessSummary.contains("MLXVLM"))
+    }
+
+    @Test func bundledLLMUsesLocalMLXArtifactWhenPresent() {
+        let selection = BundledLLMSelection.recommended
+        let location = selection.modelLocation()
+
+        guard case .localDirectory(let url) = location else {
+            Issue.record("Expected the existing local Gemma 4 MLX model to be selected")
+            return
+        }
+
+        #expect(url.path.hasSuffix("/Broom/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
+    }
+
+    @Test func bundledLLMModelConfigurationUsesMLXVLMRegistry() {
+        let selection = BundledLLMSelection.recommended
+        let configuration = selection.modelConfiguration()
+
+        guard case .directory(let url) = configuration.id else {
+            Issue.record("Expected the existing local Gemma 4 MLX model to back the configuration")
+            return
+        }
+
+        #expect(url.path.hasSuffix("/Broom/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
+        #expect(configuration.defaultPrompt == "Describe the image in English")
+        #expect(configuration.extraEOSTokens.contains("<end_of_turn>"))
     }
 
     @MainActor

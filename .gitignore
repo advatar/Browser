@@ -45,5 +45,9 @@ Cargo.lock
 /dist
 /build
 
+# Local iOS LLM bundles staged for Xcode resources. Use
+# swift/dBrowser/scripts/stage-gemma4-e2b-model.sh to recreate.
+swift/dBrowser/dBrowser/Gemma4E2B4BitMLX/
+
 # Debug logs
 *.log

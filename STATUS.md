@@ -19,6 +19,15 @@
 
 ## Active Task
 
+## iOS Gemma MLX Bundle
+
+- [x] Search the wider `~/dev/advatar` workspace for existing MLX-optimized Gemma artifacts.
+- [x] Select the iPhone-sized Gemma bundle target and record the local source path.
+- [x] Wire the Swift app to the current MLX Swift LM VLM package.
+- [x] Add focused unit tests for model selection and package-backed model configuration.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push the scoped Gemma integration.
+
 ## Swift AFM Services Integration
 
 - [x] Create GitHub issue for Swift service-backed runtime work (#49).
