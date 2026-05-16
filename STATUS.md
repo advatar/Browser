@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Swift Strawberry Equivalence Plan
+
+- [x] Create GitHub issues for each Swift Strawberry equivalence step (#50-#58).
+- [x] Create GitHub issues for major-chain Swift light-client integration (#59-#68).
+- [x] Draft a Swift-app-specific Strawberry equivalence plan from the existing Rust plan.
+- [x] Verify the local Swift project still builds/tests after the documentation change.
+- [x] Commit and push only the scoped status and plan updates.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- Full `xcodebuild test` still fails in existing macOS UI tests: `dBrowserUITests.testExample`, `testGatewayStartingPointsRenderRequiredURLs`, `testIPFSStartingPointsRenderAndOpenThroughBridge`, and `testPanelButtonsShowPanelContent`.
+
 ## iOS Architecture Light-Client Emphasis
 
 - [x] Inspect current light-client docs and blockchain runtime surface.
