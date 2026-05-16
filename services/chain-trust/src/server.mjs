@@ -228,6 +228,94 @@ const avalancheFixtureEvmProofBundle = {
   }
 };
 
+const tronNetworks = {
+  'tron-mainnet': {
+    network: 'tron-mainnet',
+    chain_ref: 'tron-mainnet',
+    network_id: 'mainnet',
+    display_name: 'TRON',
+    sync_state: 'proof_checked',
+    limitations: ['Fixture-backed witness quorum checks do not yet replace a production TRON full-node light client.']
+  },
+  'tron-nile': {
+    network: 'tron-nile',
+    chain_ref: 'tron-nile',
+    network_id: 'nile',
+    display_name: 'TRON Nile',
+    sync_state: 'api_fallback',
+    limitations: ['TRON testnet routes are modeled for explicit fallback and fixture checks only.']
+  },
+  'tron-shasta': {
+    network: 'tron-shasta',
+    chain_ref: 'tron-shasta',
+    network_id: 'shasta',
+    display_name: 'TRON Shasta',
+    sync_state: 'api_fallback',
+    limitations: ['TRON testnet routes are modeled for explicit fallback and fixture checks only.']
+  }
+};
+const tronWitnessA = `41${'a1'.repeat(20)}`;
+const tronWitnessB = `41${'b2'.repeat(20)}`;
+const tronWitnessC = `41${'c3'.repeat(20)}`;
+const tronFixtureWitnesses = [
+  { address: tronWitnessA, weight: 10, name: 'sr-a' },
+  { address: tronWitnessB, weight: 9, name: 'sr-b' },
+  { address: tronWitnessC, weight: 8, name: 'sr-c' }
+];
+const tronFixtureWitnessSetHash = tronWitnessSetHash(tronFixtureWitnesses);
+const tronFixtureSubject = `41${'d4'.repeat(20)}`;
+const tronFixtureValueHash = sha256HexFromString('tron-usdt-balance:1');
+const tronFixtureLeaf = tronFixtureLeafHash('token', tronFixtureSubject, 'trc20-usdt', tronFixtureValueHash);
+const tronFixtureReceiptLeaf = tronFixtureLeafHash('receipt', 'tron-tx-fixture', '', sha256HexFromString('receipt:success'));
+const tronFixtureBlockID = sha256HexFromString('tron-mainnet|60000000|solid-block');
+const tronFixtureBlockHeader = {
+  network: 'tron-mainnet',
+  chain_ref: 'tron-mainnet',
+  number: 60000000,
+  block_id: tronFixtureBlockID,
+  parent_hash: sha256HexFromString('tron-mainnet|59999999|solid-block'),
+  witness_address: tronWitnessA,
+  timestamp: 1715000000,
+  account_state_root: tronFixtureLeaf,
+  receipt_root: tronFixtureReceiptLeaf,
+  solid: true,
+  source: mode
+};
+const tronFixtureWitnessSet = {
+  network: 'tron-mainnet',
+  chain_ref: 'tron-mainnet',
+  epoch: 7001,
+  witnesses: tronFixtureWitnesses,
+  hash: tronFixtureWitnessSetHash,
+  source: mode
+};
+const tronFixtureFinalityProof = {
+  epoch: tronFixtureWitnessSet.epoch,
+  target_block_id: tronFixtureBlockHeader.block_id,
+  target_number: tronFixtureBlockHeader.number,
+  signatures: [
+    { witness_address: tronWitnessA, block_id: tronFixtureBlockHeader.block_id, signed: true, signature: 'fixture-tron-a' },
+    { witness_address: tronWitnessB, block_id: tronFixtureBlockHeader.block_id, signed: true, signature: 'fixture-tron-b' },
+    { witness_address: tronWitnessC, block_id: tronFixtureBlockHeader.block_id, signed: false, signature: null }
+  ],
+  source: mode
+};
+const tronFixtureProof = {
+  proof_id: 'tron-fixture-token',
+  kind: 'token',
+  network: 'tron-mainnet',
+  chain_ref: 'tron-mainnet',
+  subject: tronFixtureSubject,
+  token_id: 'trc20-usdt',
+  expected_value_hash: tronFixtureValueHash,
+  block_id: tronFixtureBlockHeader.block_id,
+  block_number: tronFixtureBlockHeader.number,
+  expected_root: tronFixtureBlockHeader.account_state_root,
+  leaf_hash: tronFixtureLeaf,
+  witnesses: [],
+  source: mode
+};
+
 const solanaClusters = {
   'mainnet-beta': {
     cluster: 'mainnet-beta',
@@ -491,6 +579,7 @@ if (args.has('--snapshot')) {
     bitcoin: bitcoinStatus,
     evm: evmStatusFor('ethereum-mainnet'),
     avalanche: avalancheStatusFor('avalanche-c'),
+    tron: tronStatusFor('tron-mainnet'),
     solana: solanaStatusFor('mainnet-beta'),
     cosmos: cosmosStatusFor('cosmoshub-4'),
     substrate: substrateStatusFor('polkadot')
@@ -502,6 +591,7 @@ if (args.has('--lint')) {
   assertGenesisFixture();
   assertEvmFixture();
   assertAvalancheFixture();
+  assertTronFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -513,6 +603,7 @@ if (args.has('--self-test')) {
   assertGenesisFixture();
   assertEvmFixture();
   assertAvalancheFixture();
+  assertTronFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -551,6 +642,18 @@ if (args.has('--self-test')) {
 
   if (!avalancheResult.verified || avalancheResult.state !== 'proof_checked') {
     console.error('[chain-trust] Avalanche self-test failed:', avalancheResult.summary);
+    process.exit(1);
+  }
+
+  const tronResult = verifyTronProof({
+    header: tronFixtureBlockHeader,
+    witness_set: tronFixtureWitnessSet,
+    finality_proof: tronFixtureFinalityProof,
+    proof: tronFixtureProof
+  });
+
+  if (!tronResult.verified || tronResult.state !== 'proof_checked') {
+    console.error('[chain-trust] TRON self-test failed:', tronResult.summary);
     process.exit(1);
   }
 
@@ -620,6 +723,10 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, avalancheStatusFor(url.searchParams.get('network')));
   }
 
+  if (req.method === 'GET' && (url.pathname === '/v1/tron/status' || url.pathname === '/tron/status')) {
+    return sendJson(res, 200, tronStatusFor(url.searchParams.get('network')));
+  }
+
   if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
     return sendJson(res, 200, solanaStatusFor(url.searchParams.get('cluster')));
   }
@@ -678,6 +785,24 @@ const server = http.createServer(async (req, res) => {
         block_number: null,
         block_hash: null,
         proof_id: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/tron/verify-proof' || url.pathname === '/tron/verify-proof')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifyTronProof(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        block_number: null,
+        block_id: null,
+        proof_id: null,
+        kind: null,
         summary: String(err.message ?? err)
       });
     }
@@ -807,6 +932,37 @@ function avalancheStatusFor(requestedNetwork) {
     validator_set: validatorSet,
     peer_count: 0,
     proof_source: 'fixture-snowman-evm-proof',
+    limitations: network.limitations,
+    mode
+  };
+}
+
+function tronStatusFor(requestedNetwork) {
+  const network = resolveTronNetwork(requestedNetwork);
+  const latestSolidBlock = {
+    ...tronFixtureBlockHeader,
+    network: network.network,
+    chain_ref: network.chain_ref,
+    solid: network.sync_state !== 'api_fallback'
+  };
+  const witnessSet = {
+    ...tronFixtureWitnessSet,
+    network: network.network,
+    chain_ref: network.chain_ref
+  };
+  const stale = network.sync_state === 'stale';
+  return {
+    ok: true,
+    service_available: network.sync_state !== 'api_fallback',
+    network: network.network,
+    chain_ref: network.chain_ref,
+    sync_state: network.sync_state,
+    source: mode,
+    latest_solid_block: latestSolidBlock,
+    witness_set: witnessSet,
+    peer_count: 0,
+    proof_source: 'fixture-witness-token-proof',
+    stale,
     limitations: network.limitations,
     mode
   };
@@ -1033,6 +1189,82 @@ function verifyAvalancheState(payload) {
     summary: evmProof
       ? `Avalanche Snowman accepted block ${Number.isFinite(height) ? height : 'unknown'} checked with C-Chain EVM proof evidence.`
       : `Avalanche Snowman accepted block ${Number.isFinite(height) ? height : 'unknown'} checked with fixture validator quorum.`
+  };
+}
+
+function verifyTronProof(payload) {
+  const header = requireObject(payload.header, 'header');
+  const witnessSet = requireObject(payload.witness_set ?? payload.witnessSet, 'witness_set');
+  const finalityProof = requireObject(payload.finality_proof ?? payload.finalityProof, 'finality_proof');
+  const proof = payload.proof;
+  const network = resolveTronNetwork(header.network ?? header.chain_ref ?? header.chainRef);
+  const witnessSetNetwork = resolveTronNetwork(witnessSet.network ?? witnessSet.chain_ref ?? witnessSet.chainRef ?? network.network);
+  const blockNumber = Number(header.number);
+  const blockID = normalizeHex(requireString(header.block_id ?? header.blockID, 'header.block_id'));
+  const witnessSetHash = normalizeHex(requireString(witnessSet.hash, 'witness_set.hash'));
+  const computedWitnessSetHash = tronWitnessSetHash(Array.isArray(witnessSet.witnesses) ? witnessSet.witnesses : []);
+  const finalityEpoch = Number(finalityProof.epoch);
+  const finalityNumber = Number(finalityProof.target_number ?? finalityProof.targetNumber);
+  const finalityBlockID = normalizeHex(requireString(finalityProof.target_block_id ?? finalityProof.targetBlockID, 'finality_proof.target_block_id'));
+
+  if (network.chain_ref !== witnessSetNetwork.chain_ref) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON block network does not match witness set.');
+  }
+  if (header.solid === false) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON block is not marked solid; API/RPC data must remain fallback-labeled.');
+  }
+  if (finalityEpoch !== Number(witnessSet.epoch)) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON finality proof uses a different witness epoch.');
+  }
+  if (finalityNumber !== blockNumber || finalityBlockID !== blockID) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON finality proof targets a different solid block.');
+  }
+  if (witnessSetHash !== computedWitnessSetHash) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON witness set hash is invalid.');
+  }
+  if (!hasTronWitnessQuorum(witnessSet.witnesses, tronSignedWitnesses(finalityProof))) {
+    return tronFailure(network, blockNumber, blockID, proof, 'TRON finality proof did not reach the witness quorum.');
+  }
+
+  if (proof) {
+    const kind = requireString(proof.kind, 'proof.kind');
+    if (!['account', 'token', 'receipt'].includes(kind)) {
+      throw Object.assign(new Error(`unsupported TRON proof kind: ${kind}`), { statusCode: 400 });
+    }
+    const proofNetwork = resolveTronNetwork(proof.network ?? proof.chain_ref ?? proof.chainRef ?? network.network);
+    const proofBlockID = normalizeHex(requireString(proof.block_id ?? proof.blockID, 'proof.block_id'));
+    const proofBlockNumber = Number(proof.block_number ?? proof.blockNumber);
+    if (proofNetwork.chain_ref !== network.chain_ref || proofBlockID !== blockID || proofBlockNumber !== blockNumber) {
+      return tronFailure(network, blockNumber, blockID, proof, 'TRON proof references a different network or block.');
+    }
+    const headerRoot = normalizeHex(requireString(
+      kind === 'receipt' ? header.receipt_root ?? header.receiptRoot : header.account_state_root ?? header.accountStateRoot,
+      `${kind} root`
+    ));
+    const expectedRoot = normalizeHex(requireString(proof.expected_root ?? proof.expectedRoot, 'proof.expected_root'));
+    if (expectedRoot !== headerRoot) {
+      return tronFailure(network, blockNumber, blockID, proof, `TRON ${kind} proof expected root does not match the solid block root.`);
+    }
+    const computedRoot = computeTronLocalMerkleRoot(
+      requireString(proof.leaf_hash ?? proof.leafHash, 'proof.leaf_hash'),
+      Array.isArray(proof.witnesses) ? proof.witnesses : []
+    );
+    if (computedRoot !== expectedRoot) {
+      return tronFailure(network, blockNumber, blockID, proof, `TRON ${kind} proof did not resolve to the expected root.`);
+    }
+  }
+
+  return {
+    verified: true,
+    state: 'proof_checked',
+    chain_ref: network.chain_ref,
+    block_number: Number.isFinite(blockNumber) ? blockNumber : null,
+    block_id: blockID,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
+    summary: proof
+      ? `TRON ${proof.kind} proof checked against solid block ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'}.`
+      : `TRON solid block ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'} checked with fixture witness quorum.`
   };
 }
 
@@ -1340,6 +1572,22 @@ function assertAvalancheFixture() {
   }
 }
 
+function assertTronFixture() {
+  const computedWitnessSetHash = tronWitnessSetHash(tronFixtureWitnesses);
+  if (computedWitnessSetHash !== tronFixtureWitnessSetHash) {
+    throw new Error(`TRON witness fixture mismatch: ${computedWitnessSetHash}`);
+  }
+  const result = verifyTronProof({
+    header: tronFixtureBlockHeader,
+    witness_set: tronFixtureWitnessSet,
+    finality_proof: tronFixtureFinalityProof,
+    proof: tronFixtureProof
+  });
+  if (!result.verified) {
+    throw new Error(`TRON proof fixture mismatch: ${result.summary}`);
+  }
+}
+
 function assertSolanaFixture() {
   const computedRoot = computeSolanaLocalMerkleRoot(solanaFixtureProof.leaf_hash, solanaFixtureProof.witnesses);
   if (computedRoot !== solanaFixtureSlotRoot.account_root) {
@@ -1411,6 +1659,19 @@ function avalancheFailure(network, blockNumber, blockHash, evmProof, summary) {
     block_number: Number.isFinite(blockNumber) ? blockNumber : null,
     block_hash: blockHash,
     proof_id: evmProof?.proof ? String(evmProof.proof.proof_id ?? evmProof.proof.proofID ?? '') : null,
+    summary
+  };
+}
+
+function tronFailure(network, blockNumber, blockID, proof, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: network.chain_ref,
+    block_number: Number.isFinite(blockNumber) ? blockNumber : null,
+    block_id: blockID,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
     summary
   };
 }
@@ -1488,6 +1749,24 @@ function resolveAvalancheNetwork(requestedNetwork) {
   }
   const byID = Object.values(avalancheNetworks).find(network => String(network.chain_id) === normalized);
   return byID ?? avalancheNetworks['avalanche-c'];
+}
+
+function resolveTronNetwork(requestedNetwork) {
+  if (!requestedNetwork) {
+    return tronNetworks['tron-mainnet'];
+  }
+  const normalized = String(requestedNetwork)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (tronNetworks[normalized]) {
+    return tronNetworks[normalized];
+  }
+  if (normalized === 'tron' || normalized === 'mainnet') {
+    return tronNetworks['tron-mainnet'];
+  }
+  return tronNetworks['tron-mainnet'];
 }
 
 function resolveSolanaCluster(requestedCluster) {
@@ -1584,6 +1863,49 @@ function hasAvalancheAcceptedQuorum(validators, validatorIDs) {
   return totalWeight > 0 && signedWeight * 5 >= totalWeight * 4;
 }
 
+function tronWitnessSetHash(witnesses) {
+  const payload = witnesses
+    .map(witness => `${normalizeID(requireString(witness.address, 'witness.address'))}:${Number(witness.weight)}`)
+    .sort()
+    .join('|');
+  return sha256HexFromString(payload);
+}
+
+function tronSignedWitnesses(finalityProof) {
+  return new Set((Array.isArray(finalityProof.signatures) ? finalityProof.signatures : [])
+    .filter(signature => signature.signed !== false)
+    .map(signature => normalizeID(requireString(signature.witness_address ?? signature.witnessAddress, 'signature.witness_address'))));
+}
+
+function hasTronWitnessQuorum(witnesses, witnessAddresses) {
+  let totalWeight = 0;
+  let signedWeight = 0;
+  for (const witness of Array.isArray(witnesses) ? witnesses : []) {
+    const weight = Number(witness.weight);
+    if (!Number.isFinite(weight) || weight < 0) {
+      continue;
+    }
+    totalWeight += weight;
+    const address = normalizeID(requireString(witness.address, 'witness.address'));
+    if (witnessAddresses.has(address)) {
+      signedWeight += weight;
+    }
+  }
+  if (totalWeight >= 27) {
+    return signedWeight >= 19;
+  }
+  return totalWeight > 0 && signedWeight * 3 > totalWeight * 2;
+}
+
+function tronFixtureLeafHash(kind, subject, tokenID, valueHash) {
+  return sha256HexFromString([
+    kind,
+    String(subject).toLowerCase(),
+    String(tokenID ?? '').toLowerCase(),
+    normalizeHex(valueHash)
+  ].join('|'));
+}
+
 function solanaFixtureLeafHash(kind, subject, value) {
   return sha256HexFromString([
     kind,
@@ -1614,6 +1936,21 @@ function computeSolanaLocalMerkleRoot(leafHash, witnesses) {
     const position = requireString(witness.position, 'witness.position');
     if (position !== 'left' && position !== 'right') {
       throw Object.assign(new Error(`unsupported Solana witness position: ${position}`), { statusCode: 400 });
+    }
+    node = position === 'left'
+      ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
+      : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
+  }
+  return node.toString('hex');
+}
+
+function computeTronLocalMerkleRoot(leafHash, witnesses) {
+  let node = Buffer.from(normalizeHex(leafHash), 'hex');
+  for (const witness of witnesses) {
+    const siblingHash = Buffer.from(normalizeHex(requireString(witness.hash, 'witness.hash')), 'hex');
+    const position = requireString(witness.position, 'witness.position');
+    if (position !== 'left' && position !== 'right') {
+      throw Object.assign(new Error(`unsupported TRON witness position: ${position}`), { statusCode: 400 });
     }
     node = position === 'left'
       ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()

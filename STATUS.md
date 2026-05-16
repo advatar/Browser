@@ -23,15 +23,15 @@
 
 - [x] Triage TRON light-client/proof-verified fallback gap from #65.
 - [x] Create tracker issue for Swift TRON chain trust foundation (#98).
-- [ ] Add Swift TRON network metadata, endpoint config, witness set, block header, account/token proof, receipt proof, verification result, and service snapshot models.
-- [ ] Add fixture-backed delegated-proof-of-stake witness quorum validation.
-- [ ] Add stale block detection and unsupported production light-client labeling.
-- [ ] Add local account/token and transaction receipt proof verification bound to block roots.
-- [ ] Add weak quorum, stale, failed, and API/RPC fallback labeling.
-- [ ] Add TRON service client contract and fixture-backed `services/chain-trust` endpoints.
-- [ ] Bind TRON snapshots into the shared chain trust registry/runtime status.
-- [ ] Add focused Swift unit tests for routing, status modeling, stale detection, proof verification, fallback, service contract, registry updates, and runtime refresh.
-- [ ] Verify local service checks plus Swift tests/build.
+- [x] Add Swift TRON network metadata, endpoint config, witness set, block header, account/token proof, receipt proof, verification result, and service snapshot models.
+- [x] Add fixture-backed delegated-proof-of-stake witness quorum validation.
+- [x] Add stale block detection and unsupported production light-client labeling.
+- [x] Add local account/token and transaction receipt proof verification bound to block roots.
+- [x] Add weak quorum, stale, failed, and API/RPC fallback labeling.
+- [x] Add TRON service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind TRON snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for routing, status modeling, stale detection, proof verification, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close completed GitHub issues.
 

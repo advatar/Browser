@@ -43,6 +43,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var cosmosLightClient: CosmosLightClientEndpointConfiguration
     var substrateLightClient: SubstrateLightClientEndpointConfiguration
     var avalancheLightClient: AvalancheLightClientEndpointConfiguration
+    var tronLightClient: TronLightClientEndpointConfiguration
     var chainTrustRegistry: ChainTrustRegistry
 
     nonisolated init(
@@ -58,6 +59,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         cosmosLightClient: CosmosLightClientEndpointConfiguration = .disabled,
         substrateLightClient: SubstrateLightClientEndpointConfiguration = .disabled,
         avalancheLightClient: AvalancheLightClientEndpointConfiguration = .disabled,
+        tronLightClient: TronLightClientEndpointConfiguration = .disabled,
         chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
@@ -72,6 +74,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.cosmosLightClient = cosmosLightClient
         self.substrateLightClient = substrateLightClient
         self.avalancheLightClient = avalancheLightClient
+        self.tronLightClient = tronLightClient
         self.chainTrustRegistry = chainTrustRegistry
     }
 }
@@ -265,6 +268,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let cosmosLightClientServiceClient: CosmosLightClientServiceClient
     private let substrateLightClientServiceClient: SubstrateLightClientServiceClient
     private let avalancheLightClientServiceClient: AvalancheLightClientServiceClient
+    private let tronLightClientServiceClient: TronLightClientServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     @Published private(set) var bitcoinLightClientSnapshot: BitcoinLightClientServiceSnapshot = .fallback(
@@ -291,6 +295,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         network: .cChain,
         lastError: "Avalanche light-client service not checked yet."
     )
+    @Published private(set) var tronLightClientSnapshot: TronLightClientServiceSnapshot = .fallback(
+        network: .mainnet,
+        lastError: "TRON light-client service not checked yet."
+    )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
@@ -308,7 +316,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         solanaLightClientServiceClient: SolanaLightClientServiceClient? = nil,
         cosmosLightClientServiceClient: CosmosLightClientServiceClient? = nil,
         substrateLightClientServiceClient: SubstrateLightClientServiceClient? = nil,
-        avalancheLightClientServiceClient: AvalancheLightClientServiceClient? = nil
+        avalancheLightClientServiceClient: AvalancheLightClientServiceClient? = nil,
+        tronLightClientServiceClient: TronLightClientServiceClient? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
@@ -319,6 +328,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.cosmosLightClientServiceClient = cosmosLightClientServiceClient ?? CosmosLightClientServiceClient(configuration: configuration.cosmosLightClient)
         self.substrateLightClientServiceClient = substrateLightClientServiceClient ?? SubstrateLightClientServiceClient(configuration: configuration.substrateLightClient)
         self.avalancheLightClientServiceClient = avalancheLightClientServiceClient ?? AvalancheLightClientServiceClient(configuration: configuration.avalancheLightClient)
+        self.tronLightClientServiceClient = tronLightClientServiceClient ?? TronLightClientServiceClient(configuration: configuration.tronLightClient)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
@@ -344,6 +354,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             network: configuration.avalancheLightClient.network,
             lastError: "Avalanche light-client service not checked yet."
         )
+        self.tronLightClientSnapshot = .fallback(
+            network: configuration.tronLightClient.network,
+            lastError: "TRON light-client service not checked yet."
+        )
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: .unknown,
@@ -362,6 +376,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let cosmosSnapshot = cosmosLightClientServiceClient.snapshot()
         async let substrateSnapshot = substrateLightClientServiceClient.snapshot()
         async let avalancheSnapshot = avalancheLightClientServiceClient.snapshot()
+        async let tronSnapshot = tronLightClientServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
         bitcoinLightClientSnapshot = await bitcoinSnapshot
@@ -370,12 +385,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         cosmosLightClientSnapshot = await cosmosSnapshot
         substrateLightClientSnapshot = await substrateSnapshot
         avalancheLightClientSnapshot = await avalancheSnapshot
+        tronLightClientSnapshot = await tronSnapshot
         _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
         _ = chainTrustSnapshot.recordEVMLightClientSnapshot(evmLightClientSnapshot)
         _ = chainTrustSnapshot.recordSolanaLightClientSnapshot(solanaLightClientSnapshot)
         _ = chainTrustSnapshot.recordCosmosLightClientSnapshot(cosmosLightClientSnapshot)
         _ = chainTrustSnapshot.recordSubstrateLightClientSnapshot(substrateLightClientSnapshot)
         _ = chainTrustSnapshot.recordAvalancheLightClientSnapshot(avalancheLightClientSnapshot)
+        _ = chainTrustSnapshot.recordTronLightClientSnapshot(tronLightClientSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,

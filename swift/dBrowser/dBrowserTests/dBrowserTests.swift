@@ -2335,6 +2335,157 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Avalanche C-Chain proof checked") == true)
     }
 
+    @Test func tronRoutingStaleAndFallbackAreExplicit() {
+        #expect(TronNetwork.known(from: "tron") == .mainnet)
+        #expect(TronNetwork.known(from: "nile") == .nile)
+        #expect(TronNetwork.mainnet.supportedProofTypes.contains("witness-quorum"))
+
+        let fallback = TronLightClientServiceSnapshot.fallback(
+            network: .mainnet,
+            lastError: "disabled"
+        )
+        let stale = TronLightClientServiceSnapshot(
+            serviceAvailable: true,
+            network: .mainnet,
+            syncState: .stale,
+            source: "fixture",
+            latestSolidBlock: Self.tronProofBundle(network: .mainnet).header,
+            stale: true
+        )
+
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("API/RPC fallback remains labeled"))
+        #expect(stale.chainTrustStatus.state == .stale)
+        #expect(stale.statusSummary.contains("stale"))
+    }
+
+    @Test func tronProofVerifiesWitnessQuorumAndTokenRoot() {
+        let bundle = Self.tronProofBundle(network: .mainnet)
+        let result = bundle.verify()
+        var weakBundle = bundle
+        weakBundle.finalityProof.signatures = [bundle.finalityProof.signatures[0]]
+        let weakResult = weakBundle.verify()
+        var apiOnlyBundle = bundle
+        apiOnlyBundle.header.solid = false
+        let apiOnlyResult = apiOnlyBundle.verify()
+
+        #expect(bundle.witnessSet.validatesHash)
+        #expect(bundle.witnessSet.totalWeight == 27)
+        #expect(bundle.witnessSet.hasQuorum(addresses: bundle.finalityProof.signedWitnessAddresses))
+        #expect(result.verified)
+        #expect(result.state == .proofChecked)
+        #expect(result.chainRef == "tron-mainnet")
+        #expect(result.kind == .token)
+        #expect(weakResult.verified == false)
+        #expect(weakResult.summary.contains("witness quorum"))
+        #expect(apiOnlyResult.verified == false)
+        #expect(apiOnlyResult.summary.contains("API/RPC data must remain fallback-labeled"))
+    }
+
+    @MainActor
+    @Test func tronLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let tronHarness = Self.makeTronLightClientSession(key: "tronregistry", network: .mainnet) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/tron/status" {
+                return Self.jsonResponse(for: request, body: Self.tronServiceStatus(network: .mainnet))
+            }
+            if request.url?.path == "/v1/tron/verify-proof" {
+                return Self.jsonResponse(for: request, body: Self.tronProofResultBody(
+                    verified: true,
+                    state: "proof_checked",
+                    network: .mainnet
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = TronLightClientServiceClient(
+            configuration: tronHarness.configuration,
+            session: tronHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyProofViaService(Self.tronProofBundle(network: .mainnet))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordTronLightClientSnapshot(snapshot)
+        let tron = registry.status(forChainRef: "tron-mainnet")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .proofChecked)
+        #expect(snapshot.latestSolidBlock?.number == 60_000_000)
+        #expect(status.state == .proofChecked)
+        #expect(status.trustSource == .localProof)
+        #expect(tron?.family == .tron)
+        #expect(tron?.evidence.first?.source == .localProof)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .proofChecked)
+        #expect(capturedRequests.body(for: "/v1/tron/verify-proof")?["finality_proof"] != nil)
+    }
+
+    @MainActor
+    @Test func tronLightClientFallsBackWhenServiceDisabled() async {
+        let client = TronLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordTronLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesTronLightClientState() async {
+        let tronHarness = Self.makeTronLightClientSession(key: "tronruntime", network: .mainnet) { request in
+            if request.url?.path == "/v1/tron/status" {
+                return Self.jsonResponse(for: request, body: Self.tronServiceStatus(
+                    network: .mainnet,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "tronruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                tronLightClient: tronHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(configuration: .disabled),
+            substrateLightClientServiceClient: SubstrateLightClientServiceClient(configuration: .disabled),
+            avalancheLightClientServiceClient: AvalancheLightClientServiceClient(configuration: .disabled),
+            tronLightClientServiceClient: TronLightClientServiceClient(
+                configuration: tronHarness.configuration,
+                session: tronHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let tron = bridge.chainTrustSnapshot.status(forChainRef: "tron-mainnet")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(tron?.state == .proofChecked)
+        #expect(tron?.trustSource == .localProof)
+        #expect(tron?.evidence.first?.summary.contains("production TRON light-client verification is not claimed") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("TRON proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4578,6 +4729,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeTronLightClientSession(
+        key: String,
+        network: TronNetwork = .mainnet,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: TronLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = TronLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-tron.test:4870")!,
+            network: network
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -4728,6 +4894,28 @@ struct dBrowserTests {
             "validator_set": avalancheValidatorSetBody(bundle.validatorSet),
             "peer_count": 2,
             "proof_source": "fixture-snowman-evm-proof",
+            "limitations": network.limitations
+        ]
+    }
+
+    private static func tronServiceStatus(
+        network: TronNetwork,
+        syncState: String = "proof_checked",
+        stale: Bool = false
+    ) -> [String: Any] {
+        let bundle = tronProofBundle(network: network)
+        return [
+            "ok": true,
+            "service_available": true,
+            "network": network.chainRef,
+            "chain_ref": network.chainRef,
+            "sync_state": syncState,
+            "source": "tron-light-client",
+            "latest_solid_block": tronHeaderBody(bundle.header),
+            "witness_set": tronWitnessSetBody(bundle.witnessSet),
+            "peer_count": 2,
+            "proof_source": "fixture-witness-token-proof",
+            "stale": stale,
             "limitations": network.limitations
         ]
     }
@@ -4974,6 +5162,67 @@ struct dBrowserTests {
         )
     }
 
+    private static func tronProofBundle(network: TronNetwork) -> TronProofVerificationBundle {
+        let witnesses = [
+            TronWitness(address: "41" + String(repeating: "a1", count: 20), weight: 10, name: "sr-a"),
+            TronWitness(address: "41" + String(repeating: "b2", count: 20), weight: 9, name: "sr-b"),
+            TronWitness(address: "41" + String(repeating: "c3", count: 20), weight: 8, name: "sr-c")
+        ]
+        let witnessSet = TronWitnessSet(
+            network: network,
+            epoch: 7_001,
+            witnesses: witnesses,
+            source: "fixture"
+        )
+        let subject = "41" + String(repeating: "d4", count: 20)
+        let valueHash = TronHex.sha256Hex("tron-usdt-balance:1")
+        let tokenLeaf = TronLocalProof.fixtureLeafHash(kind: .token, subject: subject, tokenID: "trc20-usdt", valueHash: valueHash)
+        let receiptLeaf = TronLocalProof.fixtureLeafHash(kind: .receipt, subject: "tron-tx-fixture", valueHash: TronHex.sha256Hex("receipt:success"))
+        let header = TronBlockHeaderSnapshot(
+            network: network,
+            number: 60_000_000,
+            blockID: TronHex.sha256Hex("\(network.chainRef)-60000000-solid-block"),
+            parentHash: TronHex.sha256Hex("\(network.chainRef)-59999999-solid-block"),
+            witnessAddress: witnesses[0].address,
+            timestamp: 1_715_000_000,
+            accountStateRoot: tokenLeaf,
+            receiptRoot: receiptLeaf,
+            solid: true,
+            source: "fixture"
+        )
+        let finalityProof = TronFinalityProof(
+            epoch: witnessSet.epoch,
+            targetBlockID: header.blockID,
+            targetNumber: header.number,
+            signatures: [
+                TronFinalitySignature(witnessAddress: witnesses[0].address, blockID: header.blockID),
+                TronFinalitySignature(witnessAddress: witnesses[1].address, blockID: header.blockID),
+                TronFinalitySignature(witnessAddress: witnesses[2].address, blockID: header.blockID, signed: false)
+            ],
+            source: "fixture"
+        )
+        let proof = TronLocalProof(
+            proofID: "tron-fixture-token",
+            kind: .token,
+            network: network,
+            subject: subject,
+            tokenID: "trc20-usdt",
+            expectedValueHash: valueHash,
+            blockID: header.blockID,
+            blockNumber: header.number,
+            expectedRoot: header.accountStateRoot,
+            leafHash: tokenLeaf,
+            witnesses: [],
+            source: "fixture"
+        )
+        return TronProofVerificationBundle(
+            header: header,
+            witnessSet: witnessSet,
+            finalityProof: finalityProof,
+            proof: proof
+        )
+    }
+
     private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
         [
             "chain": header.chain.chainID,
@@ -5079,6 +5328,39 @@ struct dBrowserTests {
         ]
     }
 
+    private static func tronHeaderBody(_ header: TronBlockHeaderSnapshot) -> [String: Any] {
+        [
+            "network": header.network.chainRef,
+            "chain_ref": header.network.chainRef,
+            "number": header.number,
+            "block_id": header.blockID,
+            "parent_hash": header.parentHash,
+            "witness_address": header.witnessAddress,
+            "timestamp": header.timestamp,
+            "account_state_root": header.accountStateRoot,
+            "receipt_root": header.receiptRoot,
+            "solid": header.solid,
+            "source": header.source ?? "fixture"
+        ]
+    }
+
+    private static func tronWitnessSetBody(_ witnessSet: TronWitnessSet) -> [String: Any] {
+        [
+            "network": witnessSet.network.chainRef,
+            "chain_ref": witnessSet.network.chainRef,
+            "epoch": witnessSet.epoch,
+            "witnesses": witnessSet.witnesses.map { witness in
+                [
+                    "address": witness.address,
+                    "weight": witness.weight,
+                    "name": witness.name ?? ""
+                ] as [String: Any]
+            },
+            "hash": witnessSet.hash,
+            "source": witnessSet.source ?? "fixture"
+        ]
+    }
+
     private static func evmProofResultBody(
         verified: Bool,
         state: String,
@@ -5168,6 +5450,24 @@ struct dBrowserTests {
             "block_hash": bundle.acceptedBlock.blockHash,
             "proof_id": bundle.evmProof?.proof.proofID ?? "avalanche-fixture-account",
             "summary": "Avalanche Snowman accepted block checked with C-Chain proof evidence."
+        ]
+    }
+
+    private static func tronProofResultBody(
+        verified: Bool,
+        state: String,
+        network: TronNetwork
+    ) -> [String: Any] {
+        let bundle = tronProofBundle(network: network)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": network.chainRef,
+            "block_number": bundle.header.number,
+            "block_id": bundle.header.blockID,
+            "proof_id": bundle.proof?.proofID ?? "tron-fixture-token",
+            "kind": bundle.proof?.kind.rawValue ?? "token",
+            "summary": "TRON token proof checked against solid block."
         ]
     }
 
