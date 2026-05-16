@@ -38,6 +38,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var openMindMemory: OpenMindMemoryEndpointConfiguration
     var llmRouter: LLMRouterEndpointConfiguration
     var bitcoinLightClient: BitcoinLightClientEndpointConfiguration
+    var evmLightClient: EVMLightClientEndpointConfiguration
     var chainTrustRegistry: ChainTrustRegistry
 
     nonisolated init(
@@ -48,6 +49,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
         llmRouter: LLMRouterEndpointConfiguration = .local,
         bitcoinLightClient: BitcoinLightClientEndpointConfiguration = .disabled,
+        evmLightClient: EVMLightClientEndpointConfiguration = .disabled,
         chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
@@ -57,6 +59,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.openMindMemory = openMindMemory
         self.llmRouter = llmRouter
         self.bitcoinLightClient = bitcoinLightClient
+        self.evmLightClient = evmLightClient
         self.chainTrustRegistry = chainTrustRegistry
     }
 }
@@ -245,11 +248,16 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let afmServicesClient: AFMServicesClient
     private let llmRouterServiceClient: LLMRouterServiceClient
     private let bitcoinLightClientServiceClient: BitcoinLightClientServiceClient
+    private let evmLightClientServiceClient: EVMLightClientServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     @Published private(set) var bitcoinLightClientSnapshot: BitcoinLightClientServiceSnapshot = .fallback(
         network: .mainnet,
         lastError: "Bitcoin light-client service not checked yet."
+    )
+    @Published private(set) var evmLightClientSnapshot: EVMLightClientServiceSnapshot = .fallback(
+        chain: .ethereumMainnet,
+        lastError: "Ethereum/EVM light-client service not checked yet."
     )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletAddress: String?
@@ -263,16 +271,22 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         configuration: RuntimeBridgeConfiguration,
         afmServicesClient: AFMServicesClient? = nil,
         llmRouterServiceClient: LLMRouterServiceClient? = nil,
-        bitcoinLightClientServiceClient: BitcoinLightClientServiceClient? = nil
+        bitcoinLightClientServiceClient: BitcoinLightClientServiceClient? = nil,
+        evmLightClientServiceClient: EVMLightClientServiceClient? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
         self.llmRouterServiceClient = llmRouterServiceClient ?? LLMRouterServiceClient(configuration: configuration.llmRouter)
         self.bitcoinLightClientServiceClient = bitcoinLightClientServiceClient ?? BitcoinLightClientServiceClient(configuration: configuration.bitcoinLightClient)
+        self.evmLightClientServiceClient = evmLightClientServiceClient ?? EVMLightClientServiceClient(configuration: configuration.evmLightClient)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
             lastError: "Bitcoin light-client service not checked yet."
+        )
+        self.evmLightClientSnapshot = .fallback(
+            chain: configuration.evmLightClient.chain,
+            lastError: "Ethereum/EVM light-client service not checked yet."
         )
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
@@ -287,10 +301,13 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let afmSnapshot = afmServicesClient.snapshot()
         async let llmRouterSnapshot = llmRouterServiceClient.snapshot()
         async let bitcoinSnapshot = bitcoinLightClientServiceClient.snapshot()
+        async let evmSnapshot = evmLightClientServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
         bitcoinLightClientSnapshot = await bitcoinSnapshot
+        evmLightClientSnapshot = await evmSnapshot
         _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
+        _ = chainTrustSnapshot.recordEVMLightClientSnapshot(evmLightClientSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,

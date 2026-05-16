@@ -1522,6 +1522,201 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Bitcoin light-client verified") == true)
     }
 
+    @Test func evmChainRoutingDistinguishesMainnetAndLayer2Finality() {
+        #expect(EVMChain.known(from: "1") == .ethereumMainnet)
+        #expect(EVMChain.known(from: "84532") == .baseSepolia)
+        #expect(EVMChain.ethereumMainnet.family == .ethereum)
+        #expect(EVMChain.baseSepolia.family == .evmLayer2)
+        #expect(EVMChain.baseSepolia.finalityModel == .rollupSettlement)
+        #expect(EVMChain.baseSepolia.l2SettlementSummary?.contains("sequencer") == true)
+    }
+
+    @Test func evmLocalProofVerifiesAccountStorageAndReceiptFixtures() {
+        let accountLeaf = EVMLocalProof.fixtureLeafHash(
+            kind: .account,
+            subject: "0x1111111111111111111111111111111111111111",
+            value: "0x01"
+        )
+        let accountSibling = EVMProofWitness(hash: EVMHex.sha256Hex("account-sibling"), position: .right)
+        let accountRoot = EVMLocalProof.computeRoot(leafHash: accountLeaf, witnesses: [accountSibling])!
+        let receiptLeaf = EVMLocalProof.fixtureLeafHash(kind: .receipt, subject: "0xtx", value: "0x01")
+        let receiptRoot = EVMLocalProof.computeRoot(leafHash: receiptLeaf, witnesses: [])!
+        let header = EVMExecutionHeaderSnapshot(
+            chain: .ethereumMainnet,
+            number: 17_000_000,
+            hash: EVMHex.sha256Hex("ethereum-mainnet-17000000-header"),
+            parentHash: EVMHex.sha256Hex("ethereum-mainnet-16999999-header"),
+            stateRoot: accountRoot,
+            receiptsRoot: receiptRoot,
+            timestamp: 1_680_000_000,
+            finalized: true,
+            source: "fixture"
+        )
+        let accountProof = EVMLocalProof(
+            proofID: "account-proof",
+            kind: .account,
+            chain: .ethereumMainnet,
+            subject: "0x1111111111111111111111111111111111111111",
+            expectedValue: "0x01",
+            blockHash: header.hash,
+            blockNumber: header.number,
+            expectedRoot: accountRoot,
+            leafHash: accountLeaf,
+            witnesses: [accountSibling],
+            source: "fixture"
+        )
+        let receiptProof = EVMLocalProof(
+            proofID: "receipt-proof",
+            kind: .receipt,
+            chain: .ethereumMainnet,
+            subject: "0xtx",
+            expectedValue: "0x01",
+            blockHash: header.hash,
+            blockNumber: header.number,
+            expectedRoot: receiptRoot,
+            leafHash: receiptLeaf,
+            witnesses: [],
+            source: "fixture"
+        )
+        let storageLeaf = EVMLocalProof.fixtureLeafHash(
+            kind: .storage,
+            subject: "0x2222222222222222222222222222222222222222",
+            key: "0x00",
+            value: "0x2a"
+        )
+        let storageRoot = EVMLocalProof.computeRoot(leafHash: storageLeaf, witnesses: [])!
+        let storageHeader = EVMExecutionHeaderSnapshot(
+            chain: .baseSepolia,
+            number: 12_345,
+            hash: EVMHex.sha256Hex("base-sepolia-12345-header"),
+            stateRoot: storageRoot,
+            receiptsRoot: receiptRoot,
+            finalized: false,
+            source: "fixture"
+        )
+        let storageProof = EVMLocalProof(
+            proofID: "storage-proof",
+            kind: .storage,
+            chain: .baseSepolia,
+            subject: "0x2222222222222222222222222222222222222222",
+            storageKey: "0x00",
+            expectedValue: "0x2a",
+            blockHash: storageHeader.hash,
+            blockNumber: storageHeader.number,
+            expectedRoot: storageRoot,
+            leafHash: storageLeaf,
+            witnesses: [],
+            source: "fixture"
+        )
+
+        let accountResult = EVMLocalProofBundle(header: header, proof: accountProof).verify()
+        let receiptResult = EVMLocalProofBundle(header: header, proof: receiptProof).verify()
+        let storageResult = EVMLocalProofBundle(header: storageHeader, proof: storageProof).verify()
+
+        #expect(accountResult.verified)
+        #expect(accountResult.state == .synced)
+        #expect(receiptResult.verified)
+        #expect(receiptResult.kind == .receipt)
+        #expect(storageResult.verified)
+        #expect(storageResult.state == .proofChecked)
+    }
+
+    @MainActor
+    @Test func evmLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let evmHarness = Self.makeEVMLightClientSession(key: "evmregistry", chain: .ethereumMainnet) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/evm/status" {
+                return Self.jsonResponse(for: request, body: Self.evmServiceStatus(chain: .ethereumMainnet))
+            }
+            if request.url?.path == "/v1/evm/verify-proof" {
+                return Self.jsonResponse(for: request, body: Self.evmProofResultBody(
+                    verified: true,
+                    state: "synced",
+                    proofID: "account-proof",
+                    kind: "account",
+                    chain: .ethereumMainnet
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = EVMLightClientServiceClient(
+            configuration: evmHarness.configuration,
+            session: evmHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyProofViaService(Self.evmProofBundle(chain: .ethereumMainnet))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordEVMLightClientSnapshot(snapshot)
+        let ethereum = registry.status(forChainRef: "ethereum-mainnet")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .synced)
+        #expect(snapshot.finalizedCheckpoint?.number == 17_000_000)
+        #expect(status.state == .verified)
+        #expect(status.trustSource == .embeddedLightClient)
+        #expect(ethereum?.evidence.first?.source == .embeddedLightClient)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .synced)
+        #expect(capturedRequests.body(for: "/v1/evm/verify-proof")?["proof"] != nil)
+    }
+
+    @MainActor
+    @Test func evmLightClientFallsBackWhenServiceDisabled() async {
+        let client = EVMLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordEVMLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesEVMLightClientState() async {
+        let evmHarness = Self.makeEVMLightClientSession(key: "evmruntime", chain: .baseSepolia) { request in
+            if request.url?.path == "/v1/evm/status" {
+                return Self.jsonResponse(for: request, body: Self.evmServiceStatus(chain: .baseSepolia, syncState: "proof_checked"))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "evmruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                evmLightClient: evmHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(
+                configuration: evmHarness.configuration,
+                session: evmHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let base = bridge.chainTrustSnapshot.status(forChainRef: "base-sepolia")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(base?.state == .proofChecked)
+        #expect(base?.trustSource == .localProof)
+        #expect(base?.displaySummary.contains("proof-checked evidence") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Base Sepolia proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -3690,6 +3885,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeEVMLightClientSession(
+        key: String,
+        chain: EVMChain = .ethereumMainnet,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: EVMLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = EVMLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-evm.test:4870")!,
+            chain: chain
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -3713,6 +3923,92 @@ struct dBrowserTests {
             ],
             "peer_count": 3,
             "filter_source": "bip157"
+        ]
+    }
+
+    private static func evmServiceStatus(
+        chain: EVMChain,
+        syncState: String = "synced"
+    ) -> [String: Any] {
+        let bundle = evmProofBundle(chain: chain)
+        let header = bundle.header
+        let checkpointKey = syncState == "synced" ? "finalized_checkpoint" : "head"
+        return [
+            "ok": true,
+            "chain": chain.chainRef,
+            "chain_ref": chain.chainRef,
+            "chain_id": chain.chainID,
+            "sync_state": syncState,
+            "source": "evm-light-client",
+            "finality_model": chain.finalityModel.rawValue,
+            checkpointKey: [
+                "chain": chain.chainRef,
+                "chain_ref": chain.chainRef,
+                "number": header.number,
+                "hash": header.hash,
+                "parent_hash": header.parentHash ?? EVMHex.sha256Hex("\(chain.chainRef)-parent"),
+                "state_root": header.stateRoot,
+                "receipts_root": header.receiptsRoot,
+                "transactions_root": header.transactionsRoot ?? EVMHex.sha256Hex("\(chain.chainRef)-transactions"),
+                "timestamp": Int(header.timestamp ?? 1_680_000_000),
+                "finalized": syncState == "synced",
+                "source": "fixture"
+            ],
+            "peer_count": 2,
+            "proof_source": "fixture-local-merkle"
+        ]
+    }
+
+    private static func evmProofBundle(chain: EVMChain) -> EVMLocalProofBundle {
+        let subject = "0x1111111111111111111111111111111111111111"
+        let leaf = EVMLocalProof.fixtureLeafHash(kind: .account, subject: subject, value: "0x01")
+        let root = EVMLocalProof.computeRoot(leafHash: leaf, witnesses: [])!
+        let receiptLeaf = EVMLocalProof.fixtureLeafHash(kind: .receipt, subject: "0xtx", value: "0x01")
+        let receiptRoot = EVMLocalProof.computeRoot(leafHash: receiptLeaf, witnesses: [])!
+        let header = EVMExecutionHeaderSnapshot(
+            chain: chain,
+            number: 17_000_000,
+            hash: EVMHex.sha256Hex("\(chain.chainRef)-17000000-header"),
+            parentHash: EVMHex.sha256Hex("\(chain.chainRef)-16999999-header"),
+            stateRoot: root,
+            receiptsRoot: receiptRoot,
+            transactionsRoot: EVMHex.sha256Hex("\(chain.chainRef)-transactions"),
+            timestamp: 1_680_000_000,
+            finalized: chain == .ethereumMainnet,
+            source: "fixture"
+        )
+        let proof = EVMLocalProof(
+            proofID: "account-proof",
+            kind: .account,
+            chain: chain,
+            subject: subject,
+            expectedValue: "0x01",
+            blockHash: header.hash,
+            blockNumber: header.number,
+            expectedRoot: root,
+            leafHash: leaf,
+            witnesses: [],
+            source: "fixture"
+        )
+        return EVMLocalProofBundle(header: header, proof: proof)
+    }
+
+    private static func evmProofResultBody(
+        verified: Bool,
+        state: String,
+        proofID: String,
+        kind: String,
+        chain: EVMChain
+    ) -> [String: Any] {
+        [
+            "verified": verified,
+            "state": state,
+            "proof_id": proofID,
+            "kind": kind,
+            "chain_ref": chain.chainRef,
+            "block_hash": EVMHex.sha256Hex("\(chain.chainRef)-17000000-header"),
+            "block_number": 17_000_000,
+            "summary": "EVM \(kind) fixture proof checked."
         ]
     }
 

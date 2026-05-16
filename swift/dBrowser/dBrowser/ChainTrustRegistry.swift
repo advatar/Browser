@@ -434,6 +434,24 @@ struct ChainTrustRegistry: Codable, Equatable {
         return status
     }
 
+    mutating func recordEVMLightClientSnapshot(_ snapshot: EVMLightClientServiceSnapshot) -> ChainTrustStatus {
+        var status = snapshot.chainTrustStatus
+        let existing = self.status(forChainRef: snapshot.chain.chainRef)
+        if status.evidence.isEmpty, let existingEvidence = existing?.evidence {
+            status.evidence = existingEvidence
+        }
+        if status.latestCheckpoint == nil {
+            status.latestCheckpoint = existing?.latestCheckpoint
+        }
+
+        if let index = statuses.firstIndex(where: { $0.matches(chainRef: snapshot.chain.chainRef) }) {
+            statuses[index] = status
+        } else {
+            statuses.append(status)
+        }
+        return status
+    }
+
     private static func chainTrustState(for verificationState: AFMVerificationState) -> ChainTrustState? {
         switch verificationState {
         case .chainAnchored:
@@ -476,8 +494,12 @@ struct ChainTrustRegistry: Codable, Equatable {
         if normalized.contains("bitcoin") || normalized.contains("btc") {
             return .bitcoin
         }
+        if normalized == "ethereum"
+            || normalized == "ethereum-mainnet"
+            || normalized == "mainnet" {
+            return .ethereum
+        }
         if normalized.contains("base")
-            || normalized.contains("ethereum")
             || normalized.contains("sepolia")
             || normalized.contains("polygon")
             || normalized.contains("optimism")

@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Swift Ethereum/EVM Light Client Foundation Slice
+
+- [x] Triage Ethereum/EVM light-client gap from #60.
+- [x] Create tracker issue for Swift Ethereum/EVM light-client foundation (#93).
+- [x] Add Swift Ethereum/EVM chain, endpoint, checkpoint, header, proof, and service snapshot models.
+- [x] Add local verifier primitives for fixture-backed account/storage/receipt/log evidence.
+- [x] Add Ethereum/EVM service client contract for `./services` chain-trust status and proof verification endpoints.
+- [x] Extend `services/chain-trust` with fixture-backed Ethereum/EVM status and proof verification endpoints.
+- [x] Bind Ethereum/EVM snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for routing, proof validation, fallback, registry updates, and runtime refresh.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Local Chain Trust Bitcoin Service Slice
 
 - [x] Triage remaining Bitcoin service gap from #59.
