@@ -19,6 +19,19 @@
 
 ## Active Task
 
+## Swift AFMarket Integration Plan
+
+- [x] Inspect `../AFMarket` marketplace, router, registry, node, contracts, pipelines, and Swift ZKAI surfaces.
+- [x] Create a GitHub issue for integrating Swift Strawberry equivalence with `../AFMarket` (#69).
+- [x] Update the Swift Strawberry plan with AFMarket integration requirements.
+- [x] Verify the documentation-only change locally.
+- [x] Commit and push only the scoped status and plan updates.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+
 ## Swift Strawberry Equivalence Plan
 
 - [x] Create GitHub issues for each Swift Strawberry equivalence step (#50-#58).

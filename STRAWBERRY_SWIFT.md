@@ -42,6 +42,10 @@ Core Strawberry steps:
 - #57 - Add a concurrent Copilot runs surface.
 - #58 - Add local Smart History recall.
 
+AFMarket integration:
+
+- #69 - Integrate `../AFMarket` runner packs, routing, node dispatch, attested AFM execution, and ZK settlement.
+
 Chain trust and light-client issues:
 
 - #68 - Add a shared light-client registry and trust-state UI.
@@ -208,6 +212,44 @@ Extend history beyond URL/title:
 - Add controls to clear summaries and exclude pages/domains.
 
 Smart History must stay local by default. Remote services only receive selected, user-approved context.
+
+## AFMarket Integration Track (#69)
+
+`../AFMarket` is the market project and should be the source of truth for runner-pack discovery, expert routing, node dispatch, attested AFM execution, and ZK settlement. The Swift app should integrate with those contracts instead of creating a parallel marketplace or ad hoc pack format.
+
+AFMarket surfaces to integrate:
+
+- Marketplace UI and pack API: `../AFMarket/afm-marketplace-starter`.
+- Runner pack schema: `../AFMarket/afm-marketplace-starter/lib/schema.ts` and `../AFMarket/pipelines/src/types.ts`.
+- Registry expert and bundle schemas: `../AFMarket/registry/src/schemas.ts`.
+- Router task and route schemas: `../AFMarket/router/src/schemas.ts`.
+- API contracts and proof public inputs: `../AFMarket/docs/api-contracts.md`.
+- Node ingest/install API: `../AFMarket/node/src/http.rs`.
+- Pipeline clients for marketplace, registry, and node install flows: `../AFMarket/pipelines/src/client.ts`.
+- EVM escrow and verifier contracts: `../AFMarket/contracts/src/AFMZKEscrow.sol`, `VerifierSP1.sol`, and `SP1VerifierGroth16.sol`.
+- Swift attested-run reference: `../AFMarket/ZKAI/ZKAI/AFMTaskRunner.swift`.
+
+Swift implementation requirements:
+
+- Extend runtime configuration with AFMarket endpoints: marketplace base URL, registry base URL, router base URL, node agent URL, and settlement chain configuration.
+- Add Codable Swift models mirroring runner packs, registry bundles, expert records, router tasks, route responses, node install responses, result envelopes, and settlement metadata.
+- Add a marketplace surface for browsing and installing AFMarket runner packs instead of relying only on hardcoded local suggestions.
+- Install selected runner packs by calling the configured node agent's `POST /packs/install` endpoint.
+- Route Copilot runs through AFMarket when a compatible runner pack is selected, including task tags, capability vectors or embeddings, input/page-snapshot commitments, HPKE envelope metadata, reward/SLA policy, chain reference, and settlement deadline/verifier fields.
+- Dispatch selected work through the router/node contracts documented by AFMarket, then reflect lease, dispatch, result, attestation, proof, and settlement status in Copilot run activity.
+- Reuse the ZKAI Swift attested-run shape for local AFM execution: `taskId`, response, token count, context passages, output commitment, nonce, and COSE/attestation token.
+- Bind AFMarket proof and escrow status into credit metering, approval history, and the chain-trust UI.
+- Keep local/offline/mock AFMarket modes explicitly labeled; never represent mock attestation, stub proof, or mock settlement as production verification.
+
+Definition of done:
+
+- Swift dBrowser can list AFMarket runner packs and registry bundles from configured endpoints.
+- Users can install a selected runner pack into the configured node agent.
+- A Copilot run can be routed through AFMarket router and registry contracts with deterministic request/response models.
+- Attested local AFM execution produces an output commitment and nonce compatible with AFMarket/ZKAI settlement proof inputs.
+- Copilot activity shows AFMarket pack selection, lease, dispatch, attestation, proof, and settlement status.
+- Unit tests cover AFMarket Codable models against fixture payloads from the AFMarket docs/schemas.
+- Service-client tests mock marketplace, registry, router, and node responses.
 
 ## Chain Trust Track
 
