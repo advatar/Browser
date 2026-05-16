@@ -103,6 +103,49 @@ struct BrowserBookmark: Identifiable, Equatable {
     let urlString: String
 }
 
+struct DecentralizedStartingPoint: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let description: String
+    let address: String
+    let systemImage: String
+
+    init(title: String, description: String, address: String, systemImage: String) {
+        self.id = address
+        self.title = title
+        self.description = description
+        self.address = address
+        self.systemImage = systemImage
+    }
+
+    static let featured: [DecentralizedStartingPoint] = [
+        DecentralizedStartingPoint(
+            title: "IPFS Docs",
+            description: "Protocol guides, concepts, and examples published through IPNS.",
+            address: "ipns://docs.ipfs.tech",
+            systemImage: "book.closed"
+        ),
+        DecentralizedStartingPoint(
+            title: "IPFS Home",
+            description: "The public IPFS project site served through a mutable IPNS name.",
+            address: "ipns://ipfs.tech",
+            systemImage: "network"
+        ),
+        DecentralizedStartingPoint(
+            title: "Wikipedia on IPFS",
+            description: "A decentralized mirror that demonstrates large public knowledge content.",
+            address: "ipns://en.wikipedia-on-ipfs.org",
+            systemImage: "text.book.closed"
+        ),
+        DecentralizedStartingPoint(
+            title: "Sample CID",
+            description: "A content-addressed IPFS object for checking gateway and CID resolution.",
+            address: "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+            systemImage: "cube.box"
+        )
+    ]
+}
+
 struct RuntimeFeatureExplanation: Equatable {
     let overview: String
     let bridgeBehavior: String

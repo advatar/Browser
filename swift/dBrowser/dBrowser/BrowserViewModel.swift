@@ -6,7 +6,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var tabs: [BrowserTab]
     @Published var activeTabID: UUID
     @Published var addressText: String
-    @Published var selectedPanel: BrowserPanel = .runtime
+    @Published var selectedPanel: BrowserPanel?
     @Published var history: [BrowserHistoryEntry] = []
     @Published var bookmarks: [BrowserBookmark] = [
         BrowserBookmark(title: "Advatar Browser", urlString: "https://github.com/advatar/browser"),
@@ -53,6 +53,7 @@ final class BrowserViewModel: ObservableObject {
 
     func activateTab(_ id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
+        selectedPanel = nil
         activeTabID = id
         addressText = activeTab?.urlString ?? BrowserURLResolver.homeURLString
     }
@@ -61,6 +62,10 @@ final class BrowserViewModel: ObservableObject {
         let tab = BrowserTab()
         tabs.append(tab)
         activateTab(tab.id)
+    }
+
+    func selectPanel(_ panel: BrowserPanel?) {
+        selectedPanel = panel
     }
 
     func closeTab(_ id: UUID) {
@@ -85,6 +90,7 @@ final class BrowserViewModel: ObservableObject {
 
     func navigate(_ rawInput: String) {
         guard let index = activeTabIndex else { return }
+        selectedPanel = nil
 
         switch BrowserURLResolver.resolve(rawInput) {
         case .home:
@@ -112,6 +118,10 @@ final class BrowserViewModel: ObservableObject {
 
     func openBookmark(_ bookmark: BrowserBookmark) {
         navigate(bookmark.urlString)
+    }
+
+    func openHistoryEntry(_ entry: BrowserHistoryEntry) {
+        navigate(entry.urlString)
     }
 
     func addActivePageBookmark() {

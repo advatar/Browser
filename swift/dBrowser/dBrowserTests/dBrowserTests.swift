@@ -64,6 +64,45 @@ struct dBrowserTests {
         }
     }
 
+    @Test func decentralizedStartingPointsAreRuntimeResolvable() {
+        let points = DecentralizedStartingPoint.featured
+        #expect(points.count >= 4)
+
+        for point in points {
+            #expect(!point.title.isEmpty)
+            #expect(point.description.count > 30)
+            #expect(!point.systemImage.isEmpty)
+
+            guard let url = URL(string: point.address), let scheme = url.scheme?.lowercased() else {
+                Issue.record("Expected URL-like decentralized address for \(point.title)")
+                continue
+            }
+
+            #expect(["ipfs", "ipns", "ens"].contains(scheme))
+        }
+    }
+
+    @MainActor
+    @Test func decentralizedStartingPointsResolveToRenderableGatewayURLs() async {
+        let bridge = MobileRuntimeBridge()
+
+        for point in DecentralizedStartingPoint.featured {
+            let resolution = await bridge.resolve(point.address)
+
+            #expect(resolution.resolvedURLString?.hasPrefix("https://") == true)
+            #expect(resolution.message?.contains("Resolved") == true)
+
+            guard let resolvedURLString = resolution.resolvedURLString,
+                  let resolvedURL = URL(string: resolvedURLString) else {
+                Issue.record("Expected gateway URL for \(point.title)")
+                continue
+            }
+
+            #expect(resolvedURL.host == "dweb.link")
+            #expect(resolvedURL.path.hasPrefix("/ipfs/") || resolvedURL.path.hasPrefix("/ipns/"))
+        }
+    }
+
     @MainActor
     @Test func runtimeBridgeResolvesDecentralizedAddresses() async {
         let bridge = MobileRuntimeBridge()
@@ -120,6 +159,26 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func viewModelLoadsFeaturedIPFSStartingPointsThroughRuntimeBridge() async {
+        for point in DecentralizedStartingPoint.featured {
+            let model = BrowserViewModel()
+            let resolution = await model.runtimeBridge.resolve(point.address)
+
+            guard let resolvedURLString = resolution.resolvedURLString else {
+                Issue.record("Expected resolved URL for \(point.title)")
+                continue
+            }
+
+            model.navigate(point.address)
+
+            let resolved = await waitForActiveURL(in: model, resolvedURLString)
+            #expect(resolved)
+            #expect(model.activeTab?.mobileNotice == nil)
+            #expect(model.history.first?.urlString == resolvedURLString)
+        }
+    }
+
+    @MainActor
     @Test func viewModelTracksNavigationAndBookmarks() {
         let model = BrowserViewModel()
         model.navigate("example.com")
@@ -128,6 +187,25 @@ struct dBrowserTests {
 
         model.addActivePageBookmark()
         #expect(model.bookmarks.contains { $0.urlString == "https://example.com" })
+    }
+
+    @MainActor
+    @Test func panelSelectionShowsPanelsAndNavigationReturnsToBrowser() {
+        let model = BrowserViewModel()
+
+        model.selectPanel(.history)
+        #expect(model.selectedPanel == .history)
+
+        model.selectPanel(.bookmarks)
+        #expect(model.selectedPanel == .bookmarks)
+
+        model.navigate("example.com")
+        #expect(model.selectedPanel == nil)
+
+        model.selectPanel(.runtime)
+        model.newTab()
+        #expect(model.selectedPanel == nil)
+        #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
     }
 
     @MainActor

@@ -19,6 +19,34 @@
 
 ## Active Task
 
+## iOS Panel Navigation and IPFS Rendering
+
+- [x] Add real panel content for History, Bookmarks, Copilot, and Runtime.
+- [x] Add iOS panel controls that visibly switch between browser and panels.
+- [x] Add focused unit/UI tests for IPFS starting points rendering and bridge navigation.
+- [x] Run local Swift/Xcode validation.
+- [x] Commit the panel and IPFS rendering work semantically.
+
+## macOS WKWebView Network Entitlement
+
+- [x] Add a macOS sandbox entitlement with outbound network client access.
+- [x] Attach platform-specific entitlements in the Xcode project.
+- [x] Verify the macOS destination build.
+
+## Decentralized Web Starting Points
+
+- [x] Add curated IPFS/IPNS starting points to the iOS home screen.
+- [x] Route starting points through the existing decentralized runtime bridge.
+- [x] Add focused tests for the starting-point data.
+- [x] Run local Swift/Xcode validation.
+- [x] Commit the starting-point work semantically.
+
+## Push All Dangling Work
+
+- [ ] Commit semantic groups for all current changes.
+- [ ] Commit any remaining miscellaneous changes in a final cleanup commit.
+- [ ] Push all resulting commits.
+
 ## Runtime Button Details
 
 - [x] Make runtime feature tiles clickable.

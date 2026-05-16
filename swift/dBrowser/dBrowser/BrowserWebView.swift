@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WebKit
 
@@ -117,6 +118,10 @@ struct BrowserWebView: BrowserViewRepresentable {
             publish(webView: webView, isLoading: false)
         }
 
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            publish(webView: webView, isLoading: false)
+        }
+
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
@@ -136,16 +141,17 @@ struct BrowserWebView: BrowserViewRepresentable {
         }
 
         private func publish(webView: WKWebView, isLoading: Bool) {
-            parent.onNavigationUpdate(
-                BrowserNavigationUpdate(
-                    tabID: parent.tab.id,
-                    urlString: webView.url?.absoluteString,
-                    title: webView.title,
-                    isLoading: isLoading,
-                    canGoBack: webView.canGoBack,
-                    canGoForward: webView.canGoForward
-                )
+            let update = BrowserNavigationUpdate(
+                tabID: parent.tab.id,
+                urlString: webView.url?.absoluteString,
+                title: webView.title,
+                isLoading: isLoading,
+                canGoBack: webView.canGoBack,
+                canGoForward: webView.canGoForward
             )
+            DispatchQueue.main.async {
+                self.parent.onNavigationUpdate(update)
+            }
         }
     }
 }

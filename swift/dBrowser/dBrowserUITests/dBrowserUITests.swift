@@ -24,13 +24,40 @@ final class dBrowserUITests: XCTestCase {
 
     @MainActor
     func testExample() throws {
-        // UI tests must launch the application that they test.
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.staticTexts["dBrowser"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testIPFSStartingPointsRenderAndOpenThroughBridge() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.otherElements["ipfs-starting-points"].waitForExistence(timeout: 5))
+
+        let docsButton = app.buttons["ipfs-start-ipfs-docs"]
+        XCTAssertTrue(docsButton.exists)
+        docsButton.tap()
+
+        let gatewayText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "dweb.link")).firstMatch
+        XCTAssertTrue(gatewayText.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testPanelButtonsShowPanelContent() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let panels = ["history", "bookmarks", "copilot", "runtime"]
+        for panel in panels {
+            let button = app.buttons["panel-\(panel)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 5), "Missing \(panel) panel button")
+            button.tap()
+            let content = app.descendants(matching: .any)["panel-content-\(panel)"]
+            XCTAssertTrue(content.waitForExistence(timeout: 5), "Missing \(panel) panel content")
+        }
     }
 
     @MainActor

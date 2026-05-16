@@ -37,6 +37,9 @@ struct ContentView: View {
     private var browserWorkspace: some View {
         VStack(spacing: 0) {
             browserToolbar
+#if !os(macOS)
+            BrowserPanelSelector(browser: browser)
+#endif
             tabStrip
             Divider()
             browserSurface
@@ -141,7 +144,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var browserSurface: some View {
-        if let index = browser.activeTabIndex {
+        if let panel = browser.selectedPanel {
+            BrowserPanelContentView(browser: browser, panel: panel)
+        } else if let index = browser.activeTabIndex {
             let tab = browser.tabs[index]
             if tab.urlString == BrowserURLResolver.homeURLString {
                 BrowserHomeView(browser: browser)
@@ -164,6 +169,7 @@ struct ContentView: View {
             Image(systemName: browser.activeTab?.isLoading == true ? "network" : "lock.shield")
             Text(browser.activeTab?.displayURL ?? "Home")
                 .lineLimit(1)
+                .accessibilityIdentifier("active-url")
             Spacer()
             Text("\(browser.tabs.count) tab\(browser.tabs.count == 1 ? "" : "s")")
             Text(runtimeBridgeStatusText)
@@ -215,6 +221,346 @@ private struct BrowserRootLayout<Content: View>: View {
     }
 }
 
+private struct BrowserPanelSelector: View {
+    @ObservedObject var browser: BrowserViewModel
+    private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+            BrowserPanelSelectorButton(
+                title: "Browser",
+                systemImage: "globe",
+                isSelected: browser.selectedPanel == nil
+            ) {
+                browser.selectPanel(nil)
+            }
+            .accessibilityIdentifier("panel-browser")
+
+            ForEach(BrowserPanel.allCases) { panel in
+                BrowserPanelSelectorButton(
+                    title: panel.title,
+                    systemImage: panel.systemImage,
+                    isSelected: browser.selectedPanel == panel
+                ) {
+                    browser.selectPanel(panel)
+                }
+                .accessibilityIdentifier("panel-\(panel.id)")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+}
+
+private struct BrowserPanelSelectorButton: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct BrowserPanelContentView: View {
+    @ObservedObject var browser: BrowserViewModel
+    let panel: BrowserPanel
+    @State private var selectedFeature: RuntimeFeatureState?
+
+    var body: some View {
+        Group {
+            switch panel {
+            case .history:
+                HistoryPanelView(browser: browser)
+            case .bookmarks:
+                BookmarksPanelView(browser: browser)
+            case .copilot:
+                CopilotPanelView(browser: browser)
+            case .runtime:
+                RuntimePanelView(browser: browser) { feature in
+                    selectedFeature = feature
+                }
+            }
+        }
+        .sheet(item: $selectedFeature) { feature in
+            RuntimeFeatureDetailView(state: feature)
+        }
+    }
+}
+
+private struct PanelHeaderView: View {
+    let title: String
+    let systemImage: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.title2.bold())
+            Text(subtitle)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct EmptyPanelView: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct HistoryPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "History",
+                    systemImage: BrowserPanel.history.systemImage,
+                    subtitle: "Recently visited pages from this iOS session."
+                )
+
+                if browser.history.isEmpty {
+                    EmptyPanelView(title: "No history yet", message: "Visited pages will appear here after navigation completes.")
+                } else {
+                    LazyVStack(spacing: 10) {
+                        ForEach(browser.history) { entry in
+                            Button {
+                                browser.openHistoryEntry(entry)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .frame(width: 24)
+                                        .foregroundStyle(Color.accentColor)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(entry.title)
+                                            .font(.headline)
+                                            .lineLimit(1)
+                                        Text(entry.urlString)
+                                            .font(.caption.monospaced())
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer()
+                                    Text(entry.visitedAt, style: .time)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Open history entry")
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-history")
+    }
+}
+
+private struct BookmarksPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    PanelHeaderView(
+                        title: "Bookmarks",
+                        systemImage: BrowserPanel.bookmarks.systemImage,
+                        subtitle: "Saved pages and project defaults."
+                    )
+                    Spacer()
+                    Button {
+                        browser.addActivePageBookmark()
+                    } label: {
+                        Label("Add Current", systemImage: "bookmark.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(browser.activeTab?.urlString == BrowserURLResolver.homeURLString)
+                }
+
+                if browser.bookmarks.isEmpty {
+                    EmptyPanelView(title: "No bookmarks", message: "Bookmark useful pages from the toolbar or this panel.")
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+                        ForEach(browser.bookmarks) { bookmark in
+                            Button {
+                                browser.openBookmark(bookmark)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "bookmark")
+                                            .frame(width: 22)
+                                            .foregroundStyle(Color.accentColor)
+                                        Text(bookmark.title)
+                                            .font(.headline)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Image(systemName: "arrow.up.forward")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text(bookmark.urlString)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                        .truncationMode(.middle)
+                                }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Open bookmark")
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-bookmarks")
+    }
+}
+
+private struct CopilotPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+    @State private var prompt = "Summarize this page and suggest next actions."
+    @State private var result: CopilotRunResult?
+    @State private var isRunning = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "Copilot",
+                    systemImage: BrowserPanel.copilot.systemImage,
+                    subtitle: "Prepare an AI run against the active browsing context."
+                )
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Prompt")
+                        .font(.headline)
+                    TextEditor(text: $prompt)
+                        .frame(minHeight: 110)
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityIdentifier("copilot-prompt")
+
+                    HStack {
+                        Text(browser.activeTab?.displayURL ?? "Home")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button {
+                            runCopilot()
+                        } label: {
+                            Label(isRunning ? "Running" : "Run Copilot", systemImage: "sparkles")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isRunning)
+                        .accessibilityIdentifier("copilot-run")
+                    }
+                }
+
+                if let result {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(result.title)
+                            .font(.headline)
+                        Text(result.summary)
+                            .foregroundStyle(.secondary)
+                        ForEach(result.suggestions, id: \.self) { suggestion in
+                            Label(suggestion, systemImage: "checkmark.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-result")
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-copilot")
+    }
+
+    private func runCopilot() {
+        isRunning = true
+        let request = CopilotRunRequest(prompt: prompt, pageURLString: browser.activeTab?.urlString)
+        Task { @MainActor in
+            result = await browser.runtimeBridge.runCopilot(request)
+            isRunning = false
+        }
+    }
+}
+
+private struct RuntimePanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+    let onSelectFeature: (RuntimeFeatureState) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "Runtime",
+                    systemImage: BrowserPanel.runtime.systemImage,
+                    subtitle: "Native and bridged capabilities available to the iOS shell."
+                )
+
+                RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-runtime")
+    }
+}
+
 private struct BrowserHomeView: View {
     @ObservedObject var browser: BrowserViewModel
     @State private var selectedFeature: RuntimeFeatureState?
@@ -238,8 +584,12 @@ private struct BrowserHomeView: View {
                         browser.navigate("https://github.com/advatar/browser")
                     }
                     QuickActionButton(title: "IPFS", systemImage: "link") {
-                        browser.navigate("ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi")
+                        browser.navigate(DecentralizedStartingPoint.featured.first?.address ?? "ipns://docs.ipfs.tech")
                     }
+                }
+
+                DecentralizedStartingPointsView(points: DecentralizedStartingPoint.featured) { point in
+                    browser.navigate(point.address)
                 }
 
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates) { feature in
@@ -252,6 +602,62 @@ private struct BrowserHomeView: View {
         .sheet(item: $selectedFeature) { feature in
             RuntimeFeatureDetailView(state: feature)
         }
+    }
+}
+
+private struct DecentralizedStartingPointsView: View {
+    let points: [DecentralizedStartingPoint]
+    let onOpen: (DecentralizedStartingPoint) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Start on IPFS", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+                ForEach(points) { point in
+                    Button {
+                        onOpen(point)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: point.systemImage)
+                                    .frame(width: 22)
+                                    .foregroundStyle(Color.accentColor)
+                                Text(point.title)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Spacer()
+                                Image(systemName: "arrow.up.forward")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(point.description)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+
+                            Text(point.address)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Color.accentColor)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(point.title)
+                    .accessibilityHint("Open decentralized web starting point")
+                    .accessibilityIdentifier("ipfs-start-\(point.title.lowercased().replacingOccurrences(of: " ", with: "-"))")
+                }
+            }
+        }
+        .accessibilityIdentifier("ipfs-starting-points")
     }
 }
 
@@ -410,11 +816,22 @@ private struct BrowserSidebar: View {
     @ObservedObject var browser: BrowserViewModel
 
     var body: some View {
-        List(selection: $browser.selectedPanel) {
+        List {
             Section("Browser") {
+                Button {
+                    browser.selectPanel(nil)
+                } label: {
+                    Label("Browser", systemImage: "globe")
+                }
+                .fontWeight(browser.selectedPanel == nil ? .semibold : .regular)
+
                 ForEach(BrowserPanel.allCases) { panel in
-                    Label(panel.title, systemImage: panel.systemImage)
-                        .tag(panel)
+                    Button {
+                        browser.selectPanel(panel)
+                    } label: {
+                        Label(panel.title, systemImage: panel.systemImage)
+                    }
+                    .fontWeight(browser.selectedPanel == panel ? .semibold : .regular)
                 }
             }
 
