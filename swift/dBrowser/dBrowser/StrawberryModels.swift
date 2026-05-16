@@ -345,6 +345,11 @@ enum CopilotRunStatus: String, Codable, Equatable {
 enum CopilotRunEventKind: String, Codable, Equatable {
     case queued
     case pageSnapshotRequested
+    case memoryAccessStarted
+    case memoryAccessCompleted
+    case memoryAccessDenied
+    case memoryStepUpRequired
+    case memoryUnavailable
     case modelStarted
     case modelCompleted
     case actionRequested

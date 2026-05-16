@@ -664,6 +664,23 @@ private struct CopilotPanelView: View {
                         .disabled(activeRun != nil)
                         .accessibilityIdentifier("copilot-run")
                     }
+
+                    if !browser.availableAFMPacks.isEmpty {
+                        Picker(
+                            "Runner pack",
+                            selection: Binding(
+                                get: { browser.selectedAFMPackID ?? "" },
+                                set: { browser.selectAFMPack($0.isEmpty ? nil : $0) }
+                            )
+                        ) {
+                            Text("Router choice").tag("")
+                            ForEach(browser.availableAFMPacks) { pack in
+                                Text(pack.displayName).tag(pack.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("copilot-afm-pack-picker")
+                    }
                 }
 
                 if let snapshot = browser.latestPageSnapshot {
@@ -709,6 +726,28 @@ private struct CopilotPanelView: View {
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityIdentifier("copilot-result")
+                }
+
+                if let recall = browser.latestOpenMindRecall {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("OpenMind Memory", systemImage: "brain")
+                            .font(.headline)
+                        Text(openMindRecallSummary(recall))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if !recall.memories.isEmpty {
+                            ForEach(recall.memories.prefix(3)) { memory in
+                                Text(memory.summary)
+                                    .font(.caption)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-openmind-memory")
                 }
 
                 if !browser.copilotWorkflows.isEmpty {
@@ -758,6 +797,19 @@ private struct CopilotPanelView: View {
             allowedActions: [.click, .focus, .scroll, .waitForSelector]
         )
     }
+
+    private func openMindRecallSummary(_ recall: OpenMindMemoryRecallResult) -> String {
+        switch recall.decision.status {
+        case .allowed:
+            return "Allowed \(recall.memories.count) item\(recall.memories.count == 1 ? "" : "s")."
+        case .denied:
+            return "Denied: \(recall.decision.reason)"
+        case .stepUpRequired:
+            return "Step-up required: \(recall.decision.stepUpPrompt ?? recall.decision.reason)"
+        case .unavailable:
+            return "Unavailable: \(recall.decision.reason)"
+        }
+    }
 }
 
 private struct RuntimePanelView: View {
@@ -774,12 +826,89 @@ private struct RuntimePanelView: View {
                 )
 
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
+
+                AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
+                OpenMindMemoryPanelView(state: browser.openMindCapabilityState)
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
         }
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-runtime")
+    }
+}
+
+private struct AFMServicesPanelView: View {
+    let snapshot: AFMServiceSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("AFM Services", systemImage: "point.3.connected.trianglepath.dotted")
+                .font(.headline)
+            Text(snapshot.serviceStatusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if snapshot.availablePacks.isEmpty {
+                Text("No runner packs reported by router or registry.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(snapshot.availablePacks.prefix(6)) { pack in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(pack.displayName)
+                                .font(.subheadline.weight(.semibold))
+                            Text([pack.id, pack.version, pack.status].compactMap { $0 }.joined(separator: " / "))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if let maintainer = pack.maintainer {
+                            Text(maintainer)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("runtime-afm-services")
+    }
+}
+
+private struct OpenMindMemoryPanelView: View {
+    let state: OpenMindMemoryCapabilityState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("OpenMind Memory", systemImage: "brain")
+                .font(.headline)
+            Text(state.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !state.capabilities.isEmpty {
+                Text(state.capabilities.joined(separator: ", "))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            if let posture = state.posture {
+                Text("Posture: \(posture)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("runtime-openmind-memory")
     }
 }
 

@@ -39,9 +39,17 @@ struct AFMServiceSnapshot: Equatable {
         ]
         return states.joined(separator: ", ")
     }
+
+    var availablePacks: [AFMPackSummary] {
+        var packsByID: [String: AFMPackSummary] = [:]
+        for pack in routerPacks + registryPacks {
+            packsByID[pack.id] = packsByID[pack.id]?.merged(with: pack) ?? pack
+        }
+        return packsByID.values.sorted { $0.displayName < $1.displayName }
+    }
 }
 
-struct AFMPackSummary: Codable, Equatable {
+struct AFMPackSummary: Codable, Equatable, Identifiable {
     var id: String
     var name: String?
     var maintainer: String?
@@ -52,6 +60,18 @@ struct AFMPackSummary: Codable, Equatable {
 
     var displayName: String {
         name ?? id
+    }
+
+    func merged(with other: AFMPackSummary) -> AFMPackSummary {
+        AFMPackSummary(
+            id: id,
+            name: name ?? other.name,
+            maintainer: maintainer ?? other.maintainer,
+            version: version ?? other.version,
+            checksum: checksum ?? other.checksum,
+            skills: skills ?? other.skills,
+            status: status ?? other.status
+        )
     }
 }
 
@@ -93,6 +113,9 @@ final class AFMServicesClient {
         let skill: String
         let prompt: String
         let pageURLString: String?
+        let preferredPackID: String?
+        let pageSnapshotCommitment: String?
+        let memoryContextIDs: [String]
     }
 
     private struct PipelineJobRequest: Encodable {
@@ -104,6 +127,9 @@ final class AFMServicesClient {
         let prompt: String
         let pageURLString: String?
         let selectedPackID: String?
+        let preferredPackID: String?
+        let pageSnapshotCommitment: String?
+        let memoryContextIDs: [String]
     }
 
     private let configuration: AFMServiceEndpointConfiguration
@@ -135,8 +161,22 @@ final class AFMServicesClient {
         )
     }
 
-    func route(skill: String, prompt: String, pageURLString: String?) async throws -> AFMRouteResult {
-        let body = RouteRequest(skill: skill, prompt: prompt, pageURLString: pageURLString)
+    func route(
+        skill: String,
+        prompt: String,
+        pageURLString: String?,
+        preferredPackID: String? = nil,
+        pageSnapshotCommitment: String? = nil,
+        memoryContextIDs: [String] = []
+    ) async throws -> AFMRouteResult {
+        let body = RouteRequest(
+            skill: skill,
+            prompt: prompt,
+            pageURLString: pageURLString,
+            preferredPackID: preferredPackID,
+            pageSnapshotCommitment: pageSnapshotCommitment,
+            memoryContextIDs: memoryContextIDs
+        )
         return try await send(
             method: "POST",
             baseURL: configuration.routerBaseURL,
@@ -148,14 +188,20 @@ final class AFMServicesClient {
     func enqueueCopilotJob(
         prompt: String,
         pageURLString: String?,
-        selectedPackID: String?
+        selectedPackID: String?,
+        preferredPackID: String? = nil,
+        pageSnapshotCommitment: String? = nil,
+        memoryContextIDs: [String] = []
     ) async throws -> AFMPipelineJobResult {
         let body = PipelineJobRequest(
             name: "swift-copilot",
             payload: PipelineJobPayload(
                 prompt: prompt,
                 pageURLString: pageURLString,
-                selectedPackID: selectedPackID
+                selectedPackID: selectedPackID,
+                preferredPackID: preferredPackID,
+                pageSnapshotCommitment: pageSnapshotCommitment,
+                memoryContextIDs: memoryContextIDs
             )
         )
         return try await send(

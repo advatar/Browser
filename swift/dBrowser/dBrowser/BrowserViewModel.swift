@@ -17,10 +17,15 @@ final class BrowserViewModel: ObservableObject {
     @Published var copilotRuns: [CopilotRun] = []
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
+    @Published var afmServiceSnapshot: AFMServiceSnapshot
+    @Published var selectedAFMPackID: String?
+    @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
+    @Published var latestOpenMindRecall: OpenMindMemoryRecallResult?
 
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
     private let smartHistoryStore: SmartHistoryStore
+    private let openMindMemoryClient: OpenMindMemoryClient
     private var smartHistoryExcludedDomains: Set<String>
     private var copilotTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -32,15 +37,19 @@ final class BrowserViewModel: ObservableObject {
         initialURL: String,
         runtimeBridge: MobileRuntimeBridge,
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
-        smartHistoryStore: SmartHistoryStore = SmartHistoryStore()
+        smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
+        openMindMemoryClient: OpenMindMemoryClient? = nil
     ) {
         let tab = BrowserTab(urlString: initialURL)
         let smartHistoryPayload = smartHistoryStore.load()
         self.runtimeBridge = runtimeBridge
         self.workflowStore = copilotWorkflowStore
         self.smartHistoryStore = smartHistoryStore
+        self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
+        self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
+        self.openMindCapabilityState = .disabled
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
@@ -71,6 +80,10 @@ final class BrowserViewModel: ObservableObject {
 
     var activeCopilotRunCount: Int {
         copilotRuns.filter { $0.status == .queued || $0.status == .running }.count
+    }
+
+    var availableAFMPacks: [AFMPackSummary] {
+        afmServiceSnapshot.availablePacks
     }
 
     func activateTab(_ id: UUID) {
@@ -171,6 +184,20 @@ final class BrowserViewModel: ObservableObject {
 
     func refreshRuntimeBridgeStatus() async {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
+        afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
+        openMindCapabilityState = await openMindMemoryClient.refreshCapabilities()
+        if let selectedAFMPackID, !afmServiceSnapshot.availablePacks.contains(where: { $0.id == selectedAFMPackID }) {
+            self.selectedAFMPackID = nil
+        }
+    }
+
+    func selectAFMPack(_ id: String?) {
+        guard let id, !id.isEmpty else {
+            selectedAFMPackID = nil
+            return
+        }
+        guard afmServiceSnapshot.availablePacks.contains(where: { $0.id == id }) else { return }
+        selectedAFMPackID = id
     }
 
     func openBookmark(_ bookmark: BrowserBookmark) {
@@ -283,9 +310,29 @@ final class BrowserViewModel: ObservableObject {
         requestPageSnapshot()
 
         let task = Task { @MainActor in
+            appendCopilotEvent(runID: runID, kind: .memoryAccessStarted, message: "Requested governed memory from OpenMind.")
+            let memoryRecall = await openMindMemoryClient.recall(
+                prompt: prompt,
+                pageURLString: tab.urlString,
+                pageSnapshot: snapshot
+            )
+            latestOpenMindRecall = memoryRecall
+            appendCopilotEvent(
+                runID: runID,
+                kind: copilotEventKind(for: memoryRecall),
+                message: copilotMemoryMessage(for: memoryRecall)
+            )
+
+            guard !Task.isCancelled, isCopilotRunActive(runID) else { return }
             appendCopilotEvent(runID: runID, kind: .modelStarted, message: "Started model bridge.")
             let result = await runtimeBridge.runCopilot(
-                CopilotRunRequest(prompt: prompt, pageURLString: tab.urlString, pageSnapshot: snapshot)
+                CopilotRunRequest(
+                    prompt: prompt,
+                    pageURLString: tab.urlString,
+                    pageSnapshot: snapshot,
+                    preferredAFMPackID: selectedAFMPackID,
+                    memoryRecall: memoryRecall
+                )
             )
 
             guard !Task.isCancelled else {
@@ -571,6 +618,39 @@ final class BrowserViewModel: ObservableObject {
     private func appendCopilotEvent(runID: UUID, kind: CopilotRunEventKind, message: String) {
         guard let index = copilotRuns.firstIndex(where: { $0.id == runID }) else { return }
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
+    }
+
+    private func isCopilotRunActive(_ id: UUID) -> Bool {
+        guard let run = copilotRuns.first(where: { $0.id == id }) else { return false }
+        return run.status == .queued || run.status == .running
+    }
+
+    private func copilotEventKind(for recall: OpenMindMemoryRecallResult) -> CopilotRunEventKind {
+        switch recall.decision.status {
+        case .allowed:
+            return .memoryAccessCompleted
+        case .denied:
+            return .memoryAccessDenied
+        case .stepUpRequired:
+            return .memoryStepUpRequired
+        case .unavailable:
+            return .memoryUnavailable
+        }
+    }
+
+    private func copilotMemoryMessage(for recall: OpenMindMemoryRecallResult) -> String {
+        switch recall.decision.status {
+        case .allowed:
+            return recall.memories.isEmpty
+                ? "OpenMind allowed recall but returned no matching memories."
+                : "OpenMind approved \(recall.memories.count) memory item\(recall.memories.count == 1 ? "" : "s")."
+        case .denied:
+            return "OpenMind denied memory recall: \(recall.decision.reason)"
+        case .stepUpRequired:
+            return "OpenMind requires step-up before memory recall: \(recall.decision.stepUpPrompt ?? recall.decision.reason)"
+        case .unavailable:
+            return "OpenMind memory unavailable: \(recall.decision.reason)"
+        }
     }
 
     private func finishCopilotRun(

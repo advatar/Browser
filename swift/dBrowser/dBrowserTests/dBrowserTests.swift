@@ -343,6 +343,176 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func browserViewModelSurfacesAFMServicePacks() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "surface") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "maintainer": "core",
+                            "version": "0.1.0",
+                            "checksum": "0xabc"
+                        ]
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+
+        await model.refreshRuntimeBridgeStatus()
+
+        #expect(model.afmServiceSnapshot.allServicesAvailable)
+        #expect(model.availableAFMPacks.first?.id == "afm://demo-writer")
+        #expect(model.availableAFMPacks.first?.maintainer == "core")
+
+        model.selectAFMPack("afm://demo-writer")
+        #expect(model.selectedAFMPackID == "afm://demo-writer")
+    }
+
+    @MainActor
+    @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
+        let capturedRequests = JSONRequestCapture()
+        let serviceHarness = Self.makeAFMServiceSession(key: "forward") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+            capturedRequests.capture(request)
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-42",
+                    "status": "queued"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+        let snapshot = PageSnapshot(
+            urlString: "https://example.com",
+            title: "Example",
+            visibleText: "Service-backed context",
+            headings: [],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 0
+        )
+        let memoryRecall = OpenMindMemoryRecallResult(
+            decision: OpenMindAccessDecision(
+                status: .allowed,
+                allowedScopes: ["profile"],
+                reason: "allowed",
+                redactionCount: 0,
+                stepUpPrompt: nil
+            ),
+            memories: [
+                OpenMindMemoryRecord(
+                    id: "mem-1",
+                    summary: "Prefers concise summaries",
+                    source: "test",
+                    sensitivity: "normal",
+                    evidenceURLString: nil
+                )
+            ],
+            notices: []
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(
+                prompt: "Summarize",
+                pageURLString: "https://example.com",
+                pageSnapshot: snapshot,
+                preferredAFMPackID: "afm://demo-writer",
+                memoryRecall: memoryRecall
+            )
+        )
+
+        let routeBody = capturedRequests.body(for: "/route")
+        let jobBody = capturedRequests.body(for: "/jobs")
+        let jobPayload = jobBody?["payload"] as? [String: Any]
+
+        #expect(result.mode == .service)
+        #expect(result.summary.contains("OpenMind approved 1 governed memory item"))
+        #expect(routeBody?["preferredPackID"] as? String == "afm://demo-writer")
+        #expect(routeBody?["pageSnapshotCommitment"] as? String != nil)
+        #expect(routeBody?["memoryContextIDs"] as? [String] == ["mem-1"])
+        #expect(jobPayload?["preferredPackID"] as? String == "afm://demo-writer")
+        #expect(jobPayload?["memoryContextIDs"] as? [String] == ["mem-1"])
+    }
+
+    @MainActor
     @Test func runtimeBridgeFallsBackWhenAFMServicesAreOffline() async {
         let serviceHarness = Self.makeAFMServiceSession(key: "offline") { request in
             Self.jsonResponse(for: request, status: 503, body: ["ok": false])
@@ -633,6 +803,192 @@ struct dBrowserTests {
         #expect(estimated.isEstimated)
     }
 
+    @Test func openMindMemoryClientRecallsAllowedContextAndWriteback() async {
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "memory") { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/mcp/capabilities" {
+                return Self.jsonResponse(for: request, body: [
+                    "available": true,
+                    "capabilities": ["mind.search_memories", "mind.add_memory"],
+                    "posture": "normal",
+                    "message": "ready"
+                ])
+            }
+
+            if path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "allowed",
+                    "allowedScopes": ["profile"],
+                    "reason": "allowed for test",
+                    "redactionCount": 1
+                ])
+            }
+
+            if path == "/mcp/tools/mind.search_memories" {
+                return Self.jsonResponse(for: request, body: [
+                    "memories": [
+                        [
+                            "id": "mem-1",
+                            "summary": "User prefers short implementation summaries.",
+                            "source": "BrIAn",
+                            "sensitivity": "normal"
+                        ]
+                    ],
+                    "notices": ["one item redacted"]
+                ])
+            }
+
+            if path == "/mcp/tools/mind.add_memory" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "recorded",
+                    "revisionID": "rev-1",
+                    "message": "recorded"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = OpenMindMemoryClient(
+            configuration: memoryHarness.configuration,
+            session: memoryHarness.session
+        )
+
+        let capabilities = await client.refreshCapabilities()
+        #expect(capabilities.status == .available)
+        #expect(capabilities.capabilities.contains("mind.search_memories"))
+
+        let recall = await client.recall(
+            prompt: "Summarize this page",
+            pageURLString: "https://example.com",
+            pageSnapshot: nil
+        )
+        #expect(recall.decision.status == .allowed)
+        #expect(recall.memories.first?.id == "mem-1")
+        #expect(recall.notices == ["one item redacted"])
+
+        let outcome = await client.writeback(
+            OpenMindWritebackRequest(
+                runID: UUID(),
+                prompt: "Summarize this page",
+                pageURLString: "https://example.com",
+                summary: "Completed test run.",
+                source: "unit-test",
+                snapshotCommitment: nil,
+                idempotencyKey: "test-key"
+            )
+        )
+        #expect(outcome.status == .recorded)
+        #expect(outcome.revisionID == "rev-1")
+    }
+
+    @Test func openMindMemoryClientHandlesDeniedStepUpAndUnavailableStates() async {
+        let deniedHarness = Self.makeOpenMindMemorySession(key: "denied") { request in
+            if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "denied",
+                    "allowedScopes": [],
+                    "reason": "private memory blocked",
+                    "redactionCount": 0
+                ])
+            }
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let stepHarness = Self.makeOpenMindMemorySession(key: "step") { request in
+            if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "stepUpRequired",
+                    "allowedScopes": [],
+                    "reason": "grant required",
+                    "redactionCount": 0,
+                    "stepUpPrompt": "Confirm memory access"
+                ])
+            }
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let unavailableHarness = Self.makeOpenMindMemorySession(key: "down") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["error": "offline"])
+        }
+
+        let denied = await OpenMindMemoryClient(
+            configuration: deniedHarness.configuration,
+            session: deniedHarness.session
+        ).recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
+        let stepUp = await OpenMindMemoryClient(
+            configuration: stepHarness.configuration,
+            session: stepHarness.session
+        ).recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
+        let unavailable = await OpenMindMemoryClient(
+            configuration: unavailableHarness.configuration,
+            session: unavailableHarness.session
+        ).recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
+
+        #expect(denied.decision.status == .denied)
+        #expect(denied.memories.isEmpty)
+        #expect(stepUp.decision.status == .stepUpRequired)
+        #expect(stepUp.decision.stepUpPrompt == "Confirm memory access")
+        #expect(unavailable.decision.status == .unavailable)
+    }
+
+    @MainActor
+    @Test func copilotRequestsOpenMindMemoryBeforeModelRun() async {
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "copilotmemory") { request in
+            if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "allowed",
+                    "allowedScopes": ["profile"],
+                    "reason": "allowed",
+                    "redactionCount": 0
+                ])
+            }
+
+            if request.url?.path == "/mcp/tools/mind.search_memories" {
+                return Self.jsonResponse(for: request, body: [
+                    "memories": [
+                        [
+                            "id": "mem-1",
+                            "summary": "Use service-backed context when available.",
+                            "source": "BrIAn",
+                            "sensitivity": "normal"
+                        ]
+                    ],
+                    "notices": []
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let offlineServices = Self.makeAFMServiceSession(key: "memoryoffline") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: offlineServices.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineServices.configuration,
+                session: offlineServices.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(
+            runtimeBridge: bridge,
+            openMindMemoryClient: OpenMindMemoryClient(
+                configuration: memoryHarness.configuration,
+                session: memoryHarness.session
+            )
+        )
+        model.navigate("https://example.com")
+
+        guard let runID = model.runCopilot(prompt: "Summarize with memory") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+
+        #expect(completed)
+        #expect(model.latestOpenMindRecall?.memories.first?.id == "mem-1")
+        #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessStarted } == true)
+        #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessCompleted } == true)
+    }
+
     @MainActor
     @Test func panelSelectionShowsPanelsAndNavigationReturnsToBrowser() {
         let model = BrowserViewModel()
@@ -674,16 +1030,34 @@ struct dBrowserTests {
     }
 
     @MainActor
+    private func waitForCopilotRun(
+        in model: BrowserViewModel,
+        _ id: UUID,
+        status: CopilotRunStatus
+    ) async -> Bool {
+        for _ in 0..<40 {
+            if model.copilotRuns.first(where: { $0.id == id })?.status == status {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+
+    @MainActor
     private func makeIsolatedBrowserViewModel(
-        initialURL: String = BrowserURLResolver.homeURLString,
+        initialURL: String = "about:home",
+        runtimeBridge: MobileRuntimeBridge? = nil,
         workflowStore: CopilotWorkflowStore = .ephemeral(),
-        smartHistoryStore: SmartHistoryStore = .ephemeral()
+        smartHistoryStore: SmartHistoryStore = .ephemeral(),
+        openMindMemoryClient: OpenMindMemoryClient? = nil
     ) -> BrowserViewModel {
         BrowserViewModel(
             initialURL: initialURL,
-            runtimeBridge: MobileRuntimeBridge(),
+            runtimeBridge: runtimeBridge ?? MobileRuntimeBridge(),
             copilotWorkflowStore: workflowStore,
-            smartHistoryStore: smartHistoryStore
+            smartHistoryStore: smartHistoryStore,
+            openMindMemoryClient: openMindMemoryClient
         )
     }
 
@@ -702,6 +1076,19 @@ struct dBrowserTests {
         return (endpoints, URLSession(configuration: configuration))
     }
 
+    private static func makeOpenMindMemorySession(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: OpenMindMemoryEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = OpenMindMemoryEndpointConfiguration(
+            httpBaseURL: URL(string: "http://\(key)-memory.test:4840")!
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func jsonResponse(
         for request: URLRequest,
         status: Int = 200,
@@ -717,6 +1104,44 @@ struct dBrowserTests {
         return (response, data)
     }
 
+}
+
+private final class JSONRequestCapture {
+    private let lock = NSLock()
+    private var bodiesByPath: [String: [String: Any]] = [:]
+
+    func capture(_ request: URLRequest) {
+        guard let path = request.url?.path, let data = request.httpBody ?? Self.readBodyStream(request.httpBodyStream) else { return }
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        lock.lock()
+        bodiesByPath[path] = object
+        lock.unlock()
+    }
+
+    func body(for path: String) -> [String: Any]? {
+        lock.lock()
+        let body = bodiesByPath[path]
+        lock.unlock()
+        return body
+    }
+
+    private static func readBodyStream(_ stream: InputStream?) -> Data? {
+        guard let stream else { return nil }
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count > 0 {
+                data.append(buffer, count: count)
+            } else {
+                break
+            }
+        }
+        return data.isEmpty ? nil : data
+    }
 }
 
 private final class AFMServiceMockURLProtocol: URLProtocol {
