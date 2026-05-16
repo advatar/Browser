@@ -19,6 +19,25 @@
 
 ## Active Task
 
+## Swift OpenMind MCP Transport Negotiation Slice
+
+- [x] Triage remaining OpenMind/BrIAn transport negotiation gap from #70.
+- [x] Create tracker issue for OpenMind MCP transport negotiation (#87).
+- [x] Add Swift OpenMind transport preference/configuration models.
+- [x] Add negotiated transport metadata to OpenMind runtime/capability state.
+- [x] Negotiate direct HTTP versus JSON-RPC HTTP bridge capabilities.
+- [x] Add JSON-RPC tool/resource wrappers while preserving direct HTTP compatibility.
+- [x] Normalize JSON-RPC structuredContent responses into existing typed models.
+- [x] Add focused Swift unit tests for negotiation, recall, resources, and writeback.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-openmind-transport-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-openmind-transport-tests -only-testing:dBrowserTests` passed.
+
 ## Swift AFMarket Proof And Settlement Verification Slice
 
 - [x] Triage remaining AFMarket proof/settlement verification gap from #69.

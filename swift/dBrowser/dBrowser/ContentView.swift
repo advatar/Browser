@@ -1176,6 +1176,11 @@ private struct OpenMindMemoryPanelView: View {
             Text(state.message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let transport = state.transport {
+                Text("Transport: \(transport.displaySummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if !state.capabilities.isEmpty {
                 Text(state.capabilities.joined(separator: ", "))
                     .font(.caption.monospaced())

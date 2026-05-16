@@ -1977,6 +1977,7 @@ struct dBrowserTests {
         let capabilities = await client.refreshCapabilities()
         #expect(capabilities.status == .available)
         #expect(capabilities.capabilities.contains("mind.search_memories"))
+        #expect(capabilities.transport?.kind == .directHTTP)
 
         let recall = await client.recall(
             prompt: "Summarize this page",
@@ -2137,6 +2138,7 @@ struct dBrowserTests {
         let postureBody = capturedRequests.body(for: "/mcp/tools/posture.get")
 
         #expect(state.capability.status == .available)
+        #expect(state.capability.transport?.kind == .directHTTP)
         #expect(state.continuity.version == "omcont/0.1")
         #expect(state.continuity.pendingStepUps == 2)
         #expect(state.continuity.notices == ["review one peer grant"])
@@ -2144,6 +2146,231 @@ struct dBrowserTests {
         #expect(state.posture.allowsMemoryWriteback == false)
         #expect(state.posture.requiresExplicitConfirmation)
         #expect(postureBody?["clientID"] as? String == "dBrowser.swift")
+    }
+
+    @MainActor @Test func openMindMemoryClientNegotiatesJSONRPCBridgeAndRecallsMemory() async {
+        let capturedRPC = JSONRPCRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "memoryrpc") { request in
+            guard request.url?.path == "/mcp" else {
+                return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+            }
+
+            let payload = capturedRPC.capture(request) ?? [:]
+            let method = payload["method"] as? String
+            let id = payload["id"] ?? 1
+
+            if method == "initialize" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "protocolVersion": "2025-11-25",
+                        "serverInfo": [
+                            "name": "openmind-test",
+                            "version": "1.0"
+                        ],
+                        "capabilities": [
+                            "tools": [:] as [String: Any],
+                            "resources": [:] as [String: Any]
+                        ]
+                    ]
+                ])
+            }
+
+            if method == "notifications/initialized" {
+                return Self.emptyResponse(for: request)
+            }
+
+            if method == "tools/list" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "tools": [
+                            ["name": "gateway.evaluate_access_intent"],
+                            ["name": "mind.retrieve_evidence_bundle"],
+                            ["name": "mind.search_memories"],
+                            ["name": "mind.add_memory"],
+                            ["name": "posture.get"]
+                        ]
+                    ]
+                ])
+            }
+
+            if method == "resources/list" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "resources": [
+                            ["uri": "mind://continuity"]
+                        ]
+                    ]
+                ])
+            }
+
+            if method == "resources/read" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "contents": [
+                            [
+                                "uri": "mind://continuity",
+                                "mimeType": "application/json",
+                                "text": Self.jsonString([
+                                    "version": "omcont/0.1",
+                                    "mode": "normal",
+                                    "summary": "Bridge continuity ready",
+                                    "pendingStepUps": 1,
+                                    "notices": ["bridge resource"]
+                                ])
+                            ]
+                        ]
+                    ]
+                ])
+            }
+
+            guard method == "tools/call",
+                  let params = payload["params"] as? [String: Any],
+                  let toolName = params["name"] as? String else {
+                return Self.jsonResponse(for: request, status: 400, body: ["error": "unexpected JSON-RPC request"])
+            }
+
+            switch toolName {
+            case "posture.get":
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "mode": "normal",
+                            "allowsMemoryWriteback": true,
+                            "requiresExplicitConfirmation": false,
+                            "summary": "Bridge posture"
+                        ],
+                        "isError": false
+                    ]
+                ])
+            case "gateway.evaluate_access_intent":
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "status": "allow",
+                            "allowedScopes": ["mind.read.private"],
+                            "reason": "bridge allowed",
+                            "redactionCount": 0
+                        ],
+                        "isError": false
+                    ]
+                ])
+            case "mind.retrieve_evidence_bundle":
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "bundleId": "evb-rpc",
+                            "profile": "OMSEM-0.1",
+                            "items": [
+                                [
+                                    "kind": "memory",
+                                    "id": "mem-rpc-evidence",
+                                    "summary": "RPC evidence memory",
+                                    "evidenceRefs": ["event-rpc"],
+                                    "sensitivity": "normal"
+                                ]
+                            ],
+                            "governanceNotes": ["rpc governed"]
+                        ],
+                        "isError": false
+                    ]
+                ])
+            case "mind.search_memories":
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "results": [
+                                [
+                                    "id": "mem-rpc",
+                                    "summary": "RPC bridge memory.",
+                                    "source": "BrIAn",
+                                    "sensitivity": "normal"
+                                ]
+                            ],
+                            "notices": ["rpc notice"]
+                        ],
+                        "isError": false
+                    ]
+                ])
+            case "mind.add_memory":
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "id": "rev-rpc"
+                        ],
+                        "isError": false
+                    ]
+                ])
+            default:
+                return Self.jsonResponse(for: request, status: 404, body: ["error": "unknown tool"])
+            }
+        }
+        let client = OpenMindMemoryClient(
+            configuration: memoryHarness.configuration,
+            session: memoryHarness.session
+        )
+
+        let state = await client.refreshRuntimeState()
+        #expect(state.capability.status == .available)
+        #expect(state.capability.transport?.kind == .jsonRPCHTTPBridge)
+        #expect(state.capability.transport?.serverName == "openmind-test")
+        #expect(state.capability.capabilities.contains("mind.search_memories"))
+        #expect(state.capability.capabilities.contains("mind://continuity"))
+        #expect(state.continuity.version == "omcont/0.1")
+        #expect(state.continuity.pendingStepUps == 1)
+        #expect(state.posture.mode == "normal")
+
+        let recall = await client.recall(
+            prompt: "Summarize via bridge",
+            pageURLString: "https://example.com/path",
+            pageSnapshot: nil
+        )
+        #expect(recall.decision.status == .allowed)
+        #expect(recall.memories.first?.id == "mem-rpc")
+        #expect(recall.memories.contains { $0.id == "mem-rpc-evidence" })
+        #expect(recall.evidenceBundle?.bundleID == "evb-rpc")
+        #expect(recall.notices == ["rpc notice"])
+
+        let outcome = await client.writeback(
+            OpenMindWritebackRequest(
+                runID: UUID(),
+                prompt: "Summarize via bridge",
+                pageURLString: "https://example.com/path",
+                summary: "Completed RPC bridge test.",
+                source: "unit-test",
+                snapshotCommitment: "fnv1a64:abc",
+                idempotencyKey: "rpc-key"
+            )
+        )
+        let accessArguments = capturedRPC.toolArguments(named: "gateway.evaluate_access_intent")
+        let addArguments = capturedRPC.toolArguments(named: "mind.add_memory")
+        let addSource = addArguments?["source"] as? [String: Any]
+
+        #expect(outcome.status == .recorded)
+        #expect(outcome.revisionID == "rev-rpc")
+        #expect(accessArguments?["operation"] as? String == "memory.search")
+        #expect((accessArguments?["requestedDomains"] as? [String]) == ["example.com"])
+        #expect(addArguments?["summary"] as? String == "Completed RPC bridge test.")
+        #expect(addArguments?["idempotencyKey"] as? String == "rpc-key")
+        #expect(addSource?["product"] as? String == "dBrowser.swift")
+        #expect(addSource?["clientSource"] as? String == "unit-test")
     }
 
     @MainActor
@@ -2612,6 +2839,24 @@ struct dBrowserTests {
         return (response, data)
     }
 
+    private static func emptyResponse(
+        for request: URLRequest,
+        status: Int = 204
+    ) -> (HTTPURLResponse, Data) {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: [:]
+        )!
+        return (response, Data())
+    }
+
+    private static func jsonString(_ body: Any) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: body)
+        return String(data: data, encoding: .utf8)!
+    }
+
 }
 
 private final class JSONRequestCapture {
@@ -2633,7 +2878,7 @@ private final class JSONRequestCapture {
         return body
     }
 
-    private static func readBodyStream(_ stream: InputStream?) -> Data? {
+    fileprivate static func readBodyStream(_ stream: InputStream?) -> Data? {
         guard let stream else { return nil }
         stream.open()
         defer { stream.close() }
@@ -2649,6 +2894,37 @@ private final class JSONRequestCapture {
             }
         }
         return data.isEmpty ? nil : data
+    }
+}
+
+private final class JSONRPCRequestCapture {
+    private let lock = NSLock()
+    private var bodies: [[String: Any]] = []
+
+    func capture(_ request: URLRequest) -> [String: Any]? {
+        guard let data = request.httpBody ?? JSONRequestCapture.readBodyStream(request.httpBodyStream),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        lock.lock()
+        bodies.append(object)
+        lock.unlock()
+        return object
+    }
+
+    func toolArguments(named name: String) -> [String: Any]? {
+        lock.lock()
+        let match = bodies.last { body in
+            guard body["method"] as? String == "tools/call",
+                  let params = body["params"] as? [String: Any] else {
+                return false
+            }
+            return params["name"] as? String == name
+        }
+        lock.unlock()
+
+        let params = match?["params"] as? [String: Any]
+        return params?["arguments"] as? [String: Any]
     }
 }
 
