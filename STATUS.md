@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift AFMarket V1 Registry And Route Slice
+
+- [x] Triage remaining AFMarket v1 compatibility gaps from #69.
+- [x] Create tracker issue for registry bundle and route lease metadata (#84).
+- [x] Add typed Swift AFMarket expert, bundle, route lease, and settlement metadata models.
+- [x] Extend AFMServicesClient snapshot with `/v1/experts` and `/v1/bundles` support plus local fallback.
+- [x] Extend AFMServicesClient route with `/v1/route` request metadata and local `/route` fallback.
+- [x] Surface route lease, reward, SLA, and chain metadata in Copilot/runtime status.
+- [x] Add focused Swift unit tests for v1 registry, routing, fallback, and Copilot summaries.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-afmarket-v1-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-afmarket-v1-tests -only-testing:dBrowserTests` passed.
+
 ## Swift OpenMind Evidence Bundle And Step-Up Slice
 
 - [x] Triage the remaining BrIAn/OpenMind evidence and step-up gaps from #70.

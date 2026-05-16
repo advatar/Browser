@@ -1096,6 +1096,9 @@ private struct AFMServicesPanelView: View {
             )
             .font(.caption)
             .foregroundStyle(snapshot.nodeAvailable ? Color.green : Color.secondary)
+            Text("Registry v1: \(snapshot.registryExperts.count) expert\(snapshot.registryExperts.count == 1 ? "" : "s"), \(snapshot.registryBundles.count) bundle\(snapshot.registryBundles.count == 1 ? "" : "s").")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if snapshot.availablePacks.isEmpty {
                 Text("No runner packs reported by router or registry.")
@@ -1107,7 +1110,7 @@ private struct AFMServicesPanelView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(pack.displayName)
                                 .font(.subheadline.weight(.semibold))
-                            Text([pack.id, pack.version, pack.status].compactMap { $0 }.joined(separator: " / "))
+                            Text([pack.id, pack.version, pack.modelID, pack.status].compactMap { $0 }.joined(separator: " / "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

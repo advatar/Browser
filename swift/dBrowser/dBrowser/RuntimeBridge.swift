@@ -329,7 +329,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 memoryContextIDs: memoryIDs
             )
             let selectedPackID = route.selection?.id ?? request.preferredAFMPackID
-            let selectedPack = route.selection?.displayName ?? request.preferredAFMPackID ?? "AFM router default"
+            let selectedPack = route.selection?.displayName
+                ?? route.primary.map { "AFMarket node \($0.nodeID)" }
+                ?? request.preferredAFMPackID
+                ?? "AFM router default"
             let job = try await afmServicesClient.enqueueCopilotJob(
                 prompt: adapterPrompt,
                 pageURLString: target,
@@ -339,12 +342,28 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 memoryContextIDs: memoryIDs
             )
             var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(conversationContext)\(memoryContext)"
+            if let routeRequest = route.request {
+                summary += " Route contract \(route.contract) used \(routeRequest.reward) \(routeRequest.rewardToken) on \(routeRequest.chainRef)."
+            }
+            if let primary = route.primary {
+                summary += " Lease \(primary.leaseID) assigned \(primary.nodeID)"
+                if let ttl = route.leaseTTLMS {
+                    summary += " for \(ttl) ms"
+                }
+                summary += "."
+            }
             var suggestions = [
-                "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
-                "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
+                route.primary.map { "AFMarket v1 primary lease \($0.leaseID) on \($0.nodeID)." } ?? "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
+                "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s"), \(snapshot.registryBundles.count) bundle\(snapshot.registryBundles.count == 1 ? "" : "s"), and \(snapshot.registryExperts.count) expert\(snapshot.registryExperts.count == 1 ? "" : "s") available to the Swift shell.",
                 request.preferredAFMPackID.map { "Copilot requested runner pack \($0)." } ?? "Router chose the runner pack.",
                 "Pipelines accepted job \(job.id) with status \(job.status)."
             ]
+            if let routeRequest = route.request {
+                suggestions.append("Route \(route.contract) used chain \(routeRequest.chainRef), reward \(routeRequest.reward) \(routeRequest.rewardToken), SLA \(routeRequest.sla.maxLatencyMS.map { "\($0) ms" } ?? "default").")
+            }
+            if !route.backups.isEmpty {
+                suggestions.append("AFMarket retained \(route.backups.count) backup lease\(route.backups.count == 1 ? "" : "s").")
+            }
             var installResult: AFMNodeInstallResult?
             var nodeTaskResult: AFMNodeTaskResult?
 
@@ -353,7 +372,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     let selectedPackSummary = snapshot.availablePacks.first { $0.id == selectedPackID }
                     let install = try await afmServicesClient.installPack(
                         packID: selectedPackID,
-                        checksum: selectedPackSummary?.checksum
+                        checksum: selectedPackSummary?.checksum,
+                        bundleURL: selectedPackSummary?.bundleURL
                     )
                     let nodeTask = try await afmServicesClient.dispatchTask(
                         prompt: adapterPrompt,

@@ -639,6 +639,207 @@ struct dBrowserTests {
         #expect(model.selectedAFMPackID == "afm://demo-writer")
     }
 
+    @Test func afmServicesClientLoadsV1RegistryExpertsAndBundles() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "v1registry") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: [
+                    "experts": [
+                        [
+                            "id": "exp-001",
+                            "name": "demo-afm",
+                            "payoutAddr": "0x000000000000000000000000000000000000dead",
+                            "nodePub": "node-public-key-000000000000000000000000000000",
+                            "capability": [0.12, 0.01, 0.75],
+                            "pricePer1k": 2.5,
+                            "latencyP50": 320,
+                            "tags": ["afm", "legal"],
+                            "baseModel": "apple.afm.demo",
+                            "coverage": 0.85,
+                            "reputation": 0.72,
+                            "stake": 250.0,
+                            "attestation": "cbor+base64",
+                            "ingestUrl": "http://localhost:8686",
+                            "profileSig": "hex-hmac"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: [
+                    "bundles": [
+                        [
+                            "id": "bundle-001",
+                            "runnerId": "afm://demo-writer",
+                            "version": "1.0.0",
+                            "capability": [0.12, 0.01, 0.75],
+                            "hashes": [
+                                "manifest": "sha256:manifest",
+                                "bundle": "sha256:bundle"
+                            ],
+                            "attestation": ["secure-enclave"],
+                            "bundleUrl": "https://example.com/demo-writer.tar",
+                            "runner_root": "0xrunnerroot",
+                            "bundleSig": "0xsig"
+                        ]
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = AFMServicesClient(
+            configuration: serviceHarness.configuration,
+            session: serviceHarness.session
+        )
+
+        let snapshot = await client.snapshot()
+        let bundlePack = snapshot.availablePacks.first { $0.id == "afm://demo-writer" }
+
+        #expect(snapshot.registryExperts.first?.id == "exp-001")
+        #expect(snapshot.registryExperts.first?.pricePer1K == 2.5)
+        #expect(snapshot.registryBundles.first?.runnerID == "afm://demo-writer")
+        #expect(snapshot.registryBundles.first?.hashes.bundle == "sha256:bundle")
+        #expect(bundlePack?.checksum == "sha256:bundle")
+        #expect(bundlePack?.bundleURL == "https://example.com/demo-writer.tar")
+    }
+
+    @Test func afmServicesClientRoutesThroughV1ContractAndFallsBackToLocal() async {
+        let capturedV1Requests = JSONRequestCapture()
+        let v1Harness = Self.makeAFMServiceSession(key: "v1route") { request in
+            let path = request.url?.path ?? ""
+            capturedV1Requests.capture(request)
+
+            if path == "/v1/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "primary": [
+                        "node_id": "exp-001",
+                        "lease_id": "lease-001",
+                        "verifier": "attestation-ref",
+                        "payout_address": "0x000000000000000000000000000000000000dead",
+                        "dispatch": [
+                            "status": "ok",
+                            "http_status": 202
+                        ]
+                    ],
+                    "backups": [
+                        [
+                            "node_id": "exp-002",
+                            "lease_id": "lease-002"
+                        ]
+                    ],
+                    "lease_ttl_ms": 15000,
+                    "explain": [
+                        [
+                            "expert_id": "exp-001",
+                            "score": 0.81,
+                            "vrf_ratio": 0.12,
+                            "rendezvous": 0.34
+                        ]
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let v1Client = AFMServicesClient(
+            configuration: v1Harness.configuration,
+            session: v1Harness.session
+        )
+
+        var v1Route: AFMRouteResult?
+        do {
+            v1Route = try await v1Client.route(
+                skill: "summarize",
+                prompt: "Summarize v1 route",
+                pageURLString: "https://example.com",
+                pageSnapshotCommitment: "snapshot-commitment",
+                memoryContextIDs: ["mem-1"]
+            )
+        } catch {
+            Issue.record("Expected v1 route, got \(error)")
+            v1Route = nil
+        }
+        let v1Body = capturedV1Requests.body(for: "/v1/route")
+        let hpkeInfo = v1Body?["hpke_info"] as? [String: Any]
+        let sla = v1Body?["sla"] as? [String: Any]
+
+        #expect(v1Route?.contract == "afmarket-v1")
+        #expect(v1Route?.primary?.leaseID == "lease-001")
+        #expect(v1Route?.backups.first?.nodeID == "exp-002")
+        #expect(v1Route?.request?.chainRef == "base-sepolia")
+        #expect(v1Body?["task_id"] as? String != nil)
+        #expect(v1Body?["input_commitment"] as? String == "snapshot-commitment")
+        #expect(v1Body?["chain_ref"] as? String == "base-sepolia")
+        #expect((v1Body?["task_tags"] as? [String])?.contains("summarize") == true)
+        #expect(sla?["max_latency_ms"] as? Int == 12_000)
+        #expect(hpkeInfo?["version"] as? String == "X25519-HKDF-SHA256/CHACHA20POLY1305-v1")
+
+        let capturedFallbackRequests = JSONRequestCapture()
+        let fallbackHarness = Self.makeAFMServiceSession(key: "v1fallback") { request in
+            let path = request.url?.path ?? ""
+            capturedFallbackRequests.capture(request)
+
+            if path == "/v1/route" {
+                return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let fallbackClient = AFMServicesClient(
+            configuration: fallbackHarness.configuration,
+            session: fallbackHarness.session
+        )
+
+        var fallbackRoute: AFMRouteResult?
+        do {
+            fallbackRoute = try await fallbackClient.route(
+                skill: "summarize",
+                prompt: "Summarize local route",
+                pageURLString: "https://example.com",
+                preferredPackID: "afm://demo-writer",
+                pageSnapshotCommitment: "snapshot-commitment"
+            )
+        } catch {
+            Issue.record("Expected fallback route, got \(error)")
+            fallbackRoute = nil
+        }
+        let fallbackBody = capturedFallbackRequests.body(for: "/route")
+
+        #expect(capturedFallbackRequests.body(for: "/v1/route") != nil)
+        #expect(fallbackRoute?.contract == "local")
+        #expect(fallbackRoute?.selection?.id == "afm://demo-writer")
+        #expect(fallbackRoute?.request?.inputCommitment == "snapshot-commitment")
+        #expect(fallbackBody?["preferredPackID"] as? String == "afm://demo-writer")
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -750,6 +951,100 @@ struct dBrowserTests {
         #expect(routeBody?["memoryContextIDs"] as? [String] == ["mem-1"])
         #expect(jobPayload?["preferredPackID"] as? String == "afm://demo-writer")
         #expect(jobPayload?["memoryContextIDs"] as? [String] == ["mem-1"])
+    }
+
+    @MainActor
+    @Test func runtimeBridgeSurfacesAFMarketV1RouteLeaseMetadata() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "runtimev1route") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": port != 4840])
+            }
+
+            if path == "/packs" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: [
+                    "experts": [
+                        [
+                            "id": "exp-001",
+                            "name": "demo-afm",
+                            "nodePub": "node-public-key-000000000000000000000000000000",
+                            "capability": [0.12, 0.01, 0.75],
+                            "pricePer1k": 2.5,
+                            "latencyP50": 320,
+                            "tags": ["afm"],
+                            "baseModel": "apple.afm.demo"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: [
+                    "bundles": [
+                        [
+                            "runnerId": "afm://demo-writer",
+                            "version": "1.0.0",
+                            "capability": [0.12, 0.01, 0.75],
+                            "hashes": ["manifest": "sha256:manifest"]
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "primary": [
+                        "node_id": "exp-001",
+                        "lease_id": "lease-v1",
+                        "verifier": "attestation-ref",
+                        "payout_address": "0x000000000000000000000000000000000000dead"
+                    ],
+                    "backups": [],
+                    "lease_ttl_ms": 15000,
+                    "explain": [
+                        [
+                            "expert_id": "exp-001",
+                            "score": 0.81
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-v1",
+                    "status": "queued"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(prompt: "Summarize through AFMarket v1", pageURLString: "https://example.com")
+        )
+
+        #expect(result.mode == .service)
+        #expect(result.summary.contains("lease-v1"))
+        #expect(result.summary.contains("base-sepolia"))
+        #expect(result.suggestions.contains { $0.contains("AFMarket v1 primary lease lease-v1") })
+        #expect(result.suggestions.contains { $0.contains("Route afmarket-v1 used chain base-sepolia") })
+        #expect(result.suggestions.contains { $0.contains("1 bundle") && $0.contains("1 expert") })
+        #expect(result.suggestions.contains { $0.contains("Node agent unavailable") })
     }
 
     @MainActor
