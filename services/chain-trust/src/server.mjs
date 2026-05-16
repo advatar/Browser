@@ -126,6 +126,108 @@ const evmFixtureProof = {
   source: mode
 };
 
+const avalancheNetworks = {
+  'avalanche-c': {
+    network: 'avalanche-c',
+    chain_ref: 'avalanche-c',
+    chain_id: 43114,
+    subnet_id: '11111111111111111111111111111111LpoYY',
+    vm_id: 'mgj786NP7uDwBCcq6NQ6wW4SnoR14HVoE8Bv7E4s34wToZr3N',
+    display_name: 'Avalanche C-Chain',
+    finality_model: 'snowman-accepted',
+    sync_state: 'proof_checked',
+    limitations: ['Fixture-backed accepted-finality checks do not yet replace a production AvalancheGo light client.']
+  },
+  'avalanche-fuji-c': {
+    network: 'avalanche-fuji-c',
+    chain_ref: 'avalanche-fuji-c',
+    chain_id: 43113,
+    subnet_id: '11111111111111111111111111111111LpoYY',
+    vm_id: 'mgj786NP7uDwBCcq6NQ6wW4SnoR14HVoE8Bv7E4s34wToZr3N',
+    display_name: 'Avalanche Fuji C-Chain',
+    finality_model: 'snowman-accepted',
+    sync_state: 'rpc_fallback',
+    limitations: ['Fuji is modeled for routing and fallback; production local verification is not enabled.']
+  }
+};
+const avalancheValidatorA = 'nodeid-avalanche-fixture-a';
+const avalancheValidatorB = 'nodeid-avalanche-fixture-b';
+const avalancheValidatorC = 'nodeid-avalanche-fixture-c';
+const avalancheFixtureValidators = [
+  { node_id: avalancheValidatorA, weight: 50 },
+  { node_id: avalancheValidatorB, weight: 30 },
+  { node_id: avalancheValidatorC, weight: 20 }
+];
+const avalancheFixtureValidatorSetHash = avalancheValidatorSetHash(avalancheFixtureValidators);
+const avalancheFixtureSubject = '0x2222222222222222222222222222222222222222';
+const avalancheFixtureLeaf = evmFixtureLeafHash('account', avalancheFixtureSubject, '', '0x01');
+const avalancheFixtureReceiptLeaf = evmFixtureLeafHash('receipt', '0xavalanche-tx-fixture', '', '0x01');
+const avalancheFixtureAcceptedBlockHash = sha256HexFromString('avalanche-c|50000000|accepted-block');
+const avalancheFixtureAcceptedBlock = {
+  network: 'avalanche-c',
+  chain_ref: 'avalanche-c',
+  chain_id: 43114,
+  subnet_id: avalancheNetworks['avalanche-c'].subnet_id,
+  vm_id: avalancheNetworks['avalanche-c'].vm_id,
+  height: 50000000,
+  block_hash: avalancheFixtureAcceptedBlockHash,
+  parent_hash: sha256HexFromString('avalanche-c|49999999|accepted-block'),
+  state_root: avalancheFixtureLeaf,
+  receipts_root: avalancheFixtureReceiptLeaf,
+  timestamp: 1710000000,
+  accepted: true,
+  source: mode
+};
+const avalancheFixtureValidatorSet = {
+  network: 'avalanche-c',
+  chain_ref: 'avalanche-c',
+  chain_id: 43114,
+  set_id: 9001,
+  validators: avalancheFixtureValidators,
+  hash: avalancheFixtureValidatorSetHash,
+  source: mode
+};
+const avalancheFixtureFinalityEvidence = {
+  set_id: avalancheFixtureValidatorSet.set_id,
+  target_hash: avalancheFixtureAcceptedBlock.block_hash,
+  target_height: avalancheFixtureAcceptedBlock.height,
+  signatures: [
+    { node_id: avalancheValidatorA, block_hash: avalancheFixtureAcceptedBlock.block_hash, signed: true, signature: 'fixture-snowman-a' },
+    { node_id: avalancheValidatorB, block_hash: avalancheFixtureAcceptedBlock.block_hash, signed: true, signature: 'fixture-snowman-b' },
+    { node_id: avalancheValidatorC, block_hash: avalancheFixtureAcceptedBlock.block_hash, signed: false, signature: null }
+  ],
+  source: mode
+};
+const avalancheFixtureEvmProofBundle = {
+  header: {
+    chain: 'avalanche-c',
+    chain_ref: 'avalanche-c',
+    number: avalancheFixtureAcceptedBlock.height,
+    hash: avalancheFixtureAcceptedBlock.block_hash,
+    parent_hash: avalancheFixtureAcceptedBlock.parent_hash,
+    state_root: avalancheFixtureAcceptedBlock.state_root,
+    receipts_root: avalancheFixtureAcceptedBlock.receipts_root,
+    transactions_root: sha256HexFromString('avalanche-c|50000000|transactions'),
+    timestamp: avalancheFixtureAcceptedBlock.timestamp,
+    finalized: false,
+    source: mode
+  },
+  proof: {
+    proof_id: 'avalanche-fixture-account',
+    kind: 'account',
+    chain: 'avalanche-c',
+    chain_ref: 'avalanche-c',
+    subject: avalancheFixtureSubject,
+    expected_value: '0x01',
+    block_hash: avalancheFixtureAcceptedBlock.block_hash,
+    block_number: avalancheFixtureAcceptedBlock.height,
+    expected_root: avalancheFixtureAcceptedBlock.state_root,
+    leaf_hash: avalancheFixtureLeaf,
+    witnesses: [],
+    source: mode
+  }
+};
+
 const solanaClusters = {
   'mainnet-beta': {
     cluster: 'mainnet-beta',
@@ -388,6 +490,7 @@ if (args.has('--snapshot')) {
     service: '@browser/chain-trust-service',
     bitcoin: bitcoinStatus,
     evm: evmStatusFor('ethereum-mainnet'),
+    avalanche: avalancheStatusFor('avalanche-c'),
     solana: solanaStatusFor('mainnet-beta'),
     cosmos: cosmosStatusFor('cosmoshub-4'),
     substrate: substrateStatusFor('polkadot')
@@ -398,6 +501,7 @@ if (args.has('--snapshot')) {
 if (args.has('--lint')) {
   assertGenesisFixture();
   assertEvmFixture();
+  assertAvalancheFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -408,6 +512,7 @@ if (args.has('--lint')) {
 if (args.has('--self-test')) {
   assertGenesisFixture();
   assertEvmFixture();
+  assertAvalancheFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -434,6 +539,18 @@ if (args.has('--self-test')) {
 
   if (!evmResult.verified || evmResult.state !== 'synced') {
     console.error('[chain-trust] EVM self-test failed:', evmResult.summary);
+    process.exit(1);
+  }
+
+  const avalancheResult = verifyAvalancheState({
+    accepted_block: avalancheFixtureAcceptedBlock,
+    validator_set: avalancheFixtureValidatorSet,
+    finality_evidence: avalancheFixtureFinalityEvidence,
+    evm_proof: avalancheFixtureEvmProofBundle
+  });
+
+  if (!avalancheResult.verified || avalancheResult.state !== 'proof_checked') {
+    console.error('[chain-trust] Avalanche self-test failed:', avalancheResult.summary);
     process.exit(1);
   }
 
@@ -499,6 +616,10 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, evmStatusFor(url.searchParams.get('chain')));
   }
 
+  if (req.method === 'GET' && (url.pathname === '/v1/avalanche/status' || url.pathname === '/avalanche/status')) {
+    return sendJson(res, 200, avalancheStatusFor(url.searchParams.get('network')));
+  }
+
   if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
     return sendJson(res, 200, solanaStatusFor(url.searchParams.get('cluster')));
   }
@@ -540,6 +661,23 @@ const server = http.createServer(async (req, res) => {
         chain_ref: null,
         block_hash: null,
         block_number: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/avalanche/verify-state' || url.pathname === '/avalanche/verify-state')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifyAvalancheState(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        block_number: null,
+        block_hash: null,
+        proof_id: null,
         summary: String(err.message ?? err)
       });
     }
@@ -635,6 +773,41 @@ function evmStatusFor(requestedChain) {
     [checkpointKey]: header,
     peer_count: 0,
     proof_source: 'fixture-local-merkle',
+    mode
+  };
+}
+
+function avalancheStatusFor(requestedNetwork) {
+  const network = resolveAvalancheNetwork(requestedNetwork);
+  const acceptedBlock = {
+    ...avalancheFixtureAcceptedBlock,
+    network: network.network,
+    chain_ref: network.chain_ref,
+    chain_id: network.chain_id,
+    subnet_id: network.subnet_id,
+    vm_id: network.vm_id,
+    accepted: network.sync_state !== 'rpc_fallback'
+  };
+  const validatorSet = {
+    ...avalancheFixtureValidatorSet,
+    network: network.network,
+    chain_ref: network.chain_ref,
+    chain_id: network.chain_id
+  };
+  return {
+    ok: true,
+    service_available: network.sync_state !== 'rpc_fallback',
+    network: network.network,
+    chain_ref: network.chain_ref,
+    chain_id: network.chain_id,
+    sync_state: network.sync_state,
+    source: mode,
+    finality_model: network.finality_model,
+    accepted_block: acceptedBlock,
+    validator_set: validatorSet,
+    peer_count: 0,
+    proof_source: 'fixture-snowman-evm-proof',
+    limitations: network.limitations,
     mode
   };
 }
@@ -776,6 +949,90 @@ function verifyEvmProof(payload) {
     block_hash: headerHash,
     block_number: Number.isFinite(headerNumber) ? headerNumber : null,
     summary: `EVM ${kind} fixture proof checked for ${chainRef} block ${Number.isFinite(headerNumber) ? headerNumber : 'unknown'}.`
+  };
+}
+
+function verifyAvalancheState(payload) {
+  const acceptedBlock = requireObject(payload.accepted_block ?? payload.acceptedBlock, 'accepted_block');
+  const validatorSet = requireObject(payload.validator_set ?? payload.validatorSet, 'validator_set');
+  const finalityEvidence = requireObject(payload.finality_evidence ?? payload.finalityEvidence, 'finality_evidence');
+  const evmProof = payload.evm_proof ?? payload.evmProof;
+  const network = resolveAvalancheNetwork(acceptedBlock.network ?? acceptedBlock.chain_ref ?? acceptedBlock.chainID ?? acceptedBlock.chain_id);
+  const validatorSetNetwork = resolveAvalancheNetwork(validatorSet.network ?? validatorSet.chain_ref ?? validatorSet.chainID ?? validatorSet.chain_id ?? network.network);
+  const height = Number(acceptedBlock.height);
+  const blockHash = normalizeHex(requireString(acceptedBlock.block_hash ?? acceptedBlock.blockHash, 'accepted_block.block_hash'));
+  const validatorSetHash = normalizeHex(requireString(validatorSet.hash, 'validator_set.hash'));
+  const computedValidatorSetHash = avalancheValidatorSetHash(Array.isArray(validatorSet.validators) ? validatorSet.validators : []);
+  const setID = Number(validatorSet.set_id ?? validatorSet.setID);
+  const evidenceSetID = Number(finalityEvidence.set_id ?? finalityEvidence.setID);
+  const evidenceHeight = Number(finalityEvidence.target_height ?? finalityEvidence.targetHeight);
+  const evidenceHash = normalizeHex(requireString(finalityEvidence.target_hash ?? finalityEvidence.targetHash, 'finality_evidence.target_hash'));
+
+  if (network.chain_ref !== validatorSetNetwork.chain_ref) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche accepted block network does not match the validator set.');
+  }
+  if (acceptedBlock.accepted === false) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche block is not marked accepted by Snowman finality evidence.');
+  }
+  if (setID !== evidenceSetID) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche finality evidence uses a different validator set.');
+  }
+  if (evidenceHeight !== height || evidenceHash !== blockHash) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche finality evidence targets a different accepted block.');
+  }
+  if (validatorSetHash !== computedValidatorSetHash) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche validator set hash is invalid.');
+  }
+
+  const conflictingEvidence = payload.conflicting_evidence ?? payload.conflictingEvidence;
+  if (conflictingEvidence) {
+    const conflictHeight = Number(conflictingEvidence.target_height ?? conflictingEvidence.targetHeight);
+    const conflictHash = normalizeHex(requireString(conflictingEvidence.target_hash ?? conflictingEvidence.targetHash, 'conflicting_evidence.target_hash'));
+    if (conflictHeight === height
+        && conflictHash !== evidenceHash
+        && hasAvalancheAcceptedQuorum(validatorSet.validators, avalancheSignedValidators(conflictingEvidence))) {
+      return avalancheFailure(network, height, blockHash, evmProof, 'Conflicting Avalanche accepted-block evidence reached validator quorum.');
+    }
+  }
+
+  if (!hasAvalancheAcceptedQuorum(validatorSet.validators, avalancheSignedValidators(finalityEvidence))) {
+    return avalancheFailure(network, height, blockHash, evmProof, 'Avalanche accepted-finality evidence did not reach the validator-weight quorum.');
+  }
+
+  if (evmProof) {
+    const header = requireObject(evmProof.header, 'evm_proof.header');
+    const proof = requireObject(evmProof.proof, 'evm_proof.proof');
+    const proofChain = resolveEvmChain(proof.chain_ref ?? proof.chain ?? header.chain_ref ?? header.chain);
+    const headerChain = resolveEvmChain(header.chain_ref ?? header.chain ?? proofChain.chain_ref);
+    const headerHash = normalizeHex(requireString(header.hash, 'evm_proof.header.hash'));
+    const headerNumber = Number(header.number);
+    const stateRoot = normalizeHex(requireString(acceptedBlock.state_root ?? acceptedBlock.stateRoot, 'accepted_block.state_root'));
+    const receiptsRoot = normalizeHex(requireString(acceptedBlock.receipts_root ?? acceptedBlock.receiptsRoot, 'accepted_block.receipts_root'));
+    if (proofChain.chain_ref !== 'avalanche-c' || headerChain.chain_ref !== 'avalanche-c') {
+      return avalancheFailure(network, height, blockHash, evmProof, 'C-Chain EVM proof must be Avalanche-specific and must not use Ethereum mainnet finality.');
+    }
+    if (headerHash !== blockHash
+        || headerNumber !== height
+        || normalizeHex(requireString(header.state_root ?? header.stateRoot, 'evm_proof.header.state_root')) !== stateRoot
+        || normalizeHex(requireString(header.receipts_root ?? header.receiptsRoot, 'evm_proof.header.receipts_root')) !== receiptsRoot) {
+      return avalancheFailure(network, height, blockHash, evmProof, 'C-Chain EVM proof header is not bound to the accepted Avalanche block.');
+    }
+    const evmResult = verifyEvmProof(evmProof);
+    if (!evmResult.verified) {
+      return avalancheFailure(network, height, blockHash, evmProof, evmResult.summary);
+    }
+  }
+
+  return {
+    verified: true,
+    state: 'proof_checked',
+    chain_ref: network.chain_ref,
+    block_number: Number.isFinite(height) ? height : null,
+    block_hash: blockHash,
+    proof_id: evmProof?.proof ? String(evmProof.proof.proof_id ?? evmProof.proof.proofID ?? '') : null,
+    summary: evmProof
+      ? `Avalanche Snowman accepted block ${Number.isFinite(height) ? height : 'unknown'} checked with C-Chain EVM proof evidence.`
+      : `Avalanche Snowman accepted block ${Number.isFinite(height) ? height : 'unknown'} checked with fixture validator quorum.`
   };
 }
 
@@ -1067,6 +1324,22 @@ function assertEvmFixture() {
   }
 }
 
+function assertAvalancheFixture() {
+  const computedValidatorSetHash = avalancheValidatorSetHash(avalancheFixtureValidators);
+  if (computedValidatorSetHash !== avalancheFixtureValidatorSetHash) {
+    throw new Error(`Avalanche validator fixture mismatch: ${computedValidatorSetHash}`);
+  }
+  const result = verifyAvalancheState({
+    accepted_block: avalancheFixtureAcceptedBlock,
+    validator_set: avalancheFixtureValidatorSet,
+    finality_evidence: avalancheFixtureFinalityEvidence,
+    evm_proof: avalancheFixtureEvmProofBundle
+  });
+  if (!result.verified) {
+    throw new Error(`Avalanche state fixture mismatch: ${result.summary}`);
+  }
+}
+
 function assertSolanaFixture() {
   const computedRoot = computeSolanaLocalMerkleRoot(solanaFixtureProof.leaf_hash, solanaFixtureProof.witnesses);
   if (computedRoot !== solanaFixtureSlotRoot.account_root) {
@@ -1130,6 +1403,18 @@ function evmFailure(proofID, kind, chainRef, blockHash, blockNumber, summary) {
   };
 }
 
+function avalancheFailure(network, blockNumber, blockHash, evmProof, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: network.chain_ref,
+    block_number: Number.isFinite(blockNumber) ? blockNumber : null,
+    block_hash: blockHash,
+    proof_id: evmProof?.proof ? String(evmProof.proof.proof_id ?? evmProof.proof.proofID ?? '') : null,
+    summary
+  };
+}
+
 function solanaFailure(proofID, kind, chainRef, slot, rootSlot, summary) {
   return {
     verified: false,
@@ -1184,6 +1469,25 @@ function resolveEvmChain(requestedChain) {
   }
   const byID = Object.values(evmChains).find(chain => String(chain.chain_id) === normalized);
   return byID ?? evmChains['ethereum-mainnet'];
+}
+
+function resolveAvalancheNetwork(requestedNetwork) {
+  if (!requestedNetwork) {
+    return avalancheNetworks['avalanche-c'];
+  }
+  const normalized = String(requestedNetwork)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (avalancheNetworks[normalized]) {
+    return avalancheNetworks[normalized];
+  }
+  if (normalized === 'avalanche' || normalized === 'avalanche-c-chain' || normalized === 'avax' || normalized === 'c-chain') {
+    return avalancheNetworks['avalanche-c'];
+  }
+  const byID = Object.values(avalancheNetworks).find(network => String(network.chain_id) === normalized);
+  return byID ?? avalancheNetworks['avalanche-c'];
 }
 
 function resolveSolanaCluster(requestedCluster) {
@@ -1247,6 +1551,37 @@ function evmFixtureLeafHash(kind, subject, key, value) {
     String(key ?? '').toLowerCase(),
     String(value).toLowerCase()
   ].join('|'));
+}
+
+function avalancheValidatorSetHash(validators) {
+  const payload = validators
+    .map(validator => `${normalizeID(requireString(validator.node_id ?? validator.nodeID, 'validator.node_id'))}:${Number(validator.weight)}`)
+    .sort()
+    .join('|');
+  return sha256HexFromString(payload);
+}
+
+function avalancheSignedValidators(finalityEvidence) {
+  return new Set((Array.isArray(finalityEvidence.signatures) ? finalityEvidence.signatures : [])
+    .filter(signature => signature.signed !== false)
+    .map(signature => normalizeID(requireString(signature.node_id ?? signature.nodeID, 'signature.node_id'))));
+}
+
+function hasAvalancheAcceptedQuorum(validators, validatorIDs) {
+  let totalWeight = 0;
+  let signedWeight = 0;
+  for (const validator of Array.isArray(validators) ? validators : []) {
+    const weight = Number(validator.weight);
+    if (!Number.isFinite(weight) || weight < 0) {
+      continue;
+    }
+    totalWeight += weight;
+    const nodeID = normalizeID(requireString(validator.node_id ?? validator.nodeID, 'validator.node_id'));
+    if (validatorIDs.has(nodeID)) {
+      signedWeight += weight;
+    }
+  }
+  return totalWeight > 0 && signedWeight * 5 >= totalWeight * 4;
 }
 
 function solanaFixtureLeafHash(kind, subject, value) {
@@ -1440,6 +1775,10 @@ function normalizeHex(value) {
     throw Object.assign(new Error(`invalid hex value: ${value}`), { statusCode: 400 });
   }
   return normalized;
+}
+
+function normalizeID(value) {
+  return String(value).trim().toLowerCase();
 }
 
 function requireObject(value, fieldName) {

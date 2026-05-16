@@ -2171,6 +2171,170 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Asset Hub Polkadot proof checked") == true)
     }
 
+    @Test func avalancheRoutingAndFallbackAreExplicit() {
+        #expect(AvalancheNetwork.known(from: "avalanche") == .cChain)
+        #expect(AvalancheNetwork.known(from: "43114") == .cChain)
+        #expect(AvalancheNetwork.cChain.evmChain == .avalancheCChain)
+        #expect(EVMChain.avalancheCChain.finalityModel == .snowmanFinality)
+
+        let fallback = AvalancheLightClientServiceSnapshot.fallback(
+            network: .cChain,
+            lastError: "disabled"
+        )
+
+        #expect(fallback.finalityModel == .rpcFallback)
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("Gateway/RPC fallback remains labeled"))
+    }
+
+    @Test func avalancheStateProofVerifiesSnowmanFinalityAndCChainProof() {
+        let bundle = Self.avalancheProofBundle(network: .cChain)
+        let result = bundle.verify()
+        var weakBundle = bundle
+        weakBundle.finalityEvidence.signatures = [bundle.finalityEvidence.signatures[0]]
+        let weakResult = weakBundle.verify()
+        var ethereumBundle = bundle
+        ethereumBundle.evmProof?.header.chain = .ethereumMainnet
+        let ethereumResult = ethereumBundle.verify()
+
+        #expect(bundle.validatorSet.validatesHash)
+        #expect(bundle.validatorSet.totalWeight == 100)
+        #expect(bundle.validatorSet.hasAcceptedQuorum(validatorIDs: bundle.finalityEvidence.signedValidatorIDs))
+        #expect(bundle.evmProof?.header.chain == .avalancheCChain)
+        #expect(result.verified)
+        #expect(result.state == .proofChecked)
+        #expect(result.chainRef == "avalanche-c")
+        #expect(result.summary.contains("C-Chain EVM proof"))
+        #expect(weakResult.verified == false)
+        #expect(weakResult.summary.contains("validator-weight quorum"))
+        #expect(ethereumResult.verified == false)
+        #expect(ethereumResult.summary.contains("must not use Ethereum mainnet"))
+    }
+
+    @Test func avalancheConflictingAcceptedEvidenceIsFailed() {
+        let bundle = Self.avalancheProofBundle(network: .cChain)
+        var conflictBundle = bundle
+        let conflictingHash = EVMHex.sha256Hex("conflicting-avalanche-accepted-block")
+        conflictBundle.conflictingEvidence = AvalancheFinalityEvidence(
+            setID: bundle.validatorSet.setID,
+            targetHash: conflictingHash,
+            targetHeight: bundle.acceptedBlock.height,
+            signatures: [
+                AvalancheFinalitySignature(nodeID: bundle.validatorSet.validators[0].nodeID, blockHash: conflictingHash),
+                AvalancheFinalitySignature(nodeID: bundle.validatorSet.validators[1].nodeID, blockHash: conflictingHash)
+            ],
+            source: "fixture"
+        )
+        let result = conflictBundle.verify()
+
+        #expect(result.verified == false)
+        #expect(result.state == .failed)
+        #expect(result.summary.contains("Conflicting Avalanche"))
+    }
+
+    @MainActor
+    @Test func avalancheLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let avalancheHarness = Self.makeAvalancheLightClientSession(key: "avalancheregistry", network: .cChain) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/avalanche/status" {
+                return Self.jsonResponse(for: request, body: Self.avalancheServiceStatus(network: .cChain))
+            }
+            if request.url?.path == "/v1/avalanche/verify-state" {
+                return Self.jsonResponse(for: request, body: Self.avalancheProofResultBody(
+                    verified: true,
+                    state: "proof_checked",
+                    network: .cChain
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = AvalancheLightClientServiceClient(
+            configuration: avalancheHarness.configuration,
+            session: avalancheHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyStateViaService(Self.avalancheProofBundle(network: .cChain))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordAvalancheLightClientSnapshot(snapshot)
+        let avalanche = registry.status(forChainRef: "avalanche-c")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .proofChecked)
+        #expect(snapshot.acceptedBlock?.height == 50_000_000)
+        #expect(status.state == .proofChecked)
+        #expect(status.trustSource == .localProof)
+        #expect(avalanche?.family == .avalanche)
+        #expect(avalanche?.evidence.first?.source == .localProof)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .proofChecked)
+        #expect(capturedRequests.body(for: "/v1/avalanche/verify-state")?["evm_proof"] != nil)
+    }
+
+    @MainActor
+    @Test func avalancheLightClientFallsBackWhenServiceDisabled() async {
+        let client = AvalancheLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordAvalancheLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesAvalancheLightClientState() async {
+        let avalancheHarness = Self.makeAvalancheLightClientSession(key: "avalancheruntime", network: .cChain) { request in
+            if request.url?.path == "/v1/avalanche/status" {
+                return Self.jsonResponse(for: request, body: Self.avalancheServiceStatus(
+                    network: .cChain,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "avalancheruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                avalancheLightClient: avalancheHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(configuration: .disabled),
+            substrateLightClientServiceClient: SubstrateLightClientServiceClient(configuration: .disabled),
+            avalancheLightClientServiceClient: AvalancheLightClientServiceClient(
+                configuration: avalancheHarness.configuration,
+                session: avalancheHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let avalanche = bridge.chainTrustSnapshot.status(forChainRef: "avalanche-c")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(avalanche?.state == .proofChecked)
+        #expect(avalanche?.trustSource == .localProof)
+        #expect(avalanche?.evidence.first?.summary.contains("distinct from Ethereum mainnet finality") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Avalanche C-Chain proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4399,6 +4563,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeAvalancheLightClientSession(
+        key: String,
+        network: AvalancheNetwork = .cChain,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: AvalancheLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = AvalancheLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-avalanche.test:4870")!,
+            network: network
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -4528,6 +4707,28 @@ struct dBrowserTests {
             "authority_set": substrateAuthoritySetBody(bundle.authoritySet),
             "peer_count": 2,
             "proof_source": "fixture-grandpa-storage"
+        ]
+    }
+
+    private static func avalancheServiceStatus(
+        network: AvalancheNetwork,
+        syncState: String = "proof_checked"
+    ) -> [String: Any] {
+        let bundle = avalancheProofBundle(network: network)
+        return [
+            "ok": true,
+            "service_available": true,
+            "network": network.chainRef,
+            "chain_ref": network.chainRef,
+            "chain_id": network.chainID,
+            "sync_state": syncState,
+            "source": "avalanche-light-client",
+            "finality_model": "snowman-accepted",
+            "accepted_block": avalancheAcceptedBlockBody(bundle.acceptedBlock),
+            "validator_set": avalancheValidatorSetBody(bundle.validatorSet),
+            "peer_count": 2,
+            "proof_source": "fixture-snowman-evm-proof",
+            "limitations": network.limitations
         ]
     }
 
@@ -4712,6 +4913,67 @@ struct dBrowserTests {
         )
     }
 
+    private static func avalancheProofBundle(network: AvalancheNetwork) -> AvalancheStateVerificationBundle {
+        let validators = [
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-a", weight: 50),
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-b", weight: 30),
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-c", weight: 20)
+        ]
+        let validatorSet = AvalancheValidatorSet(
+            network: network,
+            setID: 9_001,
+            validators: validators,
+            source: "fixture"
+        )
+        let subject = "0x2222222222222222222222222222222222222222"
+        let leaf = EVMLocalProof.fixtureLeafHash(kind: .account, subject: subject, value: "0x01")
+        let receiptLeaf = EVMLocalProof.fixtureLeafHash(kind: .receipt, subject: "0xavalanche-tx-fixture", value: "0x01")
+        let acceptedBlock = AvalancheAcceptedBlockSnapshot(
+            network: network,
+            height: 50_000_000,
+            blockHash: EVMHex.sha256Hex("\(network.chainRef)-50000000-accepted-block"),
+            parentHash: EVMHex.sha256Hex("\(network.chainRef)-49999999-accepted-block"),
+            stateRoot: leaf,
+            receiptsRoot: receiptLeaf,
+            timestamp: 1_710_000_000,
+            accepted: true,
+            source: "fixture"
+        )
+        let proof = EVMLocalProof(
+            proofID: "avalanche-fixture-account",
+            kind: .account,
+            chain: .avalancheCChain,
+            subject: subject,
+            expectedValue: "0x01",
+            blockHash: acceptedBlock.blockHash,
+            blockNumber: acceptedBlock.height,
+            expectedRoot: acceptedBlock.stateRoot,
+            leafHash: leaf,
+            witnesses: [],
+            source: "fixture"
+        )
+        let finalityEvidence = AvalancheFinalityEvidence(
+            setID: validatorSet.setID,
+            targetHash: acceptedBlock.blockHash,
+            targetHeight: acceptedBlock.height,
+            signatures: [
+                AvalancheFinalitySignature(nodeID: validators[0].nodeID, blockHash: acceptedBlock.blockHash),
+                AvalancheFinalitySignature(nodeID: validators[1].nodeID, blockHash: acceptedBlock.blockHash),
+                AvalancheFinalitySignature(nodeID: validators[2].nodeID, blockHash: acceptedBlock.blockHash, signed: false)
+            ],
+            source: "fixture"
+        )
+        return AvalancheStateVerificationBundle(
+            acceptedBlock: acceptedBlock,
+            validatorSet: validatorSet,
+            finalityEvidence: finalityEvidence,
+            evmProof: EVMLocalProofBundle(
+                header: acceptedBlock.executionHeader!,
+                proof: proof
+            )
+        )
+    }
+
     private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
         [
             "chain": header.chain.chainID,
@@ -4779,6 +5041,41 @@ struct dBrowserTests {
             },
             "hash": authoritySet.hash,
             "source": authoritySet.source ?? "fixture"
+        ]
+    }
+
+    private static func avalancheAcceptedBlockBody(_ block: AvalancheAcceptedBlockSnapshot) -> [String: Any] {
+        [
+            "network": block.network.chainRef,
+            "chain_ref": block.network.chainRef,
+            "chain_id": block.network.chainID,
+            "subnet_id": block.network.subnetID,
+            "vm_id": block.network.vmID,
+            "height": block.height,
+            "block_hash": block.blockHash,
+            "parent_hash": block.parentHash,
+            "state_root": block.stateRoot,
+            "receipts_root": block.receiptsRoot,
+            "timestamp": block.timestamp ?? 0,
+            "accepted": block.accepted,
+            "source": block.source ?? "fixture"
+        ]
+    }
+
+    private static func avalancheValidatorSetBody(_ validatorSet: AvalancheValidatorSet) -> [String: Any] {
+        [
+            "network": validatorSet.network.chainRef,
+            "chain_ref": validatorSet.network.chainRef,
+            "chain_id": validatorSet.network.chainID,
+            "set_id": validatorSet.setID,
+            "validators": validatorSet.validators.map { validator in
+                [
+                    "node_id": validator.nodeID,
+                    "weight": validator.weight
+                ] as [String: Any]
+            },
+            "hash": validatorSet.hash,
+            "source": validatorSet.source ?? "fixture"
         ]
     }
 
@@ -4854,6 +5151,23 @@ struct dBrowserTests {
             "proof_id": bundle.storageProof?.proofID ?? "substrate-storage-proof",
             "storage_key": bundle.storageProof?.storageKey ?? substrateStorageKey,
             "summary": "Substrate storage proof checked."
+        ]
+    }
+
+    private static func avalancheProofResultBody(
+        verified: Bool,
+        state: String,
+        network: AvalancheNetwork
+    ) -> [String: Any] {
+        let bundle = avalancheProofBundle(network: network)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": network.chainRef,
+            "block_number": bundle.acceptedBlock.height,
+            "block_hash": bundle.acceptedBlock.blockHash,
+            "proof_id": bundle.evmProof?.proof.proofID ?? "avalanche-fixture-account",
+            "summary": "Avalanche Snowman accepted block checked with C-Chain proof evidence."
         ]
     }
 

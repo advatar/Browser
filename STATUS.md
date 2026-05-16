@@ -23,14 +23,14 @@
 
 - [x] Triage Avalanche light-client gap from #64.
 - [x] Create tracker issue for Swift Avalanche chain trust foundation (#97).
-- [ ] Add Swift Avalanche network/C-Chain metadata, endpoint config, accepted block, validator set, finality evidence, EVM proof bridge, verification result, and service snapshot models.
-- [ ] Add fixture-backed Snowman accepted-finality validation with validator-weight threshold checks.
-- [ ] Add C-Chain EVM account/storage/receipt proof verification bound to the accepted Avalanche block.
-- [ ] Add weak quorum, chain mismatch, stale, failed, and RPC fallback labeling.
-- [ ] Add Avalanche service client contract and fixture-backed `services/chain-trust` endpoints.
-- [ ] Bind Avalanche snapshots into the shared chain trust registry/runtime status.
-- [ ] Add focused Swift unit tests for routing, finality status, proof verification, fallback, service contract, registry updates, and runtime refresh.
-- [ ] Verify local service checks plus Swift tests/build.
+- [x] Add Swift Avalanche network/C-Chain metadata, endpoint config, accepted block, validator set, finality evidence, EVM proof bridge, verification result, and service snapshot models.
+- [x] Add fixture-backed Snowman accepted-finality validation with validator-weight threshold checks.
+- [x] Add C-Chain EVM account/storage/receipt proof verification bound to the accepted Avalanche block.
+- [x] Add weak quorum, chain mismatch, stale, failed, and RPC fallback labeling.
+- [x] Add Avalanche service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind Avalanche snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for routing, finality status, proof verification, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close completed GitHub issues.
 
