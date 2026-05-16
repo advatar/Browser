@@ -1717,6 +1717,147 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Base Sepolia proof checked") == true)
     }
 
+    @Test func solanaClusterRoutingAndStaleFallbackAreExplicit() {
+        #expect(SolanaCluster.known(from: "mainnet-beta") == .mainnetBeta)
+        #expect(SolanaCluster.known(from: "solana-devnet") == .devnet)
+        #expect(SolanaCluster.mainnetBeta.chainRef == "solana-mainnet")
+
+        let staleSnapshot = SolanaSlotRootSnapshot(
+            cluster: .mainnetBeta,
+            slot: 10_000,
+            rootSlot: 9_000,
+            blockhash: SolanaHex.sha256Hex("slot-10000"),
+            commitment: .finalized,
+            accountRoot: SolanaHex.sha256Hex("account-root"),
+            transactionStatusRoot: SolanaHex.sha256Hex("tx-root"),
+            source: "fixture"
+        )
+        let rpcSnapshot = SolanaLightClientServiceSnapshot.fallback(
+            cluster: .mainnetBeta,
+            lastError: "disabled"
+        )
+
+        #expect(staleSnapshot.rootLag() == 1_000)
+        #expect(staleSnapshot.isStale(maxRootLag: 512))
+        #expect(rpcSnapshot.syncState == .unavailable)
+        #expect(rpcSnapshot.chainTrustStatus.state == .rpcFallback)
+        #expect(rpcSnapshot.statusSummary.contains("trusted RPC fallback remains labeled"))
+    }
+
+    @Test func solanaFixtureProofVerifiesAccountAndTransactionStatus() {
+        let accountBundle = Self.solanaProofBundle(kind: .account)
+        let transactionBundle = Self.solanaProofBundle(kind: .transactionStatus)
+        let accountResult = accountBundle.verify()
+        let transactionResult = transactionBundle.verify()
+
+        #expect(accountResult.verified)
+        #expect(accountResult.state == .synced)
+        #expect(accountResult.chainRef == "solana-mainnet")
+        #expect(transactionResult.verified)
+        #expect(transactionResult.kind == .transactionStatus)
+    }
+
+    @MainActor
+    @Test func solanaLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let solanaHarness = Self.makeSolanaLightClientSession(key: "solanaregistry", cluster: .mainnetBeta) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/solana/status" {
+                return Self.jsonResponse(for: request, body: Self.solanaServiceStatus(cluster: .mainnetBeta))
+            }
+            if request.url?.path == "/v1/solana/verify-proof" {
+                return Self.jsonResponse(for: request, body: Self.solanaProofResultBody(
+                    verified: true,
+                    state: "synced",
+                    proofID: "solana-account-proof",
+                    kind: "account",
+                    cluster: .mainnetBeta
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = SolanaLightClientServiceClient(
+            configuration: solanaHarness.configuration,
+            session: solanaHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyProofViaService(Self.solanaProofBundle(kind: .account))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordSolanaLightClientSnapshot(snapshot)
+        let solana = registry.status(forChainRef: "solana-mainnet")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .synced)
+        #expect(snapshot.slotRoot?.rootSlot == 281_474_976_700)
+        #expect(status.state == .verified)
+        #expect(status.trustSource == .embeddedLightClient)
+        #expect(solana?.evidence.first?.source == .embeddedLightClient)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .synced)
+        #expect(capturedRequests.body(for: "/v1/solana/verify-proof")?["proof"] != nil)
+    }
+
+    @MainActor
+    @Test func solanaLightClientFallsBackWhenServiceDisabled() async {
+        let client = SolanaLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordSolanaLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesSolanaLightClientState() async {
+        let solanaHarness = Self.makeSolanaLightClientSession(key: "solanaruntime", cluster: .devnet) { request in
+            if request.url?.path == "/v1/solana/status" {
+                return Self.jsonResponse(for: request, body: Self.solanaServiceStatus(
+                    cluster: .devnet,
+                    syncState: "proof_checked",
+                    commitment: "confirmed"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "solanaruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                solanaLightClient: solanaHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(
+                configuration: solanaHarness.configuration,
+                session: solanaHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let solana = bridge.chainTrustSnapshot.status(forChainRef: "solana-devnet")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(solana?.state == .proofChecked)
+        #expect(solana?.trustSource == .localProof)
+        #expect(solana?.displaySummary.contains("proof-checked evidence") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Solana Devnet proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -3900,6 +4041,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeSolanaLightClientSession(
+        key: String,
+        cluster: SolanaCluster = .mainnetBeta,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: SolanaLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = SolanaLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-solana.test:4870")!,
+            cluster: cluster
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -3959,6 +4115,38 @@ struct dBrowserTests {
         ]
     }
 
+    private static func solanaServiceStatus(
+        cluster: SolanaCluster,
+        syncState: String = "synced",
+        commitment: String = "finalized"
+    ) -> [String: Any] {
+        let bundle = solanaProofBundle(kind: .account, cluster: cluster)
+        let slotRoot = bundle.snapshot
+        return [
+            "ok": true,
+            "cluster": cluster.rawValue,
+            "chain_ref": cluster.chainRef,
+            "sync_state": syncState,
+            "source": "solana-light-client",
+            "slot_root": [
+                "cluster": cluster.rawValue,
+                "chain_ref": cluster.chainRef,
+                "slot": slotRoot.slot,
+                "root_slot": slotRoot.rootSlot,
+                "blockhash": slotRoot.blockhash,
+                "parent_slot": slotRoot.parentSlot ?? slotRoot.slot - 1,
+                "commitment": commitment,
+                "account_root": slotRoot.accountRoot ?? "",
+                "transaction_status_root": slotRoot.transactionStatusRoot ?? "",
+                "source": "fixture"
+            ],
+            "peer_count": 2,
+            "proof_source": "fixture-local-merkle",
+            "root_lag": slotRoot.rootLag(),
+            "max_root_lag": 512
+        ]
+    }
+
     private static func evmProofBundle(chain: EVMChain) -> EVMLocalProofBundle {
         let subject = "0x1111111111111111111111111111111111111111"
         let leaf = EVMLocalProof.fixtureLeafHash(kind: .account, subject: subject, value: "0x01")
@@ -3993,6 +4181,47 @@ struct dBrowserTests {
         return EVMLocalProofBundle(header: header, proof: proof)
     }
 
+    private static func solanaProofBundle(
+        kind: SolanaFixtureProofKind,
+        cluster: SolanaCluster = .mainnetBeta
+    ) -> SolanaProofBundle {
+        let accountSubject = "So11111111111111111111111111111111111111112"
+        let transactionSubject = "5sUjfixtureTransactionStatus111111111111111111111111111111111"
+        let accountLeaf = SolanaFixtureProof.fixtureLeafHash(
+            kind: .account,
+            subject: accountSubject,
+            value: "lamports:1"
+        )
+        let transactionLeaf = SolanaFixtureProof.fixtureLeafHash(
+            kind: .transactionStatus,
+            subject: transactionSubject,
+            value: "confirmed"
+        )
+        let snapshot = SolanaSlotRootSnapshot(
+            cluster: cluster,
+            slot: 281_474_976_710,
+            rootSlot: 281_474_976_700,
+            blockhash: SolanaHex.sha256Hex("\(cluster.chainRef)-281474976710-blockhash"),
+            parentSlot: 281_474_976_709,
+            commitment: .finalized,
+            accountRoot: accountLeaf,
+            transactionStatusRoot: transactionLeaf,
+            source: "fixture"
+        )
+        let proof = SolanaFixtureProof(
+            proofID: kind == .account ? "solana-account-proof" : "solana-transaction-proof",
+            kind: kind,
+            cluster: cluster,
+            subject: kind == .account ? accountSubject : transactionSubject,
+            slot: snapshot.slot,
+            expectedRoot: kind == .account ? accountLeaf : transactionLeaf,
+            leafHash: kind == .account ? accountLeaf : transactionLeaf,
+            witnesses: [],
+            source: "fixture"
+        )
+        return SolanaProofBundle(snapshot: snapshot, proof: proof)
+    }
+
     private static func evmProofResultBody(
         verified: Bool,
         state: String,
@@ -4009,6 +4238,25 @@ struct dBrowserTests {
             "block_hash": EVMHex.sha256Hex("\(chain.chainRef)-17000000-header"),
             "block_number": 17_000_000,
             "summary": "EVM \(kind) fixture proof checked."
+        ]
+    }
+
+    private static func solanaProofResultBody(
+        verified: Bool,
+        state: String,
+        proofID: String,
+        kind: String,
+        cluster: SolanaCluster
+    ) -> [String: Any] {
+        [
+            "verified": verified,
+            "state": state,
+            "proof_id": proofID,
+            "kind": kind,
+            "chain_ref": cluster.chainRef,
+            "slot": 281_474_976_710,
+            "root_slot": 281_474_976_700,
+            "summary": "Solana \(kind) fixture proof checked."
         ]
     }
 

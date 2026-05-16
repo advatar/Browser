@@ -126,11 +126,80 @@ const evmFixtureProof = {
   source: mode
 };
 
+const solanaClusters = {
+  'mainnet-beta': {
+    cluster: 'mainnet-beta',
+    chain_ref: 'solana-mainnet',
+    display_name: 'Solana',
+    sync_state: 'synced',
+    commitment: 'finalized'
+  },
+  'solana-mainnet': {
+    cluster: 'mainnet-beta',
+    chain_ref: 'solana-mainnet',
+    display_name: 'Solana',
+    sync_state: 'synced',
+    commitment: 'finalized'
+  },
+  devnet: {
+    cluster: 'devnet',
+    chain_ref: 'solana-devnet',
+    display_name: 'Solana Devnet',
+    sync_state: 'proof_checked',
+    commitment: 'confirmed'
+  },
+  testnet: {
+    cluster: 'testnet',
+    chain_ref: 'solana-testnet',
+    display_name: 'Solana Testnet',
+    sync_state: 'proof_checked',
+    commitment: 'confirmed'
+  },
+  localnet: {
+    cluster: 'localnet',
+    chain_ref: 'solana-localnet',
+    display_name: 'Solana Localnet',
+    sync_state: 'proof_checked',
+    commitment: 'confirmed'
+  }
+};
+const solanaFixtureSlot = 281474976710;
+const solanaFixtureRootSlot = 281474976700;
+const solanaFixtureAccount = 'So11111111111111111111111111111111111111112';
+const solanaFixtureSignature = '5sUjfixtureTransactionStatus111111111111111111111111111111111';
+const solanaFixtureAccountLeaf = solanaFixtureLeafHash('account', solanaFixtureAccount, 'lamports:1');
+const solanaFixtureTransactionLeaf = solanaFixtureLeafHash('transaction_status', solanaFixtureSignature, 'confirmed');
+const solanaFixtureSlotRoot = {
+  cluster: 'mainnet-beta',
+  chain_ref: 'solana-mainnet',
+  slot: solanaFixtureSlot,
+  root_slot: solanaFixtureRootSlot,
+  blockhash: sha256HexFromString('solana-mainnet|281474976710|blockhash'),
+  parent_slot: solanaFixtureSlot - 1,
+  commitment: 'finalized',
+  account_root: solanaFixtureAccountLeaf,
+  transaction_status_root: solanaFixtureTransactionLeaf,
+  source: mode
+};
+const solanaFixtureProof = {
+  proof_id: 'solana-fixture-account',
+  kind: 'account',
+  cluster: 'mainnet-beta',
+  chain_ref: 'solana-mainnet',
+  subject: solanaFixtureAccount,
+  slot: solanaFixtureSlot,
+  expected_root: solanaFixtureSlotRoot.account_root,
+  leaf_hash: solanaFixtureAccountLeaf,
+  witnesses: [],
+  source: mode
+};
+
 if (args.has('--snapshot')) {
   console.log(JSON.stringify({
     service: '@browser/chain-trust-service',
     bitcoin: bitcoinStatus,
-    evm: evmStatusFor('ethereum-mainnet')
+    evm: evmStatusFor('ethereum-mainnet'),
+    solana: solanaStatusFor('mainnet-beta')
   }, null, 2));
   process.exit(0);
 }
@@ -138,12 +207,15 @@ if (args.has('--snapshot')) {
 if (args.has('--lint')) {
   assertGenesisFixture();
   assertEvmFixture();
+  assertSolanaFixture();
   console.log('[chain-trust] schema OK');
   process.exit(0);
 }
 
 if (args.has('--self-test')) {
   assertGenesisFixture();
+  assertEvmFixture();
+  assertSolanaFixture();
   const result = verifyBitcoinTransaction({
     header: genesisHeader,
     proof: {
@@ -167,6 +239,16 @@ if (args.has('--self-test')) {
 
   if (!evmResult.verified || evmResult.state !== 'synced') {
     console.error('[chain-trust] EVM self-test failed:', evmResult.summary);
+    process.exit(1);
+  }
+
+  const solanaResult = verifySolanaProof({
+    snapshot: solanaFixtureSlotRoot,
+    proof: solanaFixtureProof
+  });
+
+  if (!solanaResult.verified || solanaResult.state !== 'synced') {
+    console.error('[chain-trust] Solana self-test failed:', solanaResult.summary);
     process.exit(1);
   }
 
@@ -198,6 +280,10 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, evmStatusFor(url.searchParams.get('chain')));
   }
 
+  if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
+    return sendJson(res, 200, solanaStatusFor(url.searchParams.get('cluster')));
+  }
+
   if (req.method === 'POST' && (url.pathname === '/v1/bitcoin/verify-transaction' || url.pathname === '/bitcoin/verify-transaction')) {
     try {
       const payload = await readJson(req);
@@ -227,6 +313,24 @@ const server = http.createServer(async (req, res) => {
         chain_ref: null,
         block_hash: null,
         block_number: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/solana/verify-proof' || url.pathname === '/solana/verify-proof')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifySolanaProof(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        proof_id: null,
+        kind: null,
+        chain_ref: null,
+        slot: null,
+        root_slot: null,
         summary: String(err.message ?? err)
       });
     }
@@ -267,6 +371,30 @@ function evmStatusFor(requestedChain) {
     [checkpointKey]: header,
     peer_count: 0,
     proof_source: 'fixture-local-merkle',
+    mode
+  };
+}
+
+function solanaStatusFor(requestedCluster) {
+  const cluster = resolveSolanaCluster(requestedCluster);
+  const slotRoot = {
+    ...solanaFixtureSlotRoot,
+    cluster: cluster.cluster,
+    chain_ref: cluster.chain_ref,
+    commitment: cluster.commitment
+  };
+  return {
+    ok: true,
+    service_available: true,
+    cluster: cluster.cluster,
+    chain_ref: cluster.chain_ref,
+    sync_state: cluster.sync_state,
+    source: mode,
+    slot_root: slotRoot,
+    peer_count: 0,
+    proof_source: 'fixture-local-merkle',
+    root_lag: slotRoot.slot - slotRoot.root_slot,
+    max_root_lag: 512,
     mode
   };
 }
@@ -321,6 +449,67 @@ function verifyEvmProof(payload) {
     block_hash: headerHash,
     block_number: Number.isFinite(headerNumber) ? headerNumber : null,
     summary: `EVM ${kind} fixture proof checked for ${chainRef} block ${Number.isFinite(headerNumber) ? headerNumber : 'unknown'}.`
+  };
+}
+
+function verifySolanaProof(payload) {
+  const snapshot = requireObject(payload.snapshot, 'snapshot');
+  const proof = requireObject(payload.proof, 'proof');
+  const kind = requireString(proof.kind, 'proof.kind');
+  if (!['account', 'transaction_status'].includes(kind)) {
+    throw Object.assign(new Error(`unsupported Solana proof kind: ${kind}`), { statusCode: 400 });
+  }
+
+  const proofID = requireString(proof.proof_id ?? proof.proofID, 'proof.proof_id');
+  const cluster = resolveSolanaCluster(proof.chain_ref ?? proof.cluster ?? snapshot.chain_ref ?? snapshot.cluster);
+  const snapshotCluster = resolveSolanaCluster(snapshot.chain_ref ?? snapshot.cluster ?? cluster.cluster);
+  const proofSlot = Number(proof.slot);
+  const snapshotSlot = Number(snapshot.slot);
+  const rootSlot = Number(snapshot.root_slot ?? snapshot.rootSlot);
+
+  if (cluster.chain_ref !== snapshotCluster.chain_ref) {
+    return solanaFailure(proofID, kind, cluster.chain_ref, proofSlot, rootSlot, 'Solana proof cluster does not match the slot/root snapshot.');
+  }
+
+  if (!Number.isFinite(proofSlot) || !Number.isFinite(snapshotSlot) || !Number.isFinite(rootSlot)) {
+    return solanaFailure(proofID, kind, cluster.chain_ref, proofSlot, rootSlot, 'Solana proof slot/root fields are invalid.');
+  }
+
+  if (proofSlot > snapshotSlot) {
+    return solanaFailure(proofID, kind, cluster.chain_ref, proofSlot, rootSlot, 'Solana proof references a future slot.');
+  }
+
+  const snapshotRoot = normalizeHex(requireString(
+    kind === 'account'
+      ? snapshot.account_root ?? snapshot.accountRoot
+      : snapshot.transaction_status_root ?? snapshot.transactionStatusRoot,
+    `${kind} root`
+  ));
+  const expectedRoot = normalizeHex(requireString(proof.expected_root ?? proof.expectedRoot, 'proof.expected_root'));
+  if (expectedRoot !== snapshotRoot) {
+    return solanaFailure(proofID, kind, cluster.chain_ref, proofSlot, rootSlot, `Solana ${kind} proof expected root does not match the snapshot root.`);
+  }
+
+  const computedRoot = computeSolanaLocalMerkleRoot(
+    requireString(proof.leaf_hash ?? proof.leafHash, 'proof.leaf_hash'),
+    Array.isArray(proof.witnesses) ? proof.witnesses : []
+  );
+  if (computedRoot !== snapshotRoot) {
+    return solanaFailure(proofID, kind, cluster.chain_ref, proofSlot, rootSlot, `Solana ${kind} proof did not resolve to the expected root.`);
+  }
+
+  const maxRootLag = Number(payload.max_root_lag ?? payload.maxRootLag ?? 512);
+  const rootLag = snapshotSlot >= rootSlot ? snapshotSlot - rootSlot : 0;
+  const finalized = String(snapshot.commitment ?? '').toLowerCase() === 'finalized';
+  return {
+    verified: true,
+    state: finalized && rootLag <= maxRootLag ? 'synced' : 'proof_checked',
+    proof_id: proofID,
+    kind,
+    chain_ref: cluster.chain_ref,
+    slot: proofSlot,
+    root_slot: rootSlot,
+    summary: `Solana ${kind} fixture proof checked at slot ${Number.isFinite(proofSlot) ? proofSlot : 'unknown'}.`
   };
 }
 
@@ -402,6 +591,13 @@ function assertEvmFixture() {
   }
 }
 
+function assertSolanaFixture() {
+  const computedRoot = computeSolanaLocalMerkleRoot(solanaFixtureProof.leaf_hash, solanaFixtureProof.witnesses);
+  if (computedRoot !== solanaFixtureSlotRoot.account_root) {
+    throw new Error(`Solana fixture mismatch: ${computedRoot}`);
+  }
+}
+
 function failure(transactionID, blockHash, height, summary) {
   return {
     verified: false,
@@ -426,6 +622,19 @@ function evmFailure(proofID, kind, chainRef, blockHash, blockNumber, summary) {
   };
 }
 
+function solanaFailure(proofID, kind, chainRef, slot, rootSlot, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    proof_id: proofID,
+    kind,
+    chain_ref: chainRef,
+    slot: Number.isFinite(slot) ? slot : null,
+    root_slot: Number.isFinite(rootSlot) ? rootSlot : null,
+    summary
+  };
+}
+
 function resolveEvmChain(requestedChain) {
   if (!requestedChain) {
     return evmChains['ethereum-mainnet'];
@@ -442,11 +651,37 @@ function resolveEvmChain(requestedChain) {
   return byID ?? evmChains['ethereum-mainnet'];
 }
 
+function resolveSolanaCluster(requestedCluster) {
+  if (!requestedCluster) {
+    return solanaClusters['mainnet-beta'];
+  }
+  const normalized = String(requestedCluster)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (solanaClusters[normalized]) {
+    return solanaClusters[normalized];
+  }
+  if (normalized === 'solana' || normalized === 'mainnet') {
+    return solanaClusters['mainnet-beta'];
+  }
+  return solanaClusters['mainnet-beta'];
+}
+
 function evmFixtureLeafHash(kind, subject, key, value) {
   return sha256HexFromString([
     kind,
     String(subject).toLowerCase(),
     String(key ?? '').toLowerCase(),
+    String(value).toLowerCase()
+  ].join('|'));
+}
+
+function solanaFixtureLeafHash(kind, subject, value) {
+  return sha256HexFromString([
+    kind,
+    String(subject).toLowerCase(),
     String(value).toLowerCase()
   ].join('|'));
 }
@@ -458,6 +693,21 @@ function computeEvmLocalMerkleRoot(leafHash, witnesses) {
     const position = requireString(witness.position, 'witness.position');
     if (position !== 'left' && position !== 'right') {
       throw Object.assign(new Error(`unsupported EVM witness position: ${position}`), { statusCode: 400 });
+    }
+    node = position === 'left'
+      ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
+      : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
+  }
+  return node.toString('hex');
+}
+
+function computeSolanaLocalMerkleRoot(leafHash, witnesses) {
+  let node = Buffer.from(normalizeHex(leafHash), 'hex');
+  for (const witness of witnesses) {
+    const siblingHash = Buffer.from(normalizeHex(requireString(witness.hash, 'witness.hash')), 'hex');
+    const position = requireString(witness.position, 'witness.position');
+    if (position !== 'left' && position !== 'right') {
+      throw Object.assign(new Error(`unsupported Solana witness position: ${position}`), { statusCode: 400 });
     }
     node = position === 'left'
       ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()

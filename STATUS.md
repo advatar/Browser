@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Swift Solana Chain Trust Foundation Slice
+
+- [x] Triage Solana light-client gap from #61.
+- [x] Create tracker issue for Swift Solana chain trust foundation (#94).
+- [x] Add Swift Solana cluster, endpoint, slot/root, proof, transaction/account status, and service snapshot models.
+- [x] Add local fixture-proof validation for account and transaction-status evidence.
+- [x] Add stale slot/root detection and explicit RPC fallback labeling.
+- [x] Add Solana service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind Solana snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for status modeling, stale detection, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift Ethereum/EVM Light Client Foundation Slice
 
 - [x] Triage Ethereum/EVM light-client gap from #60.
