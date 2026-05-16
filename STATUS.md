@@ -19,6 +19,26 @@
 
 ## Active Task
 
+## Swift AFMarket Node And Settlement Slice
+
+- [x] Triage remaining AFMarket implementation gaps from #69.
+- [x] Create tracker issue for node/attestation/settlement work (#79).
+- [x] Add a local `./services/node` AFM node-agent stub and workspace scripts.
+- [x] Extend Swift AFM service configuration and snapshots with node availability.
+- [x] Add Swift install, dispatch, attestation, proof, and settlement models.
+- [x] Route service-backed Copilot through node install/dispatch when available.
+- [x] Surface AFMarket install, dispatch, attestation, proof, and settlement state in Swift UI/activity.
+- [x] Add focused Swift and service tests.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `npm --prefix services/node test` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-afm-node-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-afm-node-tests -only-testing:dBrowserTests` passed.
+
 ## Swift Service-Backed Strawberry Integrations
 
 - [x] Triage remaining Swift Strawberry service issues (#69 and #70).

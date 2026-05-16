@@ -350,6 +350,10 @@ enum CopilotRunEventKind: String, Codable, Equatable {
     case memoryAccessDenied
     case memoryStepUpRequired
     case memoryUnavailable
+    case afMarketInstallCompleted
+    case afMarketDispatchCompleted
+    case afMarketAttestationRecorded
+    case afMarketSettlementRecorded
     case modelStarted
     case modelCompleted
     case actionRequested

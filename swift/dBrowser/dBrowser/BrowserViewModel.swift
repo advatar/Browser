@@ -342,6 +342,7 @@ final class BrowserViewModel: ObservableObject {
 
             let provider = result.mode == .service ? "afm" : "local"
             let finalUsage = CopilotCreditUsage.estimate(prompt: prompt, snapshot: snapshot, provider: provider)
+            appendAFMarketEvents(runID: runID, result: result)
             finishCopilotRun(
                 runID,
                 status: .completed,
@@ -618,6 +619,33 @@ final class BrowserViewModel: ObservableObject {
     private func appendCopilotEvent(runID: UUID, kind: CopilotRunEventKind, message: String) {
         guard let index = copilotRuns.firstIndex(where: { $0.id == runID }) else { return }
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
+    }
+
+    private func appendAFMarketEvents(runID: UUID, result: CopilotRunResult) {
+        if let install = result.afmInstall {
+            appendCopilotEvent(
+                runID: runID,
+                kind: .afMarketInstallCompleted,
+                message: "Installed AFMarket pack \(install.packID) on node with \(install.mode) receipt."
+            )
+        }
+
+        guard let nodeTask = result.afmNodeTask else { return }
+        appendCopilotEvent(
+            runID: runID,
+            kind: .afMarketDispatchCompleted,
+            message: "Node dispatched \(nodeTask.taskID) with \(nodeTask.status) status."
+        )
+        appendCopilotEvent(
+            runID: runID,
+            kind: .afMarketAttestationRecorded,
+            message: "Recorded \(nodeTask.attestation.mode) attestation \(nodeTask.attestation.outputCommitment)."
+        )
+        appendCopilotEvent(
+            runID: runID,
+            kind: .afMarketSettlementRecorded,
+            message: "Recorded \(nodeTask.settlement.status) settlement on \(nodeTask.settlement.chainRef ?? "local-devnet")."
+        )
     }
 
     private func isCopilotRunActive(_ id: UUID) -> Bool {

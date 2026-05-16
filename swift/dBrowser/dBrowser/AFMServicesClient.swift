@@ -4,11 +4,13 @@ struct AFMServiceEndpointConfiguration: Equatable {
     var routerBaseURL: URL
     var registryBaseURL: URL
     var pipelinesBaseURL: URL
+    var nodeBaseURL: URL
 
     nonisolated static let local = AFMServiceEndpointConfiguration(
         routerBaseURL: URL(string: "http://127.0.0.1:4810")!,
         registryBaseURL: URL(string: "http://127.0.0.1:4820")!,
-        pipelinesBaseURL: URL(string: "http://127.0.0.1:4830")!
+        pipelinesBaseURL: URL(string: "http://127.0.0.1:4830")!,
+        nodeBaseURL: URL(string: "http://127.0.0.1:4840")!
     )
 }
 
@@ -16,6 +18,7 @@ struct AFMServiceSnapshot: Equatable {
     var routerAvailable: Bool
     var registryAvailable: Bool
     var pipelinesAvailable: Bool
+    var nodeAvailable: Bool
     var routerPacks: [AFMPackSummary]
     var registryPacks: [AFMPackSummary]
 
@@ -23,19 +26,25 @@ struct AFMServiceSnapshot: Equatable {
         routerAvailable: true,
         registryAvailable: true,
         pipelinesAvailable: true,
+        nodeAvailable: true,
         routerPacks: [],
         registryPacks: []
     )
 
     var allServicesAvailable: Bool {
-        routerAvailable && registryAvailable && pipelinesAvailable
+        routerAvailable && registryAvailable && pipelinesAvailable && nodeAvailable
+    }
+
+    var coreCopilotServicesAvailable: Bool {
+        routerAvailable && pipelinesAvailable
     }
 
     var serviceStatusText: String {
         let states = [
             "router \(routerAvailable ? "online" : "offline")",
             "registry \(registryAvailable ? "online" : "offline")",
-            "pipelines \(pipelinesAvailable ? "online" : "offline")"
+            "pipelines \(pipelinesAvailable ? "online" : "offline")",
+            "node \(nodeAvailable ? "online" : "offline")"
         ]
         return states.joined(separator: ", ")
     }
@@ -86,6 +95,73 @@ struct AFMPipelineJobResult: Codable, Equatable {
     var status: String
 }
 
+struct AFMNodeInstallReceipt: Codable, Equatable {
+    var mode: String
+    var installCommitment: String
+    var verifier: String
+}
+
+struct AFMNodeInstallResult: Codable, Equatable, Identifiable {
+    var ok: Bool?
+    var id: String
+    var packID: String
+    var checksum: String?
+    var bundleURL: String?
+    var requestedBy: String?
+    var status: String
+    var mode: String
+    var installedAt: String?
+    var receipt: AFMNodeInstallReceipt?
+}
+
+struct AFMNodeTaskOutput: Codable, Equatable {
+    var summary: String
+    var outputCommitment: String
+    var completedAt: String?
+}
+
+struct AFMAttestedRun: Codable, Equatable {
+    var mode: String
+    var taskID: String
+    var outputCommitment: String
+    var nonce: String
+    var tokenCount: Int
+    var contextPassages: Int
+    var attestationToken: String?
+}
+
+struct AFMProofState: Codable, Equatable {
+    var id: String?
+    var proofID: String?
+    var status: String
+    var verifier: String
+    var publicInputs: [String: String]?
+}
+
+struct AFMSettlementState: Codable, Equatable {
+    var id: String?
+    var status: String
+    var chainRef: String?
+    var escrowID: String?
+    var verifier: String?
+    var mode: String?
+    var settledAt: String?
+}
+
+struct AFMNodeTaskResult: Codable, Equatable, Identifiable {
+    var ok: Bool?
+    var id: String
+    var taskID: String
+    var packID: String
+    var installID: String?
+    var status: String
+    var mode: String
+    var result: AFMNodeTaskOutput
+    var attestation: AFMAttestedRun
+    var proof: AFMProofState
+    var settlement: AFMSettlementState
+}
+
 enum AFMServicesClientError: Error, LocalizedError {
     case invalidResponse
     case httpStatus(Int)
@@ -132,6 +208,21 @@ final class AFMServicesClient {
         let memoryContextIDs: [String]
     }
 
+    private struct NodeInstallRequest: Encodable {
+        let packID: String
+        let checksum: String?
+        let bundleURL: String?
+        let requestedBy: String
+    }
+
+    private struct NodeTaskRequest: Encodable {
+        let prompt: String
+        let pageURLString: String?
+        let selectedPackID: String?
+        let pageSnapshotCommitment: String?
+        let memoryContextIDs: [String]
+    }
+
     private let configuration: AFMServiceEndpointConfiguration
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -149,6 +240,7 @@ final class AFMServicesClient {
         let routerAvailable = (try? await health(baseURL: configuration.routerBaseURL)) ?? false
         let registryAvailable = (try? await health(baseURL: configuration.registryBaseURL)) ?? false
         let pipelinesAvailable = (try? await health(baseURL: configuration.pipelinesBaseURL)) ?? false
+        let nodeAvailable = (try? await health(baseURL: configuration.nodeBaseURL)) ?? false
         let routerPacks = routerAvailable ? ((try? await packs(baseURL: configuration.routerBaseURL)) ?? []) : []
         let registryPacks = registryAvailable ? ((try? await packs(baseURL: configuration.registryBaseURL)) ?? []) : []
 
@@ -156,6 +248,7 @@ final class AFMServicesClient {
             routerAvailable: routerAvailable,
             registryAvailable: registryAvailable,
             pipelinesAvailable: pipelinesAvailable,
+            nodeAvailable: nodeAvailable,
             routerPacks: routerPacks,
             registryPacks: registryPacks
         )
@@ -208,6 +301,48 @@ final class AFMServicesClient {
             method: "POST",
             baseURL: configuration.pipelinesBaseURL,
             path: "/jobs",
+            body: body
+        )
+    }
+
+    func installPack(
+        packID: String,
+        checksum: String?,
+        bundleURL: String? = nil,
+        requestedBy: String = "swift-copilot"
+    ) async throws -> AFMNodeInstallResult {
+        let body = NodeInstallRequest(
+            packID: packID,
+            checksum: checksum,
+            bundleURL: bundleURL,
+            requestedBy: requestedBy
+        )
+        return try await send(
+            method: "POST",
+            baseURL: configuration.nodeBaseURL,
+            path: "/packs/install",
+            body: body
+        )
+    }
+
+    func dispatchTask(
+        prompt: String,
+        pageURLString: String?,
+        selectedPackID: String?,
+        pageSnapshotCommitment: String?,
+        memoryContextIDs: [String] = []
+    ) async throws -> AFMNodeTaskResult {
+        let body = NodeTaskRequest(
+            prompt: prompt,
+            pageURLString: pageURLString,
+            selectedPackID: selectedPackID,
+            pageSnapshotCommitment: pageSnapshotCommitment,
+            memoryContextIDs: memoryContextIDs
+        )
+        return try await send(
+            method: "POST",
+            baseURL: configuration.nodeBaseURL,
+            path: "/tasks",
             body: body
         )
     }

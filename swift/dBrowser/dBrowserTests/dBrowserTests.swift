@@ -513,6 +513,302 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func runtimeBridgeInstallsAndDispatchesThroughAFMNode() async {
+        let capturedRequests = JSONRequestCapture()
+        let serviceHarness = Self.makeAFMServiceSession(key: "node") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+            capturedRequests.capture(request)
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "maintainer": "core",
+                            "version": "0.1.0",
+                            "checksum": "0xabc"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-node",
+                    "status": "queued"
+                ])
+            }
+
+            if path == "/packs/install" {
+                return Self.jsonResponse(for: request, status: 201, body: [
+                    "ok": true,
+                    "id": "install-1",
+                    "packID": "afm://demo-writer",
+                    "checksum": "0xabc",
+                    "status": "installed",
+                    "mode": "local-mock",
+                    "installedAt": "2026-05-16T00:00:00Z",
+                    "receipt": [
+                        "mode": "local-mock",
+                        "installCommitment": "0xinstall",
+                        "verifier": "local-dev"
+                    ]
+                ])
+            }
+
+            if path == "/tasks" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "task-1",
+                    "taskID": "task-1",
+                    "packID": "afm://demo-writer",
+                    "installID": "install-1",
+                    "status": "completed",
+                    "mode": "local-mock",
+                    "result": [
+                        "summary": "node completed",
+                        "outputCommitment": "0xoutput",
+                        "completedAt": "2026-05-16T00:00:01Z"
+                    ],
+                    "attestation": [
+                        "mode": "local-mock",
+                        "taskID": "task-1",
+                        "outputCommitment": "0xoutput",
+                        "nonce": "nonce-1",
+                        "tokenCount": 12,
+                        "contextPassages": 1
+                    ],
+                    "proof": [
+                        "id": "proof-1",
+                        "proofID": "proof-1",
+                        "status": "mock",
+                        "verifier": "local-dev",
+                        "publicInputs": [
+                            "packID": "afm://demo-writer",
+                            "pageSnapshotCommitment": "0xsnapshot",
+                            "outputCommitment": "0xoutput"
+                        ]
+                    ],
+                    "settlement": [
+                        "id": "settlement-1",
+                        "status": "mock",
+                        "chainRef": "local-devnet",
+                        "verifier": "local-dev",
+                        "mode": "local-mock",
+                        "settledAt": "2026-05-16T00:00:02Z"
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+        let memoryRecall = OpenMindMemoryRecallResult(
+            decision: OpenMindAccessDecision(
+                status: .allowed,
+                allowedScopes: ["profile"],
+                reason: "allowed",
+                redactionCount: 0,
+                stepUpPrompt: nil
+            ),
+            memories: [
+                OpenMindMemoryRecord(
+                    id: "mem-node",
+                    summary: "Use AFMarket node evidence.",
+                    source: "test",
+                    sensitivity: "normal",
+                    evidenceURLString: nil
+                )
+            ],
+            notices: []
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(
+                prompt: "Summarize",
+                pageURLString: "https://example.com",
+                preferredAFMPackID: "afm://demo-writer",
+                memoryRecall: memoryRecall
+            )
+        )
+
+        let installBody = capturedRequests.body(for: "/packs/install")
+        let taskBody = capturedRequests.body(for: "/tasks")
+
+        #expect(result.mode == .service)
+        #expect(result.afmInstall?.status == "installed")
+        #expect(result.afmInstall?.mode == "local-mock")
+        #expect(result.afmNodeTask?.attestation.mode == "local-mock")
+        #expect(result.afmNodeTask?.proof.status == "mock")
+        #expect(result.afmNodeTask?.settlement.status == "mock")
+        #expect(result.summary.contains("local-mock attestation"))
+        #expect(result.suggestions.contains { $0.contains("Node installed afm://demo-writer") })
+        #expect(installBody?["checksum"] as? String == "0xabc")
+        #expect(taskBody?["selectedPackID"] as? String == "afm://demo-writer")
+        #expect(taskBody?["memoryContextIDs"] as? [String] == ["mem-node"])
+    }
+
+    @MainActor
+    @Test func copilotRunRecordsAFMarketNodeActivity() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "nodeevents") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "checksum": "0xabc"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-node-events",
+                    "status": "queued"
+                ])
+            }
+
+            if path == "/packs/install" {
+                return Self.jsonResponse(for: request, status: 201, body: [
+                    "id": "install-events",
+                    "packID": "afm://demo-writer",
+                    "checksum": "0xabc",
+                    "status": "installed",
+                    "mode": "local-mock"
+                ])
+            }
+
+            if path == "/tasks" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "id": "task-events",
+                    "taskID": "task-events",
+                    "packID": "afm://demo-writer",
+                    "installID": "install-events",
+                    "status": "completed",
+                    "mode": "local-mock",
+                    "result": [
+                        "summary": "node completed",
+                        "outputCommitment": "0xevents"
+                    ],
+                    "attestation": [
+                        "mode": "local-mock",
+                        "taskID": "task-events",
+                        "outputCommitment": "0xevents",
+                        "nonce": "nonce-events",
+                        "tokenCount": 10,
+                        "contextPassages": 0
+                    ],
+                    "proof": [
+                        "proofID": "proof-events",
+                        "status": "mock",
+                        "verifier": "local-dev"
+                    ],
+                    "settlement": [
+                        "status": "mock",
+                        "chainRef": "local-devnet",
+                        "mode": "local-mock"
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        model.navigate("https://example.com")
+
+        guard let runID = model.runCopilot(prompt: "Summarize with node") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+        let events = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
+
+        #expect(completed)
+        #expect(events.contains(.afMarketInstallCompleted))
+        #expect(events.contains(.afMarketDispatchCompleted))
+        #expect(events.contains(.afMarketAttestationRecorded))
+        #expect(events.contains(.afMarketSettlementRecorded))
+    }
+
+    @MainActor
     @Test func runtimeBridgeFallsBackWhenAFMServicesAreOffline() async {
         let serviceHarness = Self.makeAFMServiceSession(key: "offline") { request in
             Self.jsonResponse(for: request, status: 503, body: ["ok": false])
@@ -1071,7 +1367,8 @@ struct dBrowserTests {
         let endpoints = AFMServiceEndpointConfiguration(
             routerBaseURL: URL(string: "http://\(key)-router.test:4810")!,
             registryBaseURL: URL(string: "http://\(key)-registry.test:4820")!,
-            pipelinesBaseURL: URL(string: "http://\(key)-pipelines.test:4830")!
+            pipelinesBaseURL: URL(string: "http://\(key)-pipelines.test:4830")!,
+            nodeBaseURL: URL(string: "http://\(key)-node.test:4840")!
         )
         return (endpoints, URLSession(configuration: configuration))
     }

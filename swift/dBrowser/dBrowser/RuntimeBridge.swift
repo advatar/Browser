@@ -97,6 +97,8 @@ struct CopilotRunResult: Equatable, Identifiable {
     let suggestions: [String]
     let ranAt: Date
     let mode: RuntimeBridgeMode
+    let afmInstall: AFMNodeInstallResult?
+    let afmNodeTask: AFMNodeTaskResult?
 
     init(
         id: UUID = UUID(),
@@ -104,7 +106,9 @@ struct CopilotRunResult: Equatable, Identifiable {
         summary: String,
         suggestions: [String],
         ranAt: Date = Date(),
-        mode: RuntimeBridgeMode
+        mode: RuntimeBridgeMode,
+        afmInstall: AFMNodeInstallResult? = nil,
+        afmNodeTask: AFMNodeTaskResult? = nil
     ) {
         self.id = id
         self.title = title
@@ -112,6 +116,8 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.suggestions = suggestions
         self.ranAt = ranAt
         self.mode = mode
+        self.afmInstall = afmInstall
+        self.afmNodeTask = afmNodeTask
     }
 }
 
@@ -318,17 +324,52 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 pageSnapshotCommitment: snapshotCommitment,
                 memoryContextIDs: memoryIDs
             )
+            var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(memoryContext)"
+            var suggestions = [
+                "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
+                "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
+                request.preferredAFMPackID.map { "Copilot requested runner pack \($0)." } ?? "Router chose the runner pack.",
+                "Pipelines accepted job \(job.id) with status \(job.status)."
+            ]
+            var installResult: AFMNodeInstallResult?
+            var nodeTaskResult: AFMNodeTaskResult?
+
+            if snapshot.nodeAvailable, let selectedPackID {
+                do {
+                    let selectedPackSummary = snapshot.availablePacks.first { $0.id == selectedPackID }
+                    let install = try await afmServicesClient.installPack(
+                        packID: selectedPackID,
+                        checksum: selectedPackSummary?.checksum
+                    )
+                    let nodeTask = try await afmServicesClient.dispatchTask(
+                        prompt: task,
+                        pageURLString: target,
+                        selectedPackID: selectedPackID,
+                        pageSnapshotCommitment: snapshotCommitment,
+                        memoryContextIDs: memoryIDs
+                    )
+                    installResult = install
+                    nodeTaskResult = nodeTask
+                    summary += " Node \(nodeTask.taskID) completed with \(nodeTask.attestation.mode) attestation, \(nodeTask.proof.status) proof, and \(nodeTask.settlement.status) settlement."
+                    suggestions.append("Node installed \(selectedPackID) with \(install.status) status (\(install.mode)).")
+                    suggestions.append("Node dispatched \(nodeTask.taskID) with \(nodeTask.attestation.mode) attestation.")
+                    suggestions.append("Proof \(nodeTask.proof.proofID ?? nodeTask.proof.id ?? "local") is \(nodeTask.proof.status); settlement is \(nodeTask.settlement.status) on \(nodeTask.settlement.chainRef ?? "local-devnet").")
+                } catch {
+                    suggestions.append("Node agent failed install/dispatch: \(error.localizedDescription).")
+                }
+            } else if snapshot.nodeAvailable {
+                suggestions.append("Node agent is online, but no runner pack was selected for install/dispatch.")
+            } else {
+                suggestions.append("Node agent unavailable; install, attestation, proof, and settlement stayed offline.")
+            }
 
             return CopilotRunResult(
                 title: "AFM service Copilot",
-                summary: "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(memoryContext)",
-                suggestions: [
-                    "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
-                    "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
-                    request.preferredAFMPackID.map { "Copilot requested runner pack \($0)." } ?? "Router chose the runner pack.",
-                    "Pipelines accepted job \(job.id) with status \(job.status)."
-                ],
-                mode: .service
+                summary: summary,
+                suggestions: suggestions,
+                mode: .service,
+                afmInstall: installResult,
+                afmNodeTask: nodeTaskResult
             )
         } catch {
             featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: afmServiceSnapshot)
@@ -457,9 +498,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ),
             RuntimeFeatureState(
                 feature: .copilot,
-                mode: afmSnapshot.routerAvailable && afmSnapshot.pipelinesAvailable ? .service : .local,
+                mode: afmSnapshot.coreCopilotServicesAvailable ? .service : .local,
                 isAvailable: true,
-                status: afmSnapshot.routerAvailable && afmSnapshot.pipelinesAvailable ? "AFM router + pipelines" : "Local fallback bridge"
+                status: afmSnapshot.coreCopilotServicesAvailable ? "AFM router + pipelines" : "Local fallback bridge"
             ),
             RuntimeFeatureState(feature: .wallet, mode: .local, isAvailable: true, status: "Local policy bridge"),
             RuntimeFeatureState(feature: .downloads, mode: .native, isAvailable: true, status: "URLSession bridge")

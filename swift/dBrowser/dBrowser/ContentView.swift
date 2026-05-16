@@ -848,6 +848,12 @@ private struct AFMServicesPanelView: View {
             Text(snapshot.serviceStatusText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Label(
+                snapshot.nodeAvailable ? "Node install, dispatch, attestation, proof, and settlement online" : "Node install, dispatch, attestation, proof, and settlement offline",
+                systemImage: snapshot.nodeAvailable ? "checkmark.seal" : "xmark.seal"
+            )
+            .font(.caption)
+            .foregroundStyle(snapshot.nodeAvailable ? Color.green : Color.secondary)
 
             if snapshot.availablePacks.isEmpty {
                 Text("No runner packs reported by router or registry.")

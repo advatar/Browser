@@ -15,6 +15,7 @@
     "dev:router": "pnpm --filter @browser/afm-router dev",
     "dev:registry": "pnpm --filter @browser/afm-registry dev",
     "dev:pipelines": "pnpm --filter @browser/afm-pipelines dev",
+    "dev:node": "pnpm --filter @browser/afm-node dev",
     "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
     "prepare": "husky"
   },
@@ -31,6 +32,7 @@
     "services/router",
     "services/registry",
     "services/pipelines",
+    "services/node",
     "apps/afm-marketplace"
   ],
   "lint-staged": {
