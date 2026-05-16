@@ -338,6 +338,52 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func addressAutocompleteUsesPreviouslyVisitedURLs() {
+        let model = BrowserViewModel()
+        model.navigate("https://example.com/docs/start")
+        model.navigate("https://docs.ipfs.tech/concepts/ipns")
+        model.addressText = "exa"
+
+        let suggestions = model.addressAutocompleteSuggestions()
+
+        #expect(suggestions.first?.urlString == "https://example.com/docs/start")
+        #expect(suggestions.allSatisfy { suggestion in
+            model.history.contains { $0.urlString == suggestion.urlString }
+        })
+    }
+
+    @MainActor
+    @Test func addressAutocompleteRanksURLPrefixMatchesBeforeContainsMatches() {
+        let model = BrowserViewModel()
+        model.navigate("https://example.com/docs")
+        model.navigate("https://docs.example.com/guide")
+        model.addressText = "example"
+
+        let suggestions = model.addressAutocompleteSuggestions()
+
+        #expect(suggestions.map(\.urlString) == [
+            "https://example.com/docs",
+            "https://docs.example.com/guide"
+        ])
+    }
+
+    @MainActor
+    @Test func addressAutocompleteDeduplicatesHistoryAndHidesExactMatch() {
+        let model = BrowserViewModel()
+        model.navigate("https://repeat.example/path")
+        model.navigate("https://other.example")
+        model.navigate("https://repeat.example/path")
+        model.addressText = "repeat"
+
+        let suggestions = model.addressAutocompleteSuggestions()
+
+        #expect(suggestions.filter { $0.urlString == "https://repeat.example/path" }.count == 1)
+
+        model.addressText = "https://repeat.example/path"
+        #expect(model.addressAutocompleteSuggestions().isEmpty)
+    }
+
+    @MainActor
     @Test func panelSelectionShowsPanelsAndNavigationReturnsToBrowser() {
         let model = BrowserViewModel()
 

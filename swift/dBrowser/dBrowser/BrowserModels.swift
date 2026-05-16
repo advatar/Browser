@@ -97,6 +97,13 @@ struct BrowserHistoryEntry: Identifiable, Equatable {
     let visitedAt: Date
 }
 
+struct BrowserAddressSuggestion: Identifiable, Equatable {
+    let title: String
+    let urlString: String
+
+    var id: String { urlString }
+}
+
 struct BrowserBookmark: Identifiable, Equatable {
     let id = UUID()
     let title: String

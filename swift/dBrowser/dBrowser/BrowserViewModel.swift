@@ -88,6 +88,39 @@ final class BrowserViewModel: ObservableObject {
         navigate(addressText)
     }
 
+    func addressAutocompleteSuggestions(limit: Int = 6) -> [BrowserAddressSuggestion] {
+        let query = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedQuery = normalizedAutocompleteText(query)
+        guard !normalizedQuery.isEmpty else { return [] }
+
+        var seenURLs = Set<String>()
+        let rankedSuggestions = history.enumerated().compactMap { index, entry -> (rank: Int, index: Int, suggestion: BrowserAddressSuggestion)? in
+            let normalizedURL = normalizedAutocompleteText(entry.urlString)
+            guard seenURLs.insert(normalizedURL).inserted else { return nil }
+            guard let rank = autocompleteRank(for: entry, query: normalizedQuery) else { return nil }
+
+            return (
+                rank,
+                index,
+                BrowserAddressSuggestion(title: entry.title, urlString: entry.urlString)
+            )
+        }
+
+        return rankedSuggestions
+            .sorted {
+                if $0.rank != $1.rank {
+                    return $0.rank < $1.rank
+                }
+                return $0.index < $1.index
+            }
+            .prefix(limit)
+            .map { $0.suggestion }
+    }
+
+    func openAddressSuggestion(_ suggestion: BrowserAddressSuggestion) {
+        navigate(suggestion.urlString)
+    }
+
     func navigate(_ rawInput: String) {
         guard let index = activeTabIndex else { return }
         selectedPanel = nil
@@ -234,5 +267,48 @@ final class BrowserViewModel: ObservableObject {
             return host
         }
         return url.absoluteString
+    }
+
+    private func autocompleteRank(for entry: BrowserHistoryEntry, query: String) -> Int? {
+        let normalizedURL = normalizedAutocompleteText(entry.urlString)
+        let displayURL = displayAutocompleteText(for: entry.urlString)
+        let host = URL(string: entry.urlString)?.host.map(normalizedAutocompleteText) ?? ""
+        let title = normalizedAutocompleteText(entry.title)
+
+        guard normalizedURL != query, displayURL != query else {
+            return nil
+        }
+
+        if normalizedURL.hasPrefix(query) {
+            return 0
+        }
+        if displayURL.hasPrefix(query) {
+            return 1
+        }
+        if host.hasPrefix(query) {
+            return 2
+        }
+        if normalizedURL.contains(query) || displayURL.contains(query) {
+            return 3
+        }
+        if title.contains(query) {
+            return 4
+        }
+        return nil
+    }
+
+    private func normalizedAutocompleteText(_ text: String) -> String {
+        text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func displayAutocompleteText(for urlString: String) -> String {
+        var text = normalizedAutocompleteText(urlString)
+        for prefix in ["https://www.", "http://www.", "https://", "http://"] where text.hasPrefix(prefix) {
+            text.removeFirst(prefix.count)
+            break
+        }
+        return text
     }
 }

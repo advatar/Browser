@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## iOS URL Autocomplete
+
+- [x] Inspect Swift browser history and address-entry flow.
+- [x] Add history-backed URL autocomplete suggestions.
+- [x] Add focused unit tests for autocomplete matching and ordering.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit the scoped autocomplete change.
+
 ## iOS Gemma MLX Bundle
 
 - [x] Search the wider `~/dev/advatar` workspace for existing MLX-optimized Gemma artifacts.

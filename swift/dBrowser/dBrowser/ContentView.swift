@@ -50,7 +50,7 @@ struct ContentView: View {
     }
 
     private var browserToolbar: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Button {
                 browser.goBack()
             } label: {
@@ -74,13 +74,13 @@ struct ContentView: View {
             }
             .help("Reload")
 
-            TextField("Search or enter address", text: $browser.addressText)
-                .focused($addressFieldFocused)
-                .browserAddressFieldStyle()
-                .onSubmit {
-                    browser.navigateFromAddress()
-                    addressFieldFocused = false
-                }
+            BrowserAddressAutocompleteField(
+                browser: browser,
+                isFocused: $addressFieldFocused
+            ) {
+                browser.navigateFromAddress()
+                addressFieldFocused = false
+            }
 
             Button {
                 browser.navigateFromAddress()
@@ -185,6 +185,76 @@ struct ContentView: View {
             return "runtime bridges ready"
         }
         return "\(browser.unavailableFeatureCount) bridge\(browser.unavailableFeatureCount == 1 ? "" : "s") offline"
+    }
+}
+
+private struct BrowserAddressAutocompleteField: View {
+    @ObservedObject var browser: BrowserViewModel
+    let isFocused: FocusState<Bool>.Binding
+    let onCommit: () -> Void
+
+    private var suggestions: [BrowserAddressSuggestion] {
+        guard isFocused.wrappedValue else { return [] }
+        return browser.addressAutocompleteSuggestions()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Search or enter address", text: $browser.addressText)
+                .focused(isFocused)
+                .browserAddressFieldStyle()
+                .onSubmit(onCommit)
+
+            if !suggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(suggestions) { suggestion in
+                        Button {
+                            browser.openAddressSuggestion(suggestion)
+                            isFocused.wrappedValue = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "clock")
+                                    .frame(width: 22)
+                                    .foregroundStyle(Color.accentColor)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(suggestion.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text(suggestion.urlString)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.turn.down.left")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Open previously visited URL")
+
+                        if suggestion.id != suggestions.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+                .background(platformBackgroundColor)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .shadow(color: Color.black.opacity(0.08), radius: 8, y: 3)
+                .accessibilityIdentifier("address-autocomplete-suggestions")
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
