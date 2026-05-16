@@ -20,7 +20,10 @@ final class BrowserViewModel: ObservableObject {
     @Published var afmServiceSnapshot: AFMServiceSnapshot
     @Published var selectedAFMPackID: String?
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
+    @Published var openMindContinuityState: OpenMindContinuityState
+    @Published var openMindPostureState: OpenMindPostureState
     @Published var latestOpenMindRecall: OpenMindMemoryRecallResult?
+    @Published var latestOpenMindWriteback: OpenMindWritebackOutcome?
 
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
@@ -50,6 +53,8 @@ final class BrowserViewModel: ObservableObject {
         self.runtimeFeatureStates = runtimeBridge.featureStates
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         self.openMindCapabilityState = .disabled
+        self.openMindContinuityState = .disabled
+        self.openMindPostureState = .disabled
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
@@ -185,7 +190,10 @@ final class BrowserViewModel: ObservableObject {
     func refreshRuntimeBridgeStatus() async {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
-        openMindCapabilityState = await openMindMemoryClient.refreshCapabilities()
+        let openMindState = await openMindMemoryClient.refreshRuntimeState()
+        openMindCapabilityState = openMindState.capability
+        openMindContinuityState = openMindState.continuity
+        openMindPostureState = openMindState.posture
         if let selectedAFMPackID, !afmServiceSnapshot.availablePacks.contains(where: { $0.id == selectedAFMPackID }) {
             self.selectedAFMPackID = nil
         }
@@ -353,6 +361,69 @@ final class BrowserViewModel: ObservableObject {
         }
         copilotTasks[runID] = task
         return runID
+    }
+
+    @discardableResult
+    func requestOpenMindWriteback(for runID: UUID) -> Task<Void, Never>? {
+        guard copilotRuns.contains(where: { $0.id == runID }) else { return nil }
+        return Task { @MainActor in
+            _ = await writeBackOpenMindMemory(for: runID)
+        }
+    }
+
+    @discardableResult
+    func writeBackOpenMindMemory(for runID: UUID) async -> OpenMindWritebackOutcome {
+        guard let run = copilotRuns.first(where: { $0.id == runID }) else {
+            let outcome = OpenMindWritebackOutcome(
+                status: .unavailable,
+                revisionID: nil,
+                message: "Copilot run is no longer available for memory writeback."
+            )
+            latestOpenMindWriteback = outcome
+            return outcome
+        }
+
+        guard let result = run.result else {
+            let outcome = OpenMindWritebackOutcome(
+                status: .denied,
+                revisionID: nil,
+                message: "Copilot run has no completed result to remember."
+            )
+            latestOpenMindWriteback = outcome
+            appendCopilotEvent(runID: runID, kind: .memoryWritebackDenied, message: outcome.message)
+            return outcome
+        }
+
+        if openMindPostureState.status == .available && !openMindPostureState.allowsMemoryWriteback {
+            let outcome = OpenMindWritebackOutcome(
+                status: .denied,
+                revisionID: nil,
+                message: openMindPostureState.userMessage ?? openMindPostureState.summary
+            )
+            latestOpenMindWriteback = outcome
+            appendCopilotEvent(runID: runID, kind: .memoryWritebackDenied, message: "OpenMind posture blocked writeback: \(outcome.message)")
+            return outcome
+        }
+
+        appendCopilotEvent(runID: runID, kind: .memoryWritebackRequested, message: "Requested explicit OpenMind memory writeback.")
+        let snapshot = latestPageSnapshot?.urlString == run.targetURLString ? latestPageSnapshot : nil
+        let request = OpenMindWritebackRequest(
+            runID: run.id,
+            prompt: run.prompt,
+            pageURLString: run.targetURLString,
+            summary: result.summary,
+            source: "dBrowser.copilot",
+            snapshotCommitment: OpenMindMemoryClient.snapshotCommitment(for: snapshot),
+            idempotencyKey: "copilot-\(run.id.uuidString)-writeback"
+        )
+        let outcome = await openMindMemoryClient.writeback(request)
+        latestOpenMindWriteback = outcome
+        appendCopilotEvent(
+            runID: runID,
+            kind: copilotWritebackEventKind(for: outcome),
+            message: copilotWritebackMessage(for: outcome)
+        )
+        return outcome
     }
 
     func cancelCopilotRun(_ id: UUID) {
@@ -678,6 +749,32 @@ final class BrowserViewModel: ObservableObject {
             return "OpenMind requires step-up before memory recall: \(recall.decision.stepUpPrompt ?? recall.decision.reason)"
         case .unavailable:
             return "OpenMind memory unavailable: \(recall.decision.reason)"
+        }
+    }
+
+    private func copilotWritebackEventKind(for outcome: OpenMindWritebackOutcome) -> CopilotRunEventKind {
+        switch outcome.status {
+        case .recorded:
+            return .memoryWritebackRecorded
+        case .proposed:
+            return .memoryWritebackProposed
+        case .denied:
+            return .memoryWritebackDenied
+        case .unavailable:
+            return .memoryWritebackUnavailable
+        }
+    }
+
+    private func copilotWritebackMessage(for outcome: OpenMindWritebackOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "OpenMind recorded memory revision \(outcome.revisionID ?? "without revision ID")."
+        case .proposed:
+            return "OpenMind created a memory proposal: \(outcome.message)"
+        case .denied:
+            return "OpenMind denied memory writeback: \(outcome.message)"
+        case .unavailable:
+            return "OpenMind memory writeback unavailable: \(outcome.message)"
         }
     }
 

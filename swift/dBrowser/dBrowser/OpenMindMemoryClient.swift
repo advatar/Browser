@@ -49,6 +49,221 @@ struct OpenMindMemoryCapabilityState: Codable, Equatable {
     }
 }
 
+enum OpenMindResourceStatus: String, Codable, Equatable {
+    case disabled
+    case available
+    case unavailable
+}
+
+struct OpenMindContinuityState: Codable, Equatable {
+    var status: OpenMindResourceStatus
+    var version: String?
+    var mode: String?
+    var summary: String
+    var pendingStepUps: Int
+    var updatedAt: String?
+    var notices: [String]
+
+    nonisolated static let disabled = OpenMindContinuityState(
+        status: .disabled,
+        version: nil,
+        mode: nil,
+        summary: "OpenMind continuity is disabled until an MCP endpoint is configured.",
+        pendingStepUps: 0,
+        updatedAt: nil,
+        notices: []
+    )
+
+    nonisolated static func unavailable(_ message: String) -> OpenMindContinuityState {
+        OpenMindContinuityState(
+            status: .unavailable,
+            version: nil,
+            mode: nil,
+            summary: message,
+            pendingStepUps: 0,
+            updatedAt: nil,
+            notices: [message]
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case available
+        case version
+        case mode
+        case summary
+        case pendingStepUps
+        case pendingStepUpCount
+        case updatedAt
+        case notices
+    }
+
+    nonisolated init(
+        status: OpenMindResourceStatus,
+        version: String?,
+        mode: String?,
+        summary: String,
+        pendingStepUps: Int,
+        updatedAt: String?,
+        notices: [String]
+    ) {
+        self.status = status
+        self.version = version
+        self.mode = mode
+        self.summary = summary
+        self.pendingStepUps = pendingStepUps
+        self.updatedAt = updatedAt
+        self.notices = notices
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedStatus = try container.decodeIfPresent(OpenMindResourceStatus.self, forKey: .status)
+        let available = try container.decodeIfPresent(Bool.self, forKey: .available)
+        let version = try container.decodeIfPresent(String.self, forKey: .version)
+        let mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        let summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        let pendingStepUps = try container.decodeIfPresent(Int.self, forKey: .pendingStepUps)
+            ?? container.decodeIfPresent(Int.self, forKey: .pendingStepUpCount)
+            ?? 0
+
+        self.status = decodedStatus ?? (available == false ? .unavailable : .available)
+        self.version = version
+        self.mode = mode
+        self.summary = summary ?? mode ?? "OpenMind continuity is available."
+        self.pendingStepUps = pendingStepUps
+        self.updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        self.notices = try container.decodeIfPresent([String].self, forKey: .notices) ?? []
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(version, forKey: .version)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(pendingStepUps, forKey: .pendingStepUps)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encode(notices, forKey: .notices)
+    }
+}
+
+struct OpenMindPostureState: Codable, Equatable {
+    var status: OpenMindResourceStatus
+    var mode: String?
+    var userMessage: String?
+    var allowsMemoryWriteback: Bool
+    var requiresExplicitConfirmation: Bool
+    var summary: String
+    var notices: [String]
+
+    nonisolated static let disabled = OpenMindPostureState(
+        status: .disabled,
+        mode: nil,
+        userMessage: nil,
+        allowsMemoryWriteback: false,
+        requiresExplicitConfirmation: true,
+        summary: "OpenMind posture is disabled until an MCP endpoint is configured.",
+        notices: []
+    )
+
+    nonisolated static func unavailable(_ message: String) -> OpenMindPostureState {
+        OpenMindPostureState(
+            status: .unavailable,
+            mode: nil,
+            userMessage: nil,
+            allowsMemoryWriteback: false,
+            requiresExplicitConfirmation: true,
+            summary: message,
+            notices: [message]
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case available
+        case mode
+        case posture
+        case userMessage
+        case message
+        case allowsMemoryWriteback
+        case memoryWritebackAllowed
+        case requiresExplicitConfirmation
+        case requiresConfirmation
+        case summary
+        case notices
+    }
+
+    nonisolated init(
+        status: OpenMindResourceStatus,
+        mode: String?,
+        userMessage: String?,
+        allowsMemoryWriteback: Bool,
+        requiresExplicitConfirmation: Bool,
+        summary: String,
+        notices: [String]
+    ) {
+        self.status = status
+        self.mode = mode
+        self.userMessage = userMessage
+        self.allowsMemoryWriteback = allowsMemoryWriteback
+        self.requiresExplicitConfirmation = requiresExplicitConfirmation
+        self.summary = summary
+        self.notices = notices
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedStatus = try container.decodeIfPresent(OpenMindResourceStatus.self, forKey: .status)
+        let available = try container.decodeIfPresent(Bool.self, forKey: .available)
+        let mode = try container.decodeIfPresent(String.self, forKey: .mode)
+            ?? container.decodeIfPresent(String.self, forKey: .posture)
+        let userMessage = try container.decodeIfPresent(String.self, forKey: .userMessage)
+            ?? container.decodeIfPresent(String.self, forKey: .message)
+        let summary = try container.decodeIfPresent(String.self, forKey: .summary)
+            ?? userMessage
+            ?? mode
+            ?? "OpenMind posture is available."
+        let allowsMemoryWriteback = try container.decodeIfPresent(Bool.self, forKey: .allowsMemoryWriteback)
+            ?? container.decodeIfPresent(Bool.self, forKey: .memoryWritebackAllowed)
+            ?? true
+        let requiresExplicitConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requiresExplicitConfirmation)
+            ?? container.decodeIfPresent(Bool.self, forKey: .requiresConfirmation)
+            ?? false
+
+        self.status = decodedStatus ?? (available == false ? .unavailable : .available)
+        self.mode = mode
+        self.userMessage = userMessage
+        self.allowsMemoryWriteback = allowsMemoryWriteback
+        self.requiresExplicitConfirmation = requiresExplicitConfirmation
+        self.summary = summary
+        self.notices = try container.decodeIfPresent([String].self, forKey: .notices) ?? []
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encodeIfPresent(userMessage, forKey: .userMessage)
+        try container.encode(allowsMemoryWriteback, forKey: .allowsMemoryWriteback)
+        try container.encode(requiresExplicitConfirmation, forKey: .requiresExplicitConfirmation)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(notices, forKey: .notices)
+    }
+}
+
+struct OpenMindMemoryRuntimeState: Codable, Equatable {
+    var capability: OpenMindMemoryCapabilityState
+    var continuity: OpenMindContinuityState
+    var posture: OpenMindPostureState
+
+    nonisolated static let disabled = OpenMindMemoryRuntimeState(
+        capability: .disabled,
+        continuity: .disabled,
+        posture: .disabled
+    )
+}
+
 struct OpenMindAccessIntent: Codable, Equatable {
     var prompt: String
     var pageURLString: String?
@@ -180,6 +395,10 @@ final class OpenMindMemoryClient {
         var request: OpenMindWritebackRequest
     }
 
+    private struct PostureRequest: Encodable {
+        var clientID: String
+    }
+
     private let configuration: OpenMindMemoryEndpointConfiguration
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -210,6 +429,49 @@ final class OpenMindMemoryClient {
         } catch {
             return .unavailable(error.localizedDescription)
         }
+    }
+
+    func refreshContinuity() async -> OpenMindContinuityState {
+        guard configuration.httpBaseURL != nil else {
+            return .disabled
+        }
+
+        do {
+            return try await send(method: "GET", path: "/mcp/resources/mind/continuity")
+        } catch {
+            return .unavailable(error.localizedDescription)
+        }
+    }
+
+    func refreshPosture() async -> OpenMindPostureState {
+        guard configuration.httpBaseURL != nil else {
+            return .disabled
+        }
+
+        do {
+            return try await send(
+                method: "POST",
+                path: "/mcp/tools/posture.get",
+                body: PostureRequest(clientID: configuration.clientID)
+            )
+        } catch {
+            return .unavailable(error.localizedDescription)
+        }
+    }
+
+    func refreshRuntimeState() async -> OpenMindMemoryRuntimeState {
+        guard configuration.httpBaseURL != nil else {
+            return .disabled
+        }
+
+        async let capability = refreshCapabilities()
+        async let continuity = refreshContinuity()
+        async let posture = refreshPosture()
+        return await OpenMindMemoryRuntimeState(
+            capability: capability,
+            continuity: continuity,
+            posture: posture
+        )
     }
 
     func recall(

@@ -1226,6 +1226,63 @@ struct dBrowserTests {
         #expect(unavailable.decision.status == .unavailable)
     }
 
+    @Test func openMindMemoryClientLoadsContinuityAndPosture() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "runtime") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/capabilities" {
+                return Self.jsonResponse(for: request, body: [
+                    "available": true,
+                    "capabilities": ["mind.search_memories", "posture.get"],
+                    "posture": "normal",
+                    "message": "ready"
+                ])
+            }
+
+            if path == "/mcp/resources/mind/continuity" {
+                return Self.jsonResponse(for: request, body: [
+                    "version": "omcont/0.1",
+                    "mode": "normal",
+                    "summary": "Continuity ready",
+                    "pendingStepUps": 2,
+                    "updatedAt": "2026-05-16T00:00:00Z",
+                    "notices": ["review one peer grant"]
+                ])
+            }
+
+            if path == "/mcp/tools/posture.get" {
+                return Self.jsonResponse(for: request, body: [
+                    "mode": "protective",
+                    "userMessage": "Protective mode is active.",
+                    "allowsMemoryWriteback": false,
+                    "requiresExplicitConfirmation": true,
+                    "summary": "Protective posture",
+                    "notices": ["writeback paused"]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = OpenMindMemoryClient(
+            configuration: memoryHarness.configuration,
+            session: memoryHarness.session
+        )
+
+        let state = await client.refreshRuntimeState()
+        let postureBody = capturedRequests.body(for: "/mcp/tools/posture.get")
+
+        #expect(state.capability.status == .available)
+        #expect(state.continuity.version == "omcont/0.1")
+        #expect(state.continuity.pendingStepUps == 2)
+        #expect(state.continuity.notices == ["review one peer grant"])
+        #expect(state.posture.mode == "protective")
+        #expect(state.posture.allowsMemoryWriteback == false)
+        #expect(state.posture.requiresExplicitConfirmation)
+        #expect(postureBody?["clientID"] as? String == "dBrowser.swift")
+    }
+
     @MainActor
     @Test func copilotRequestsOpenMindMemoryBeforeModelRun() async {
         let memoryHarness = Self.makeOpenMindMemorySession(key: "copilotmemory") { request in
@@ -1283,6 +1340,198 @@ struct dBrowserTests {
         #expect(model.latestOpenMindRecall?.memories.first?.id == "mem-1")
         #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessStarted } == true)
         #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessCompleted } == true)
+    }
+
+    @MainActor
+    @Test func copilotMemoryWritebackRequiresExplicitActionAndRecordsOutcome() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "writeback") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "allowed",
+                    "allowedScopes": ["profile"],
+                    "reason": "allowed",
+                    "redactionCount": 0
+                ])
+            }
+
+            if path == "/mcp/tools/mind.search_memories" {
+                return Self.jsonResponse(for: request, body: [
+                    "memories": [],
+                    "notices": []
+                ])
+            }
+
+            if path == "/mcp/tools/mind.add_memory" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "recorded",
+                    "revisionID": "rev-writeback",
+                    "message": "recorded"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let offlineServices = Self.makeAFMServiceSession(key: "writebackafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: offlineServices.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineServices.configuration,
+                session: offlineServices.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(
+            runtimeBridge: bridge,
+            openMindMemoryClient: OpenMindMemoryClient(
+                configuration: memoryHarness.configuration,
+                session: memoryHarness.session
+            )
+        )
+        model.navigate("https://example.com")
+        let snapshot = PageSnapshot(
+            urlString: "https://example.com",
+            title: "Example",
+            visibleText: "Remember governed page context.",
+            headings: ["Memory"],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 0
+        )
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: model.activeTabID,
+                status: .success,
+                message: "snapshot",
+                pageSnapshot: snapshot
+            )
+        )
+
+        guard let runID = model.runCopilot(prompt: "Summarize and remember") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+
+        #expect(completed)
+        #expect(capturedRequests.body(for: "/mcp/tools/mind.add_memory") == nil)
+
+        let outcome = await model.writeBackOpenMindMemory(for: runID)
+        let writebackBody = capturedRequests.body(for: "/mcp/tools/mind.add_memory")
+        let requestBody = writebackBody?["request"] as? [String: Any]
+        let events = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
+
+        #expect(outcome.status == .recorded)
+        #expect(outcome.revisionID == "rev-writeback")
+        #expect(model.latestOpenMindWriteback == outcome)
+        #expect(requestBody?["runID"] as? String == runID.uuidString)
+        #expect(requestBody?["prompt"] as? String == "Summarize and remember")
+        #expect(requestBody?["pageURLString"] as? String == "https://example.com")
+        #expect(requestBody?["source"] as? String == "dBrowser.copilot")
+        #expect((requestBody?["summary"] as? String)?.contains("Summarize and remember") == true)
+        #expect((requestBody?["snapshotCommitment"] as? String)?.hasPrefix("fnv1a64:") == true)
+        #expect(requestBody?["idempotencyKey"] as? String == "copilot-\(runID.uuidString)-writeback")
+        #expect(events.contains(.memoryWritebackRequested))
+        #expect(events.contains(.memoryWritebackRecorded))
+    }
+
+    @MainActor
+    @Test func copilotMemoryWritebackRespectsProtectivePosture() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "protective") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/capabilities" {
+                return Self.jsonResponse(for: request, body: [
+                    "available": true,
+                    "capabilities": ["mind.search_memories", "mind.add_memory", "posture.get"],
+                    "posture": "protective",
+                    "message": "ready"
+                ])
+            }
+
+            if path == "/mcp/resources/mind/continuity" {
+                return Self.jsonResponse(for: request, body: [
+                    "summary": "Continuity ready",
+                    "pendingStepUps": 0
+                ])
+            }
+
+            if path == "/mcp/tools/posture.get" {
+                return Self.jsonResponse(for: request, body: [
+                    "mode": "protective",
+                    "userMessage": "Protective posture blocks memory writeback.",
+                    "allowsMemoryWriteback": false,
+                    "requiresExplicitConfirmation": true
+                ])
+            }
+
+            if path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "allowed",
+                    "allowedScopes": ["profile"],
+                    "reason": "allowed",
+                    "redactionCount": 0
+                ])
+            }
+
+            if path == "/mcp/tools/mind.search_memories" {
+                return Self.jsonResponse(for: request, body: [
+                    "memories": [],
+                    "notices": []
+                ])
+            }
+
+            if path == "/mcp/tools/mind.add_memory" {
+                return Self.jsonResponse(for: request, status: 500, body: ["error": "writeback should be blocked by posture"])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let offlineServices = Self.makeAFMServiceSession(key: "protectiveafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: offlineServices.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineServices.configuration,
+                session: offlineServices.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(
+            runtimeBridge: bridge,
+            openMindMemoryClient: OpenMindMemoryClient(
+                configuration: memoryHarness.configuration,
+                session: memoryHarness.session
+            )
+        )
+
+        await model.refreshRuntimeBridgeStatus()
+        model.navigate("https://example.com")
+        guard let runID = model.runCopilot(prompt: "Summarize without writeback") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+        let outcome = await model.writeBackOpenMindMemory(for: runID)
+        let events = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
+
+        #expect(completed)
+        #expect(model.openMindPostureState.status == .available)
+        #expect(model.openMindPostureState.allowsMemoryWriteback == false)
+        #expect(outcome.status == .denied)
+        #expect(outcome.message == "Protective posture blocks memory writeback.")
+        #expect(capturedRequests.body(for: "/mcp/tools/mind.add_memory") == nil)
+        #expect(events.contains(.memoryWritebackDenied))
     }
 
     @MainActor

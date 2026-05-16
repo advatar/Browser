@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift OpenMind Governed Writeback And Continuity Slice
+
+- [x] Triage remaining BrIAn/OpenMind gaps from #70.
+- [x] Create tracker issue for writeback/continuity work (#80).
+- [x] Add typed OpenMind continuity/posture/resource snapshot models.
+- [x] Extend OpenMindMemoryClient with continuity/posture refresh and explicit writeback metadata.
+- [x] Add a user-triggered Copilot memory writeback action.
+- [x] Surface writeback outcome and BrIAn posture/continuity in Swift UI.
+- [x] Add focused Swift unit tests.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-openmind-writeback-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-openmind-writeback-tests -only-testing:dBrowserTests` passed.
+
 ## Swift AFMarket Node And Settlement Slice
 
 - [x] Triage remaining AFMarket implementation gaps from #69.

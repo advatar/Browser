@@ -715,6 +715,16 @@ private struct CopilotPanelView: View {
                                 .foregroundStyle(.secondary)
                         }
 
+                        if latestRun.status == .completed, latestRun.result != nil {
+                            Button {
+                                _ = browser.requestOpenMindWriteback(for: latestRun.id)
+                            } label: {
+                                Label("Remember", systemImage: "brain")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("copilot-openmind-writeback")
+                        }
+
                         ForEach(latestRun.events.suffix(5)) { event in
                             Label(event.message, systemImage: event.kind == .approvalRequired ? "exclamationmark.triangle" : "checkmark.circle")
                                 .font(.caption)
@@ -741,6 +751,12 @@ private struct CopilotPanelView: View {
                                     .font(.caption)
                                     .lineLimit(2)
                             }
+                        }
+                        if let writeback = browser.latestOpenMindWriteback {
+                            Divider()
+                            Label(openMindWritebackSummary(writeback), systemImage: openMindWritebackSystemImage(writeback))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .padding(14)
@@ -798,6 +814,32 @@ private struct CopilotPanelView: View {
         )
     }
 
+    private func openMindWritebackSummary(_ outcome: OpenMindWritebackOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "Writeback recorded\(outcome.revisionID.map { " as \($0)" } ?? "")."
+        case .proposed:
+            return "Writeback proposed: \(outcome.message)"
+        case .denied:
+            return "Writeback denied: \(outcome.message)"
+        case .unavailable:
+            return "Writeback unavailable: \(outcome.message)"
+        }
+    }
+
+    private func openMindWritebackSystemImage(_ outcome: OpenMindWritebackOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "checkmark.seal"
+        case .proposed:
+            return "doc.badge.clock"
+        case .denied:
+            return "hand.raised"
+        case .unavailable:
+            return "xmark.seal"
+        }
+    }
+
     private func openMindRecallSummary(_ recall: OpenMindMemoryRecallResult) -> String {
         switch recall.decision.status {
         case .allowed:
@@ -828,7 +870,11 @@ private struct RuntimePanelView: View {
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
 
                 AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
-                OpenMindMemoryPanelView(state: browser.openMindCapabilityState)
+                OpenMindMemoryPanelView(
+                    state: browser.openMindCapabilityState,
+                    continuity: browser.openMindContinuityState,
+                    posture: browser.openMindPostureState
+                )
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
@@ -890,6 +936,8 @@ private struct AFMServicesPanelView: View {
 
 private struct OpenMindMemoryPanelView: View {
     let state: OpenMindMemoryCapabilityState
+    let continuity: OpenMindContinuityState
+    let posture: OpenMindPostureState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -909,6 +957,21 @@ private struct OpenMindMemoryPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Divider()
+            Label(continuity.summary, systemImage: continuity.pendingStepUps > 0 ? "person.badge.clock" : "point.3.connected.trianglepath.dotted")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if continuity.pendingStepUps > 0 {
+                Text("\(continuity.pendingStepUps) step-up request\(continuity.pendingStepUps == 1 ? "" : "s") pending")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Label(posture.summary, systemImage: posture.allowsMemoryWriteback ? "checkmark.shield" : "hand.raised")
+                .font(.caption)
+                .foregroundStyle(posture.allowsMemoryWriteback ? Color.secondary : Color.orange)
+            Text(posture.requiresExplicitConfirmation ? "Memory writeback requires explicit confirmation." : "Memory writeback follows current posture policy.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
