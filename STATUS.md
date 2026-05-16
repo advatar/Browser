@@ -19,6 +19,29 @@
 
 ## Active Task
 
+## KeyMeIn Secret Handling Decision
+
+- [x] Inspect `KeyMeIn/` docs, browser integration notes, SDK notes, and security checklist.
+- [x] Create a GitHub issue deciding whether KeyMeIn should keep dBrowser wallet secrets (#75).
+- [x] Capture the recommended role for KeyMeIn versus Keychain/Secure Enclave and hardware-backed signers.
+- [x] Verify the status-only change locally.
+- [x] Commit and push only the scoped status update.
+
+## Swift Blockchain Wallet Code Investigation
+
+- [x] Inspect current dBrowser wallet simulator, architecture docs, and light-client issue map.
+- [x] Research primary-source Swift/native SDK options for Bitcoin, Ethereum/EVM, Solana, Cosmos, Substrate, Avalanche, TRON, XRPL, Sui, and Aptos wallets.
+- [x] Create a GitHub issue with the recommended Swift wallet code stack and investigation plan (#76).
+- [x] Capture the recommended shared wallet architecture and per-chain library choices.
+- [x] Verify the status-only change locally.
+- [x] Commit and push only the scoped status update.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+
 ## Kline Runtime Boundary Decision
 
 - [x] Inspect `../Kline` app/docs/package structure and identify its runtime boundary.
