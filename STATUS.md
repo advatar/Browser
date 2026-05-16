@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## OpenClaw Integration Investigation Plan
+
+- [x] Inspect `../clawdex/openclaw` top-level product docs, package structure, Swift companion app surfaces, gateway/MCP/plugin/memory areas, and channel scope.
+- [x] Create a GitHub issue to investigate whether integrating all of OpenClaw into dBrowser makes sense (#73).
+- [x] Capture pros, cons, overlaps, and likely integration boundaries.
+- [x] Verify the documentation/status-only change locally.
+- [x] Commit and push only the scoped status update.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+
 ## Documentation Consolidation Plan
 
 - [x] Inventory existing `./docs` narrative files and supporting metadata.
