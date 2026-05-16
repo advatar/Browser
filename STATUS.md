@@ -27,8 +27,8 @@
 - [x] Make the recents sidebar use the shared history-opening path.
 - [x] Dedupe and move reopened history entries to the top.
 - [x] Verify Swift tests and macOS build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #101.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #101.
 
 ## Swift Move-Chain Trust Foundation Slice
 
