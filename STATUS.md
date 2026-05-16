@@ -30,8 +30,8 @@
 - [x] Record router completion and proposed tool-call state in Copilot activity.
 - [x] Add focused Swift unit tests for discovery, completion payloads, runtime routing, model selection, and activity events.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift OpenMind Correction And Review Slice
 
