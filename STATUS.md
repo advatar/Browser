@@ -29,8 +29,8 @@
 - [x] Bind AFMarket settlement evidence into the chain trust registry.
 - [x] Add focused Swift unit tests for registry coverage, fallback labeling, runtime status, and AFMarket settlement binding.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift LLM Router Service Adapter Slice
 
