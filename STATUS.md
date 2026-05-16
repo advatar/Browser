@@ -19,6 +19,21 @@
 
 ## Active Task
 
+## Swift Polkadot/Substrate Chain Trust Foundation Slice
+
+- [x] Triage Polkadot/Substrate light-client gap from #63.
+- [x] Create tracker issue for Swift Polkadot/Substrate chain trust foundation (#96).
+- [x] Add Swift Substrate chain spec metadata, endpoint config, finalized header, GRANDPA authority set, finality justification, conflict evidence, storage proof, verification result, and service snapshot models.
+- [x] Add fixture-backed GRANDPA finality validation with authority-weight threshold checks.
+- [x] Add local storage proof verification against finalized header state roots.
+- [x] Add conflicting GRANDPA justification detection with explicit failed state and RPC fallback labeling.
+- [x] Add Substrate service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind Substrate snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for chain-spec routing, finalized header status, storage proof verification, conflict handling, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift Cosmos/Tendermint Chain Trust Foundation Slice
 
 - [x] Triage Cosmos/Tendermint light-client gap from #62.

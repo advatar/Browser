@@ -488,6 +488,24 @@ struct ChainTrustRegistry: Codable, Equatable {
         return status
     }
 
+    mutating func recordSubstrateLightClientSnapshot(_ snapshot: SubstrateLightClientServiceSnapshot) -> ChainTrustStatus {
+        var status = snapshot.chainTrustStatus
+        let existing = self.status(forChainRef: snapshot.chain.chainRef)
+        if status.evidence.isEmpty, let existingEvidence = existing?.evidence {
+            status.evidence = existingEvidence
+        }
+        if status.latestCheckpoint == nil {
+            status.latestCheckpoint = existing?.latestCheckpoint
+        }
+
+        if let index = statuses.firstIndex(where: { $0.matches(chainRef: snapshot.chain.chainRef) }) {
+            statuses[index] = status
+        } else {
+            statuses.append(status)
+        }
+        return status
+    }
+
     private static func chainTrustState(for verificationState: AFMVerificationState) -> ChainTrustState? {
         switch verificationState {
         case .chainAnchored:

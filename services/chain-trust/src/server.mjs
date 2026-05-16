@@ -292,13 +292,105 @@ const cosmosFixtureTrustPolicy = {
   trust_period_seconds: 1209600
 };
 
+const substrateChains = {
+  polkadot: {
+    chain: 'polkadot',
+    chain_ref: 'polkadot',
+    chain_spec_id: 'polkadot',
+    display_name: 'Polkadot',
+    sync_state: 'synced'
+  },
+  kusama: {
+    chain: 'kusama',
+    chain_ref: 'kusama',
+    chain_spec_id: 'kusama',
+    display_name: 'Kusama',
+    sync_state: 'proof_checked'
+  },
+  westend: {
+    chain: 'westend',
+    chain_ref: 'westend',
+    chain_spec_id: 'westend',
+    display_name: 'Westend',
+    sync_state: 'proof_checked'
+  },
+  'asset-hub-polkadot': {
+    chain: 'asset-hub-polkadot',
+    chain_ref: 'asset-hub-polkadot',
+    chain_spec_id: 'asset-hub-polkadot',
+    display_name: 'Asset Hub Polkadot',
+    sync_state: 'proof_checked'
+  }
+};
+const substrateAuthorityA = 'd1'.repeat(16);
+const substrateAuthorityB = 'e2'.repeat(16);
+const substrateAuthorityC = 'f3'.repeat(16);
+const substrateFixtureAuthorities = [
+  { authority_id: substrateAuthorityA, weight: 40 },
+  { authority_id: substrateAuthorityB, weight: 35 },
+  { authority_id: substrateAuthorityC, weight: 25 }
+];
+const substrateFixtureAuthoritySetHash = grandpaAuthoritySetHash(substrateFixtureAuthorities);
+const substrateFixtureStorageKey = '0x26aa394eea5630e07c48ae0c9558cef7';
+const substrateFixtureValueHash = sha256HexFromString('polkadot-account-balance:1');
+const substrateFixtureLeafHash = substrateFixtureStorageLeafHash(substrateFixtureStorageKey, substrateFixtureValueHash);
+const substrateFixtureStateRoot = substrateFixtureLeafHash;
+const substrateFixtureHeaderHash = sha256HexFromString('polkadot|21000000|fixture-header');
+const substrateFixtureHeader = {
+  chain: 'polkadot',
+  chain_ref: 'polkadot',
+  chain_spec_id: 'polkadot',
+  number: 21000000,
+  hash: substrateFixtureHeaderHash,
+  parent_hash: sha256HexFromString('polkadot|20999999|fixture-header'),
+  state_root: substrateFixtureStateRoot,
+  extrinsics_root: sha256HexFromString('polkadot|21000000|extrinsics'),
+  digest_logs: ['0x0642414245'],
+  finalized: true,
+  source: mode
+};
+const substrateFixtureAuthoritySet = {
+  chain: 'polkadot',
+  chain_ref: 'polkadot',
+  chain_spec_id: 'polkadot',
+  set_id: 1234,
+  authorities: substrateFixtureAuthorities,
+  hash: substrateFixtureAuthoritySetHash,
+  source: mode
+};
+const substrateFixtureJustification = {
+  round: 42,
+  set_id: substrateFixtureAuthoritySet.set_id,
+  target_hash: substrateFixtureHeader.hash,
+  target_number: substrateFixtureHeader.number,
+  signatures: [
+    { authority_id: substrateAuthorityA, block_hash: substrateFixtureHeader.hash, signed: true, signature: 'fixture-grandpa-a' },
+    { authority_id: substrateAuthorityB, block_hash: substrateFixtureHeader.hash, signed: true, signature: 'fixture-grandpa-b' },
+    { authority_id: substrateAuthorityC, block_hash: substrateFixtureHeader.hash, signed: false, signature: null }
+  ],
+  source: mode
+};
+const substrateFixtureStorageProof = {
+  proof_id: 'substrate-fixture-storage',
+  chain: 'polkadot',
+  chain_ref: 'polkadot',
+  chain_spec_id: 'polkadot',
+  block_hash: substrateFixtureHeader.hash,
+  storage_key: substrateFixtureStorageKey,
+  expected_value_hash: substrateFixtureValueHash,
+  leaf_hash: substrateFixtureLeafHash,
+  witnesses: [],
+  source: mode
+};
+
 if (args.has('--snapshot')) {
   console.log(JSON.stringify({
     service: '@browser/chain-trust-service',
     bitcoin: bitcoinStatus,
     evm: evmStatusFor('ethereum-mainnet'),
     solana: solanaStatusFor('mainnet-beta'),
-    cosmos: cosmosStatusFor('cosmoshub-4')
+    cosmos: cosmosStatusFor('cosmoshub-4'),
+    substrate: substrateStatusFor('polkadot')
   }, null, 2));
   process.exit(0);
 }
@@ -308,6 +400,7 @@ if (args.has('--lint')) {
   assertEvmFixture();
   assertSolanaFixture();
   assertCosmosFixture();
+  assertSubstrateFixture();
   console.log('[chain-trust] schema OK');
   process.exit(0);
 }
@@ -317,6 +410,7 @@ if (args.has('--self-test')) {
   assertEvmFixture();
   assertSolanaFixture();
   assertCosmosFixture();
+  assertSubstrateFixture();
   const result = verifyBitcoinTransaction({
     header: genesisHeader,
     proof: {
@@ -365,6 +459,18 @@ if (args.has('--self-test')) {
     process.exit(1);
   }
 
+  const substrateResult = verifySubstrateStorageProof({
+    header: substrateFixtureHeader,
+    authority_set: substrateFixtureAuthoritySet,
+    justification: substrateFixtureJustification,
+    storage_proof: substrateFixtureStorageProof
+  });
+
+  if (!substrateResult.verified || substrateResult.state !== 'synced') {
+    console.error('[chain-trust] Substrate self-test failed:', substrateResult.summary);
+    process.exit(1);
+  }
+
   console.log('[chain-trust] self-test complete');
   process.exit(0);
 }
@@ -399,6 +505,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (url.pathname === '/v1/cosmos/status' || url.pathname === '/cosmos/status')) {
     return sendJson(res, 200, cosmosStatusFor(url.searchParams.get('chain')));
+  }
+
+  if (req.method === 'GET' && (url.pathname === '/v1/substrate/status' || url.pathname === '/substrate/status')) {
+    return sendJson(res, 200, substrateStatusFor(url.searchParams.get('chain')));
   }
 
   if (req.method === 'POST' && (url.pathname === '/v1/bitcoin/verify-transaction' || url.pathname === '/bitcoin/verify-transaction')) {
@@ -466,6 +576,25 @@ const server = http.createServer(async (req, res) => {
         height: null,
         block_hash: null,
         validator_set_hash: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/substrate/verify-storage-proof' || url.pathname === '/substrate/verify-storage-proof')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifySubstrateStorageProof(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        chain_spec_id: null,
+        block_number: null,
+        block_hash: null,
+        proof_id: null,
+        storage_key: null,
         summary: String(err.message ?? err)
       });
     }
@@ -562,6 +691,37 @@ function cosmosStatusFor(requestedChain) {
     proof_source: 'fixture-tendermint-commit',
     trust_period_expired: false,
     trust_expires_at_unix_seconds: cosmosFixtureTrustPolicy.trusted_time_unix_seconds + chain.trust_period_seconds,
+    mode
+  };
+}
+
+function substrateStatusFor(requestedChain) {
+  const chain = resolveSubstrateChain(requestedChain);
+  const header = {
+    ...substrateFixtureHeader,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_spec_id: chain.chain_spec_id,
+    finalized: chain.sync_state === 'synced'
+  };
+  const authoritySet = {
+    ...substrateFixtureAuthoritySet,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_spec_id: chain.chain_spec_id
+  };
+  return {
+    ok: true,
+    service_available: true,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_spec_id: chain.chain_spec_id,
+    sync_state: chain.sync_state,
+    source: mode,
+    latest_finalized_header: header,
+    authority_set: authoritySet,
+    peer_count: 0,
+    proof_source: 'fixture-grandpa-storage',
     mode
   };
 }
@@ -754,6 +914,81 @@ function verifyCosmosHeader(payload) {
   };
 }
 
+function verifySubstrateStorageProof(payload) {
+  const header = requireObject(payload.header, 'header');
+  const authoritySet = requireObject(payload.authority_set ?? payload.authoritySet, 'authority_set');
+  const justification = requireObject(payload.justification, 'justification');
+  const storageProof = payload.storage_proof ?? payload.storageProof;
+  const chain = resolveSubstrateChain(header.chain_spec_id ?? header.chain_ref ?? header.chain);
+  const authoritySetChain = resolveSubstrateChain(authoritySet.chain_spec_id ?? authoritySet.chain_ref ?? authoritySet.chain ?? chain.chain_spec_id);
+  const blockNumber = Number(header.number);
+  const blockHash = normalizeHex(requireString(header.hash, 'header.hash'));
+  const stateRoot = normalizeHex(requireString(header.state_root ?? header.stateRoot, 'header.state_root'));
+  const authoritySetHash = normalizeHex(requireString(authoritySet.hash, 'authority_set.hash'));
+  const computedAuthoritySetHash = grandpaAuthoritySetHash(Array.isArray(authoritySet.authorities) ? authoritySet.authorities : []);
+  const targetHash = normalizeHex(requireString(justification.target_hash ?? justification.targetHash, 'justification.target_hash'));
+  const targetNumber = Number(justification.target_number ?? justification.targetNumber);
+  const setID = Number(authoritySet.set_id ?? authoritySet.setID);
+  const justificationSetID = Number(justification.set_id ?? justification.setID);
+
+  if (chain.chain_ref !== authoritySetChain.chain_ref) {
+    return substrateFailure(chain, blockNumber, blockHash, storageProof, 'Substrate header chain does not match the GRANDPA authority set.');
+  }
+  if (setID !== justificationSetID) {
+    return substrateFailure(chain, blockNumber, blockHash, storageProof, 'GRANDPA justification uses a different authority set.');
+  }
+  if (targetNumber !== blockNumber || targetHash !== blockHash) {
+    return substrateFailure(chain, blockNumber, blockHash, storageProof, 'GRANDPA justification targets a different finalized header.');
+  }
+  if (authoritySetHash !== computedAuthoritySetHash) {
+    return substrateFailure(chain, blockNumber, blockHash, storageProof, 'GRANDPA authority set hash is invalid.');
+  }
+
+  const conflictingJustification = payload.conflicting_justification ?? payload.conflictingJustification;
+  if (conflictingJustification) {
+    const conflictNumber = Number(conflictingJustification.target_number ?? conflictingJustification.targetNumber);
+    const conflictHash = normalizeHex(requireString(conflictingJustification.target_hash ?? conflictingJustification.targetHash, 'conflicting_justification.target_hash'));
+    if (conflictNumber === blockNumber
+        && conflictHash !== targetHash
+        && hasGrandpaTwoThirdsWeight(authoritySet.authorities, grandpaSignedAuthorities(conflictingJustification))) {
+      return substrateFailure(chain, blockNumber, blockHash, storageProof, 'Conflicting GRANDPA justifications both reached the authority threshold.');
+    }
+  }
+
+  if (!hasGrandpaTwoThirdsWeight(authoritySet.authorities, grandpaSignedAuthorities(justification))) {
+    return substrateFailure(chain, blockNumber, blockHash, storageProof, 'GRANDPA justification did not reach the two-thirds authority threshold.');
+  }
+
+  if (storageProof) {
+    const proofChain = resolveSubstrateChain(storageProof.chain_spec_id ?? storageProof.chain_ref ?? storageProof.chain ?? chain.chain_spec_id);
+    const proofBlockHash = normalizeHex(requireString(storageProof.block_hash ?? storageProof.blockHash, 'storage_proof.block_hash'));
+    if (proofChain.chain_ref !== chain.chain_ref || proofBlockHash !== blockHash) {
+      return substrateFailure(chain, blockNumber, blockHash, storageProof, 'Substrate storage proof references a different chain or block.');
+    }
+    const computedRoot = computeSubstrateLocalMerkleRoot(
+      requireString(storageProof.leaf_hash ?? storageProof.leafHash, 'storage_proof.leaf_hash'),
+      Array.isArray(storageProof.witnesses) ? storageProof.witnesses : []
+    );
+    if (computedRoot !== stateRoot) {
+      return substrateFailure(chain, blockNumber, blockHash, storageProof, 'Substrate storage proof did not resolve to the finalized state root.');
+    }
+  }
+
+  return {
+    verified: true,
+    state: header.finalized === false ? 'proof_checked' : (chain.chain_ref === 'polkadot' ? 'synced' : 'proof_checked'),
+    chain_ref: chain.chain_ref,
+    chain_spec_id: chain.chain_spec_id,
+    block_number: Number.isFinite(blockNumber) ? blockNumber : null,
+    block_hash: blockHash,
+    proof_id: storageProof ? String(storageProof.proof_id ?? storageProof.proofID ?? '') : null,
+    storage_key: storageProof ? String(storageProof.storage_key ?? storageProof.storageKey ?? '') : null,
+    summary: storageProof
+      ? `Substrate storage proof checked against finalized header ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'}.`
+      : `GRANDPA finalized header ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'} verified.`
+  };
+}
+
 function verifyBitcoinTransaction(payload) {
   const header = requireObject(payload.header, 'header');
   const proof = requireObject(payload.proof, 'proof');
@@ -855,6 +1090,22 @@ function assertCosmosFixture() {
   }
 }
 
+function assertSubstrateFixture() {
+  const computedAuthoritySetHash = grandpaAuthoritySetHash(substrateFixtureAuthorities);
+  if (computedAuthoritySetHash !== substrateFixtureAuthoritySetHash) {
+    throw new Error(`Substrate authority fixture mismatch: ${computedAuthoritySetHash}`);
+  }
+  const result = verifySubstrateStorageProof({
+    header: substrateFixtureHeader,
+    authority_set: substrateFixtureAuthoritySet,
+    justification: substrateFixtureJustification,
+    storage_proof: substrateFixtureStorageProof
+  });
+  if (!result.verified) {
+    throw new Error(`Substrate storage fixture mismatch: ${result.summary}`);
+  }
+}
+
 function failure(transactionID, blockHash, height, summary) {
   return {
     verified: false,
@@ -901,6 +1152,20 @@ function cosmosFailure(chain, height, blockHash, validatorSetHash, summary) {
     height: Number.isFinite(height) ? height : null,
     block_hash: blockHash,
     validator_set_hash: validatorSetHash,
+    summary
+  };
+}
+
+function substrateFailure(chain, blockNumber, blockHash, storageProof, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: chain.chain_ref,
+    chain_spec_id: chain.chain_spec_id,
+    block_number: Number.isFinite(blockNumber) ? blockNumber : null,
+    block_hash: blockHash,
+    proof_id: storageProof ? String(storageProof.proof_id ?? storageProof.proofID ?? '') : null,
+    storage_key: storageProof ? String(storageProof.storage_key ?? storageProof.storageKey ?? '') : null,
     summary
   };
 }
@@ -955,6 +1220,24 @@ function resolveCosmosChain(requestedChain) {
     return cosmosChains['cosmoshub-4'];
   }
   return cosmosChains['cosmoshub-4'];
+}
+
+function resolveSubstrateChain(requestedChain) {
+  if (!requestedChain) {
+    return substrateChains.polkadot;
+  }
+  const normalized = String(requestedChain)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (substrateChains[normalized]) {
+    return substrateChains[normalized];
+  }
+  if (normalized === 'dot' || normalized === 'polkadot-relay') {
+    return substrateChains.polkadot;
+  }
+  return substrateChains.polkadot;
 }
 
 function evmFixtureLeafHash(kind, subject, key, value) {
@@ -1049,6 +1332,59 @@ function hasTendermintTwoThirdsPower(validators, addresses) {
     }
   }
   return signedPower * 3 > totalPower * 2;
+}
+
+function grandpaAuthoritySetHash(authorities) {
+  const payload = authorities
+    .map(authority => `${normalizeHex(requireString(authority.authority_id ?? authority.authorityID, 'authority.authority_id'))}:${Number(authority.weight)}`)
+    .sort()
+    .join('|');
+  return sha256HexFromString(payload);
+}
+
+function grandpaSignedAuthorities(justification) {
+  return new Set((Array.isArray(justification.signatures) ? justification.signatures : [])
+    .filter(signature => signature.signed !== false)
+    .map(signature => normalizeHex(requireString(signature.authority_id ?? signature.authorityID, 'signature.authority_id'))));
+}
+
+function hasGrandpaTwoThirdsWeight(authorities, authorityIDs) {
+  let totalWeight = 0;
+  let signedWeight = 0;
+  for (const authority of Array.isArray(authorities) ? authorities : []) {
+    const weight = Number(authority.weight);
+    if (!Number.isFinite(weight) || weight < 0) {
+      continue;
+    }
+    totalWeight += weight;
+    const authorityID = normalizeHex(requireString(authority.authority_id ?? authority.authorityID, 'authority.authority_id'));
+    if (authorityIDs.has(authorityID)) {
+      signedWeight += weight;
+    }
+  }
+  return signedWeight * 3 > totalWeight * 2;
+}
+
+function substrateFixtureStorageLeafHash(storageKey, valueHash) {
+  return sha256HexFromString([
+    String(storageKey).toLowerCase(),
+    normalizeHex(valueHash)
+  ].join('|'));
+}
+
+function computeSubstrateLocalMerkleRoot(leafHash, witnesses) {
+  let node = Buffer.from(normalizeHex(leafHash), 'hex');
+  for (const witness of witnesses) {
+    const siblingHash = Buffer.from(normalizeHex(requireString(witness.hash, 'witness.hash')), 'hex');
+    const position = requireString(witness.position, 'witness.position');
+    if (position !== 'left' && position !== 'right') {
+      throw Object.assign(new Error(`unsupported Substrate witness position: ${position}`), { statusCode: 400 });
+    }
+    node = position === 'left'
+      ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
+      : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
+  }
+  return node.toString('hex');
 }
 
 function readJson(req) {

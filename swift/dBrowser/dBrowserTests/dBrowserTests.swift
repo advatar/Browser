@@ -2015,6 +2015,162 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Osmosis proof checked") == true)
     }
 
+    @Test func substrateChainSpecRoutingAndFallbackAreExplicit() {
+        #expect(SubstrateChain.known(from: "polkadot") == .polkadot)
+        #expect(SubstrateChain.known(from: "dot") == .polkadot)
+        #expect(SubstrateChain.known(from: "asset-hub-polkadot") == .assetHubPolkadot)
+        #expect(SubstrateChain.assetHubPolkadot.relayChain == .polkadot)
+
+        let fallback = SubstrateLightClientServiceSnapshot.fallback(
+            chain: .polkadot,
+            lastError: "disabled"
+        )
+
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("trusted RPC fallback remains labeled"))
+    }
+
+    @Test func substrateStorageProofVerifiesGrandpaFinalityAndStateRoot() {
+        let bundle = Self.substrateProofBundle(chain: .polkadot)
+        let result = bundle.verify()
+        var weakBundle = bundle
+        weakBundle.justification.signatures = [bundle.justification.signatures[0]]
+        let weakResult = weakBundle.verify()
+
+        #expect(bundle.authoritySet.validatesHash)
+        #expect(bundle.authoritySet.totalWeight == 100)
+        #expect(result.verified)
+        #expect(result.state == .synced)
+        #expect(result.chainRef == "polkadot")
+        #expect(result.storageKey == Self.substrateStorageKey)
+        #expect(weakResult.verified == false)
+        #expect(weakResult.state == .failed)
+        #expect(weakResult.summary.contains("two-thirds"))
+    }
+
+    @Test func substrateConflictingGrandpaJustificationsAreFailed() {
+        let bundle = Self.substrateProofBundle(chain: .polkadot)
+        var conflictBundle = bundle
+        let conflictingHash = SubstrateHex.sha256Hex("conflicting-grandpa-block")
+        conflictBundle.conflictingJustification = GRANDPAFinalityJustification(
+            round: 43,
+            setID: bundle.authoritySet.setID,
+            targetHash: conflictingHash,
+            targetNumber: bundle.header.number,
+            signatures: [
+                GRANDPAJustificationSignature(authorityID: bundle.authoritySet.authorities[0].authorityID, blockHash: conflictingHash),
+                GRANDPAJustificationSignature(authorityID: bundle.authoritySet.authorities[1].authorityID, blockHash: conflictingHash)
+            ],
+            source: "fixture"
+        )
+        let result = conflictBundle.verify()
+
+        #expect(result.verified == false)
+        #expect(result.state == .failed)
+        #expect(result.summary.contains("Conflicting GRANDPA"))
+    }
+
+    @MainActor
+    @Test func substrateLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let substrateHarness = Self.makeSubstrateLightClientSession(key: "substrateregistry", chain: .polkadot) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/substrate/status" {
+                return Self.jsonResponse(for: request, body: Self.substrateServiceStatus(chain: .polkadot))
+            }
+            if request.url?.path == "/v1/substrate/verify-storage-proof" {
+                return Self.jsonResponse(for: request, body: Self.substrateProofResultBody(
+                    verified: true,
+                    state: "synced",
+                    chain: .polkadot
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = SubstrateLightClientServiceClient(
+            configuration: substrateHarness.configuration,
+            session: substrateHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyStorageProofViaService(Self.substrateProofBundle(chain: .polkadot))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordSubstrateLightClientSnapshot(snapshot)
+        let polkadot = registry.status(forChainRef: "polkadot")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .synced)
+        #expect(snapshot.latestFinalizedHeader?.number == 21_000_000)
+        #expect(status.state == .verified)
+        #expect(status.trustSource == .embeddedLightClient)
+        #expect(polkadot?.evidence.first?.source == .embeddedLightClient)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .synced)
+        #expect(capturedRequests.body(for: "/v1/substrate/verify-storage-proof")?["storage_proof"] != nil)
+    }
+
+    @MainActor
+    @Test func substrateLightClientFallsBackWhenServiceDisabled() async {
+        let client = SubstrateLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordSubstrateLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesSubstrateLightClientState() async {
+        let substrateHarness = Self.makeSubstrateLightClientSession(key: "substrateruntime", chain: .assetHubPolkadot) { request in
+            if request.url?.path == "/v1/substrate/status" {
+                return Self.jsonResponse(for: request, body: Self.substrateServiceStatus(
+                    chain: .assetHubPolkadot,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "substrateruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                substrateLightClient: substrateHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(configuration: .disabled),
+            substrateLightClientServiceClient: SubstrateLightClientServiceClient(
+                configuration: substrateHarness.configuration,
+                session: substrateHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let assetHub = bridge.chainTrustSnapshot.status(forChainRef: "asset-hub-polkadot")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(assetHub?.state == .proofChecked)
+        #expect(assetHub?.trustSource == .localProof)
+        #expect(assetHub?.displaySummary.contains("proof-checked evidence") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Asset Hub Polkadot proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4228,6 +4384,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeSubstrateLightClientSession(
+        key: String,
+        chain: SubstrateChain = .polkadot,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: SubstrateLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = SubstrateLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-substrate.test:4870")!,
+            chain: chain
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -4338,6 +4509,25 @@ struct dBrowserTests {
             "proof_source": "fixture-tendermint-commit",
             "trust_period_expired": trustPeriodExpired,
             "trust_expires_at_unix_seconds": bundle.trustPolicy.trustedTimeUnixSeconds + bundle.trustPolicy.trustPeriodSeconds
+        ]
+    }
+
+    private static func substrateServiceStatus(
+        chain: SubstrateChain,
+        syncState: String = "synced"
+    ) -> [String: Any] {
+        let bundle = substrateProofBundle(chain: chain)
+        return [
+            "ok": true,
+            "chain": chain.chainSpecID,
+            "chain_ref": chain.chainRef,
+            "chain_spec_id": chain.chainSpecID,
+            "sync_state": syncState,
+            "source": "substrate-light-client",
+            "latest_finalized_header": substrateHeaderBody(bundle.header),
+            "authority_set": substrateAuthoritySetBody(bundle.authoritySet),
+            "peer_count": 2,
+            "proof_source": "fixture-grandpa-storage"
         ]
     }
 
@@ -4465,6 +4655,63 @@ struct dBrowserTests {
         )
     }
 
+    private static let substrateStorageKey = "0x26aa394eea5630e07c48ae0c9558cef7"
+
+    private static func substrateProofBundle(chain: SubstrateChain) -> SubstrateProofVerificationBundle {
+        let authorities = [
+            GRANDPAAuthority(authorityID: String(repeating: "d1", count: 16), weight: 40),
+            GRANDPAAuthority(authorityID: String(repeating: "e2", count: 16), weight: 35),
+            GRANDPAAuthority(authorityID: String(repeating: "f3", count: 16), weight: 25)
+        ]
+        let authoritySet = GRANDPAAuthoritySet(
+            chain: chain,
+            setID: 1_234,
+            authorities: authorities,
+            source: "fixture"
+        )
+        let valueHash = SubstrateHex.sha256Hex("\(chain.chainSpecID)-account-balance:1")
+        let leafHash = SubstrateStorageProof.fixtureLeafHash(storageKey: substrateStorageKey, valueHash: valueHash)
+        let header = SubstrateHeaderSnapshot(
+            chain: chain,
+            number: 21_000_000,
+            hash: SubstrateHex.sha256Hex("\(chain.chainSpecID)-21000000-header"),
+            parentHash: SubstrateHex.sha256Hex("\(chain.chainSpecID)-20999999-header"),
+            stateRoot: leafHash,
+            extrinsicsRoot: SubstrateHex.sha256Hex("\(chain.chainSpecID)-21000000-extrinsics"),
+            digestLogs: ["0x0642414245"],
+            finalized: true,
+            source: "fixture"
+        )
+        let justification = GRANDPAFinalityJustification(
+            round: 42,
+            setID: authoritySet.setID,
+            targetHash: header.hash,
+            targetNumber: header.number,
+            signatures: [
+                GRANDPAJustificationSignature(authorityID: authorities[0].authorityID, blockHash: header.hash),
+                GRANDPAJustificationSignature(authorityID: authorities[1].authorityID, blockHash: header.hash),
+                GRANDPAJustificationSignature(authorityID: authorities[2].authorityID, blockHash: header.hash, signed: false)
+            ],
+            source: "fixture"
+        )
+        let storageProof = SubstrateStorageProof(
+            proofID: "substrate-storage-proof",
+            chain: chain,
+            blockHash: header.hash,
+            storageKey: substrateStorageKey,
+            expectedValueHash: valueHash,
+            leafHash: leafHash,
+            witnesses: [],
+            source: "fixture"
+        )
+        return SubstrateProofVerificationBundle(
+            header: header,
+            authoritySet: authoritySet,
+            justification: justification,
+            storageProof: storageProof
+        )
+    }
+
     private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
         [
             "chain": header.chain.chainID,
@@ -4499,6 +4746,39 @@ struct dBrowserTests {
             },
             "hash": validatorSet.hash,
             "source": validatorSet.source ?? "fixture"
+        ]
+    }
+
+    private static func substrateHeaderBody(_ header: SubstrateHeaderSnapshot) -> [String: Any] {
+        [
+            "chain": header.chain.chainSpecID,
+            "chain_ref": header.chain.chainRef,
+            "chain_spec_id": header.chain.chainSpecID,
+            "number": header.number,
+            "hash": header.hash,
+            "parent_hash": header.parentHash,
+            "state_root": header.stateRoot,
+            "extrinsics_root": header.extrinsicsRoot,
+            "digest_logs": header.digestLogs,
+            "finalized": header.finalized,
+            "source": header.source ?? "fixture"
+        ]
+    }
+
+    private static func substrateAuthoritySetBody(_ authoritySet: GRANDPAAuthoritySet) -> [String: Any] {
+        [
+            "chain": authoritySet.chain.chainSpecID,
+            "chain_ref": authoritySet.chain.chainRef,
+            "chain_spec_id": authoritySet.chain.chainSpecID,
+            "set_id": authoritySet.setID,
+            "authorities": authoritySet.authorities.map { authority in
+                [
+                    "authority_id": authority.authorityID,
+                    "weight": authority.weight
+                ] as [String: Any]
+            },
+            "hash": authoritySet.hash,
+            "source": authoritySet.source ?? "fixture"
         ]
     }
 
@@ -4555,6 +4835,25 @@ struct dBrowserTests {
             "block_hash": bundle.header.hash,
             "validator_set_hash": bundle.validatorSet.hash,
             "summary": "Tendermint header \(bundle.header.height) verified."
+        ]
+    }
+
+    private static func substrateProofResultBody(
+        verified: Bool,
+        state: String,
+        chain: SubstrateChain
+    ) -> [String: Any] {
+        let bundle = substrateProofBundle(chain: chain)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": chain.chainRef,
+            "chain_spec_id": chain.chainSpecID,
+            "block_number": bundle.header.number,
+            "block_hash": bundle.header.hash,
+            "proof_id": bundle.storageProof?.proofID ?? "substrate-storage-proof",
+            "storage_key": bundle.storageProof?.storageKey ?? substrateStorageKey,
+            "summary": "Substrate storage proof checked."
         ]
     }
 
