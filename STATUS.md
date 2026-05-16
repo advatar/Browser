@@ -19,6 +19,17 @@
 
 ## Active Task
 
+## Swift Recents Navigation Bug
+
+- [x] Triage recents/history navigation report from #101.
+- [x] Create tracker issue for recents links not loading (#101).
+- [ ] Add a focused Swift regression test for opening recent/history entries.
+- [ ] Make the recents sidebar use the shared history-opening path.
+- [ ] Dedupe and move reopened history entries to the top.
+- [ ] Verify Swift tests and macOS build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issue #101.
+
 ## Swift Move-Chain Trust Foundation Slice
 
 - [x] Triage Sui/Aptos Move-chain trust-state gap from #67.
