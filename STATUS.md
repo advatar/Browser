@@ -29,8 +29,8 @@
 - [x] Add a Swift runtime wallet/explorer panel with chain trust labels and explorer links.
 - [x] Add focused Swift unit tests for wallet/explorer behavior and trust labeling.
 - [x] Verify Swift tests and macOS build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #102.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #102.
 
 ## Swift Recents Navigation Bug
 
