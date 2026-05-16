@@ -240,7 +240,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Gateway bridge"
-        case .architectureOverview: "AF Market + ZeroK"
+        case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -289,19 +289,23 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
             )
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
-                overview: "Resolves IPFS, IPNS, ENS, and compatible wallet-style names into loadable mobile web URLs.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback through dweb.link and .limo; the contract can later swap to embedded Rust or a trusted remote resolver.",
+                overview: "Resolves IPFS, IPNS, ENS, and compatible wallet-style names into loadable mobile web URLs while preserving the embedded light-client contract for chain-backed state.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback through dweb.link and .limo; parity with the desktop decentralized runtime means bridging to embedded Ethereum and Substrate/Polkadot light clients instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
-                    "Resolution results preserve a clear source, making it possible to show whether content came from native, gateway, or remote runtime resolution."
+                    "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
+                    "External RPC endpoints should remain development or fallback transports; they should not become the trust root for decentralized browsing.",
+                    "Resolution results preserve a clear source, making it possible to show whether content came from native, light-client, gateway, or remote runtime resolution."
                 ]
             )
         case .architectureOverview:
             RuntimeFeatureExplanation(
-                overview: "Explains how the Swift browser shell, AF Market, AFM services, ZeroK, and the LLM Gateway fit together.",
-                bridgeBehavior: "The iOS shell keeps navigation, history, wallet policy, and selected context local; AF Market routes work through AFM router, registry, and pipelines; privacy-sensitive LLM calls use the ZeroK LLM Gateway path documented in ../ZeroK.",
+                overview: "Explains how the Swift browser shell, embedded blockchain light clients, AF Market, AFM services, ZeroK, and the LLM Gateway fit together.",
+                bridgeBehavior: "The iOS shell keeps navigation, history, wallet policy, and selected context local; embedded light clients verify chain state; AF Market routes work through AFM router, registry, and pipelines; privacy-sensitive LLM calls use the ZeroK LLM Gateway path documented in ../ZeroK.",
                 detailPoints: [
+                    "Embedded Ethereum-compatible and Substrate/Polkadot light clients are the chain-trust layer: they verify headers and essential proofs locally for ENS, wallet state, transaction broadcast, escrow status, and proof settlement.",
+                    "Each blockchain needs its own light-client verifier and consensus rules; routing every chain through a centralized RPC provider would collapse the decentralized trust boundary.",
                     "AF Market is the pack discovery and install surface. The AFM router selects an expert or pack, registry supplies deterministic metadata and signing keys, and pipelines queues the selected work.",
                     "ZeroK LLM Gateway calls are sent as encrypted envelopes with token-class padding and ZK-ready usage tickets, so relays cannot read prompts and billing authorization can be proven without revealing identity.",
                     "The optional privacy relay hides the client IP from the gateway, while the gateway still decrypts for provider-bound inference and enforces replay protection with nullifiers.",

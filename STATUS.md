@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## iOS Architecture Light-Client Emphasis
+
+- [x] Inspect current light-client docs and blockchain runtime surface.
+- [x] Update the architecture/runtime explanations to make embedded blockchain light clients first-class.
+- [x] Add focused tests for light-client architecture coverage.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push the scoped light-client architecture change.
+
 ## iOS Architecture Overview Button
 
 - [x] Inspect ZeroK and current AFM runtime surfaces.

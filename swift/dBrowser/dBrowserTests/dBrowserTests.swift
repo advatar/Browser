@@ -79,6 +79,12 @@ struct dBrowserTests {
 
         #expect(searchableText.contains("AF Market"))
         #expect(searchableText.contains("AFM router"))
+        #expect(searchableText.contains("embedded blockchain light clients"))
+        #expect(searchableText.contains("Ethereum-compatible"))
+        #expect(searchableText.contains("Substrate/Polkadot"))
+        #expect(searchableText.contains("centralized RPC"))
+        #expect(searchableText.contains("escrow status"))
+        #expect(searchableText.contains("proof settlement"))
         #expect(searchableText.contains("ZeroK"))
         #expect(searchableText.contains("LLM Gateway"))
         #expect(searchableText.contains("https://zerok.cloud"))
@@ -97,8 +103,23 @@ struct dBrowserTests {
         #expect(architecture?.mode == .gateway)
         #expect(architecture?.isAvailable == true)
         #expect(architecture?.status.contains("AF Market") == true)
+        #expect(architecture?.status.contains("Light clients") == true)
         #expect(architecture?.status.contains("ZeroK") == true)
         #expect(architecture?.status.contains("LLM Gateway") == true)
+    }
+
+    @Test func decentralizedProtocolExplanationKeepsLightClientsAsTrustRoot() {
+        let explanation = MobileRuntimeFeature.decentralizedProtocols.explanation
+        let searchableText = ([explanation.overview, explanation.bridgeBehavior] + explanation.detailPoints)
+            .joined(separator: " ")
+
+        #expect(searchableText.contains("embedded light-client contract"))
+        #expect(searchableText.contains("Ethereum"))
+        #expect(searchableText.contains("Substrate/Polkadot"))
+        #expect(searchableText.contains("centralized RPC"))
+        #expect(searchableText.contains("verify block headers"))
+        #expect(searchableText.contains("wallet state"))
+        #expect(searchableText.contains("AFM settlement"))
     }
 
     @Test func decentralizedStartingPointsAreRuntimeResolvable() {

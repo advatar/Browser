@@ -415,7 +415,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 feature: .architectureOverview,
                 mode: .gateway,
                 isAvailable: true,
-                status: "AF Market + ZeroK + LLM Gateway"
+                status: "Light clients + AF Market + ZeroK + LLM Gateway"
             ),
             RuntimeFeatureState(
                 feature: .afmServices,
