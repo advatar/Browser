@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## iOS Architecture Overview Button
+
+- [x] Inspect ZeroK and current AFM runtime surfaces.
+- [x] Add an architecture overview feature button covering AF Market, ZeroK, and LLM Gateway.
+- [x] Add focused tests for architecture explanation coverage.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push the scoped architecture overview change.
+
 ## Zero Knowledge Gateway Entry Points
 
 - [x] Capture required gateway URLs for the Swift shell.

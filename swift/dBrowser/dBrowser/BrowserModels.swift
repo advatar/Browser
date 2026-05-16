@@ -214,6 +214,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case webBrowsing
     case tabs
     case decentralizedProtocols
+    case architectureOverview
     case afmServices
     case copilot
     case wallet
@@ -226,6 +227,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Web browsing"
         case .tabs: "Tabs and history"
         case .decentralizedProtocols: "IPFS, IPNS, ENS"
+        case .architectureOverview: "Architecture"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -238,6 +240,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Gateway bridge"
+        case .architectureOverview: "AF Market + ZeroK"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -250,6 +253,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "safari"
         case .tabs: "rectangle.on.rectangle"
         case .decentralizedProtocols: "link"
+        case .architectureOverview: "square.stack.3d.up"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -291,6 +295,19 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Resolution results preserve a clear source, making it possible to show whether content came from native, gateway, or remote runtime resolution."
+                ]
+            )
+        case .architectureOverview:
+            RuntimeFeatureExplanation(
+                overview: "Explains how the Swift browser shell, AF Market, AFM services, ZeroK, and the LLM Gateway fit together.",
+                bridgeBehavior: "The iOS shell keeps navigation, history, wallet policy, and selected context local; AF Market routes work through AFM router, registry, and pipelines; privacy-sensitive LLM calls use the ZeroK LLM Gateway path documented in ../ZeroK.",
+                detailPoints: [
+                    "AF Market is the pack discovery and install surface. The AFM router selects an expert or pack, registry supplies deterministic metadata and signing keys, and pipelines queues the selected work.",
+                    "ZeroK LLM Gateway calls are sent as encrypted envelopes with token-class padding and ZK-ready usage tickets, so relays cannot read prompts and billing authorization can be proven without revealing identity.",
+                    "The optional privacy relay hides the client IP from the gateway, while the gateway still decrypts for provider-bound inference and enforces replay protection with nullifiers.",
+                    "The visible HTTPS starting points are https://zerok.cloud for ZeroK and https://llmos.showntell.dev for the LLM Gateway and LLM OS surface.",
+                    "The app should send only selected, redacted page context to the gateway; browser history, long-term memory, and tab state remain in the Swift app unless a user action shares them.",
+                    "Provider boundary: upstream LLM infrastructure can still correlate decrypted prompt content and timing unless future confidential inference or enclave-backed execution is added."
                 ]
             )
         case .afmServices:

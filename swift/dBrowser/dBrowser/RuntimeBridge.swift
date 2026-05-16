@@ -412,6 +412,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: configuration.remoteRuntimeBaseURL == nil ? "IPFS/IPNS/ENS gateway bridge" : "Remote runtime bridge"
             ),
             RuntimeFeatureState(
+                feature: .architectureOverview,
+                mode: .gateway,
+                isAvailable: true,
+                status: "AF Market + ZeroK + LLM Gateway"
+            ),
+            RuntimeFeatureState(
                 feature: .afmServices,
                 mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
                 isAvailable: afmSnapshot.allServicesAvailable,

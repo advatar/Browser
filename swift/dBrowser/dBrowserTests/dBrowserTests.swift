@@ -65,6 +65,42 @@ struct dBrowserTests {
         }
     }
 
+    @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {
+        let feature = MobileRuntimeFeature.architectureOverview
+        let explanation = feature.explanation
+        let searchableText = (
+            [
+                feature.title,
+                feature.status,
+                explanation.overview,
+                explanation.bridgeBehavior
+            ] + explanation.detailPoints
+        ).joined(separator: " ")
+
+        #expect(searchableText.contains("AF Market"))
+        #expect(searchableText.contains("AFM router"))
+        #expect(searchableText.contains("ZeroK"))
+        #expect(searchableText.contains("LLM Gateway"))
+        #expect(searchableText.contains("https://zerok.cloud"))
+        #expect(searchableText.contains("https://llmos.showntell.dev"))
+        #expect(searchableText.contains("encrypted envelopes"))
+        #expect(searchableText.contains("token-class padding"))
+        #expect(searchableText.contains("privacy relay"))
+        #expect(searchableText.contains("Provider boundary"))
+    }
+
+    @MainActor
+    @Test func runtimeBridgeExposesArchitectureOverviewButton() {
+        let bridge = MobileRuntimeBridge()
+        let architecture = bridge.featureStates.first { $0.feature == .architectureOverview }
+
+        #expect(architecture?.mode == .gateway)
+        #expect(architecture?.isAvailable == true)
+        #expect(architecture?.status.contains("AF Market") == true)
+        #expect(architecture?.status.contains("ZeroK") == true)
+        #expect(architecture?.status.contains("LLM Gateway") == true)
+    }
+
     @Test func decentralizedStartingPointsAreRuntimeResolvable() {
         let points = DecentralizedStartingPoint.featured
         #expect(points.count >= 4)
