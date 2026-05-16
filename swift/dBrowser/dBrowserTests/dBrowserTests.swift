@@ -999,6 +999,7 @@ struct dBrowserTests {
         #expect(pack?.createdAtMillis == 1762127512523)
     }
 
+    @MainActor
     @Test func afmServicesClientRoutesThroughV1ContractAndFallsBackToLocal() async {
         let capturedV1Requests = JSONRequestCapture()
         let v1Harness = Self.makeAFMServiceSession(key: "v1route") { request in
@@ -1186,6 +1187,205 @@ struct dBrowserTests {
         #expect(report.checks.allSatisfy { $0.status == .passed })
         #expect(report.summary.contains("chain-anchored"))
         #expect(report.transactionHash == "0xtx")
+    }
+
+    @MainActor
+    @Test func chainTrustRegistrySeedsSupportedFamiliesAndLabelsFallback() {
+        let registry = ChainTrustRegistry.defaultRegistry
+        let families = Set(registry.statuses.map(\.family))
+        let base = registry.status(forChainRef: "base-sepolia")
+
+        #expect(families.isSuperset(of: Set(ChainTrustFamily.allCases.filter { $0 != .unknown })))
+        #expect(registry.statuses.count >= 12)
+        #expect(base?.family == .evmLayer2)
+        #expect(base?.state == .rpcFallback)
+        #expect(base?.displaySummary.contains("Gateway/RPC fallback") == true)
+        #expect(registry.runtimeStatusText.contains("gateway/RPC fallback only"))
+        #expect(registry.fallbackWarning.contains("not local light-client verification"))
+    }
+
+    @MainActor
+    @Test func chainTrustRegistryRecordsAFMarketSettlementEvidence() {
+        var registry = ChainTrustRegistry.defaultRegistry
+        let taskID = "task-chain-registry"
+        let outputCommitment = "0x\(String(repeating: "22", count: 32))"
+        let nodeTask = Self.chainAnchoredNodeTask(taskID: taskID, outputCommitment: outputCommitment)
+
+        let update = registry.recordAFMarketVerification(nodeTask.verificationReport)
+        let base = registry.status(forChainRef: "base-sepolia")
+
+        #expect(update?.state == .proofChecked)
+        #expect(update?.trustSource == .afMarketSettlement)
+        #expect(update?.latestCheckpoint?.height == 456)
+        #expect(base?.state == .proofChecked)
+        #expect(base?.evidence.first?.taskID == taskID)
+        #expect(base?.evidence.first?.transactionHash == "0xtx-chain")
+        #expect(base?.displaySummary.contains("proof-checked evidence") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeSurfacesChainTrustFeatureState() {
+        var registry = ChainTrustRegistry.defaultRegistry
+        let nodeTask = Self.chainAnchoredNodeTask(
+            taskID: "task-chain-feature",
+            outputCommitment: "0x\(String(repeating: "33", count: 32))"
+        )
+        _ = registry.recordAFMarketVerification(nodeTask.verificationReport)
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(chainTrustRegistry: registry)
+        )
+        let chainTrust = bridge.featureStates.first { $0.feature == .chainTrust }
+
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.isAvailable == true)
+        #expect(chainTrust?.status.contains("Base Sepolia proof checked") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRecordsAFMarketSettlementInChainTrustRegistry() async {
+        let taskID = "task-chain-runtime"
+        let outputCommitment = "0x\(String(repeating: "44", count: 32))"
+        let nonce = AFMNodeVerificationReport.bindingNonceHex(
+            taskID: taskID,
+            outputCommitment: outputCommitment
+        ) ?? ""
+        let serviceHarness = Self.makeAFMServiceSession(key: "chaintrust") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy",
+                            "checksum": "0xabc"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: ["experts": []])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: ["bundles": []])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-chain",
+                    "status": "queued"
+                ])
+            }
+
+            if path == "/packs/install" {
+                return Self.jsonResponse(for: request, status: 201, body: [
+                    "id": "install-chain",
+                    "packID": "afm://demo-writer",
+                    "checksum": "0xabc",
+                    "status": "installed",
+                    "mode": "production"
+                ])
+            }
+
+            if path == "/tasks" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "id": taskID,
+                    "taskID": taskID,
+                    "packID": "afm://demo-writer",
+                    "installID": "install-chain",
+                    "status": "completed",
+                    "mode": "production",
+                    "result": [
+                        "summary": "production completed",
+                        "outputCommitment": outputCommitment
+                    ],
+                    "attestation": [
+                        "mode": "secure-enclave",
+                        "taskID": taskID,
+                        "outputCommitment": outputCommitment,
+                        "nonce": nonce,
+                        "tokenCount": 20,
+                        "contextPassages": 1
+                    ],
+                    "proof": [
+                        "proofID": "proof-chain",
+                        "status": "verified",
+                        "verifier": "0xverifier",
+                        "publicInputs": [
+                            "taskID": taskID,
+                            "outputCommitment": outputCommitment
+                        ],
+                        "proofBytes": "0xproof",
+                        "publicInputsABI": "0xinputs"
+                    ],
+                    "settlement": [
+                        "id": "settlement-chain",
+                        "status": "settled",
+                        "chainRef": "base-sepolia",
+                        "escrowID": "escrow-chain",
+                        "escrowContract": "0xescrow",
+                        "transactionHash": "0xtx-chain",
+                        "blockNumber": 456,
+                        "verifier": "0xverifier",
+                        "mode": "production"
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(
+                prompt: "Summarize with chain evidence",
+                pageURLString: "https://example.com",
+                preferredAFMPackID: "afm://demo-writer"
+            )
+        )
+        let base = bridge.chainTrustSnapshot.status(forChainRef: "base-sepolia")
+        let feature = bridge.featureStates.first { $0.feature == .chainTrust }
+
+        #expect(result.mode == .service)
+        #expect(result.afmNodeTask?.verificationReport.state == .chainAnchored)
+        #expect(result.chainTrustUpdate?.state == .proofChecked)
+        #expect(base?.state == .proofChecked)
+        #expect(base?.latestCheckpoint?.height == 456)
+        #expect(feature?.mode == .service)
+        #expect(feature?.status.contains("Base Sepolia proof checked") == true)
+        #expect(result.suggestions.contains { $0.contains("Chain trust Proof checked") })
     }
 
     @MainActor
@@ -3229,6 +3429,63 @@ struct dBrowserTests {
             smartHistoryStore: smartHistoryStore,
             llmConversationStore: llmConversationStore,
             openMindMemoryClient: openMindMemoryClient
+        )
+    }
+
+    private static func chainAnchoredNodeTask(taskID: String, outputCommitment: String) -> AFMNodeTaskResult {
+        let nonce = AFMNodeVerificationReport.bindingNonceHex(
+            taskID: taskID,
+            outputCommitment: outputCommitment
+        ) ?? ""
+        return AFMNodeTaskResult(
+            ok: true,
+            id: taskID,
+            taskID: taskID,
+            packID: "afm://demo-writer",
+            installID: "install-chain",
+            status: "completed",
+            mode: "production",
+            result: AFMNodeTaskOutput(
+                summary: "production completed",
+                outputCommitment: outputCommitment,
+                completedAt: "2026-05-16T00:00:01Z"
+            ),
+            attestation: AFMAttestedRun(
+                mode: "secure-enclave",
+                taskID: taskID,
+                outputCommitment: outputCommitment,
+                nonce: nonce,
+                tokenCount: 42,
+                contextPassages: 2,
+                attestationToken: "cbor-base64"
+            ),
+            proof: AFMProofState(
+                proofID: "proof-chain",
+                status: "verified",
+                verifier: "0xverifier",
+                publicInputs: [
+                    "taskID": taskID,
+                    "outputCommitment": outputCommitment
+                ],
+                proofBytes: "0xproof",
+                publicInputsABI: "0xinputs",
+                deadline: 1730203600,
+                payoutAddress: "0x000000000000000000000000000000000000dead",
+                modelIDHash: "0xmodel"
+            ),
+            settlement: AFMSettlementState(
+                id: "settlement-chain",
+                status: "settled",
+                chainRef: "base-sepolia",
+                escrowID: "escrow-chain",
+                escrowContract: "0xescrow",
+                transactionHash: "0xtx-chain",
+                blockNumber: 456,
+                deadline: 1730203600,
+                verifier: "0xverifier",
+                mode: "production",
+                settledAt: "2026-05-16T00:00:02Z"
+            )
         )
     }
 

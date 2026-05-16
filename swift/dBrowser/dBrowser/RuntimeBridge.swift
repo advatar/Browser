@@ -37,6 +37,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
     var llmRouter: LLMRouterEndpointConfiguration
+    var chainTrustRegistry: ChainTrustRegistry
 
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
@@ -44,7 +45,8 @@ struct RuntimeBridgeConfiguration: Equatable {
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
-        llmRouter: LLMRouterEndpointConfiguration = .local
+        llmRouter: LLMRouterEndpointConfiguration = .local,
+        chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
@@ -52,6 +54,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
         self.llmRouter = llmRouter
+        self.chainTrustRegistry = chainTrustRegistry
     }
 }
 
@@ -115,6 +118,7 @@ struct CopilotRunResult: Equatable, Identifiable {
     let afmInstall: AFMNodeInstallResult?
     let afmNodeTask: AFMNodeTaskResult?
     let llmRouterResponse: LLMRouterCompletionResponse?
+    let chainTrustUpdate: ChainTrustStatus?
     let usageProviderKey: String?
 
     init(
@@ -127,6 +131,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         afmInstall: AFMNodeInstallResult? = nil,
         afmNodeTask: AFMNodeTaskResult? = nil,
         llmRouterResponse: LLMRouterCompletionResponse? = nil,
+        chainTrustUpdate: ChainTrustStatus? = nil,
         usageProviderKey: String? = nil
     ) {
         self.id = id
@@ -138,6 +143,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.afmInstall = afmInstall
         self.afmNodeTask = afmNodeTask
         self.llmRouterResponse = llmRouterResponse
+        self.chainTrustUpdate = chainTrustUpdate
         self.usageProviderKey = usageProviderKey
     }
 }
@@ -237,6 +243,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let llmRouterServiceClient: LLMRouterServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
+    @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -252,10 +259,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
         self.llmRouterServiceClient = llmRouterServiceClient ?? LLMRouterServiceClient(configuration: configuration.llmRouter)
+        self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: .unknown,
-            llmRouterSnapshot: .unknown
+            llmRouterSnapshot: .unknown,
+            chainTrustSnapshot: configuration.chainTrustRegistry
         )
         self.walletInfo = .disconnected
     }
@@ -268,7 +277,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
-            llmRouterSnapshot: llmRouterServiceSnapshot
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            chainTrustSnapshot: chainTrustSnapshot
         )
         return featureStates
     }
@@ -353,7 +363,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 featureStates = Self.makeFeatureStates(
                     configuration: configuration,
                     afmSnapshot: afmServiceSnapshot,
-                    llmRouterSnapshot: routerSnapshot
+                    llmRouterSnapshot: routerSnapshot,
+                    chainTrustSnapshot: chainTrustSnapshot
                 )
                 guard routerSnapshot.isModelAvailable(provider: .appleFoundation) else {
                     throw LLMRouterServiceClientError.invalidResponse
@@ -403,7 +414,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
                 afmSnapshot: snapshot,
-                llmRouterSnapshot: llmRouterServiceSnapshot
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                chainTrustSnapshot: chainTrustSnapshot
             )
 
             let route = try await afmServicesClient.route(
@@ -458,6 +470,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             }
             var installResult: AFMNodeInstallResult?
             var nodeTaskResult: AFMNodeTaskResult?
+            var chainTrustUpdate: ChainTrustStatus?
 
             if snapshot.nodeAvailable, let selectedPackID {
                 do {
@@ -477,11 +490,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     installResult = install
                     nodeTaskResult = nodeTask
                     let verificationReport = nodeTask.verificationReport
+                    chainTrustUpdate = recordChainTrustEvidence(from: verificationReport)
                     summary += " Node \(nodeTask.taskID) completed with \(nodeTask.attestation.mode) attestation, \(nodeTask.proof.status) proof, and \(nodeTask.settlement.status) settlement. \(verificationReport.summary)"
                     suggestions.append("Node installed \(selectedPackID) with \(install.status) status (\(install.mode)).")
                     suggestions.append("Node dispatched \(nodeTask.taskID) with \(nodeTask.attestation.mode) attestation.")
                     suggestions.append("Proof \(nodeTask.proof.proofID ?? nodeTask.proof.id ?? "local") is \(nodeTask.proof.status); settlement is \(nodeTask.settlement.status) on \(nodeTask.settlement.chainRef ?? "local-devnet").")
                     suggestions.append("Verification \(verificationReport.state.title): \(verificationReport.summary)")
+                    if let chainTrustUpdate {
+                        suggestions.append("Chain trust \(chainTrustUpdate.state.title): \(chainTrustUpdate.displaySummary)")
+                    }
                     for check in verificationReport.checks where check.status != .passed {
                         suggestions.append("Verification check \(check.id): \(check.message)")
                     }
@@ -500,13 +517,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 suggestions: suggestions,
                 mode: .service,
                 afmInstall: installResult,
-                afmNodeTask: nodeTaskResult
+                afmNodeTask: nodeTaskResult,
+                chainTrustUpdate: chainTrustUpdate
             )
         } catch {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
                 afmSnapshot: afmServiceSnapshot,
-                llmRouterSnapshot: llmRouterServiceSnapshot
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                chainTrustSnapshot: chainTrustSnapshot
             )
         }
 
@@ -610,7 +629,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private static func makeFeatureStates(
         configuration: RuntimeBridgeConfiguration,
         afmSnapshot: AFMServiceSnapshot,
-        llmRouterSnapshot: LLMRouterServiceSnapshot
+        llmRouterSnapshot: LLMRouterServiceSnapshot,
+        chainTrustSnapshot: ChainTrustRegistry
     ) -> [RuntimeFeatureState] {
         let copilotStatus: String
         let copilotMode: RuntimeBridgeMode
@@ -624,6 +644,20 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             copilotStatus = "Local fallback bridge"
             copilotMode = .local
         }
+        let chainTrustMode: RuntimeBridgeMode = {
+            switch chainTrustSnapshot.strongestState {
+            case .verified:
+                return .local
+            case .proofChecked, .syncing, .stale:
+                return .service
+            case .rpcFallback:
+                return .gateway
+            case .failed, .unavailable:
+                return .unavailable
+            }
+        }()
+        let chainTrustAvailable = chainTrustSnapshot.strongestState != .unavailable
+            && chainTrustSnapshot.strongestState != .failed
 
         return [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
@@ -641,6 +675,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: "Light clients + AF Market + ZeroK + LLM Gateway"
             ),
             RuntimeFeatureState(
+                feature: .chainTrust,
+                mode: chainTrustMode,
+                isAvailable: chainTrustAvailable,
+                status: chainTrustSnapshot.runtimeStatusText
+            ),
+            RuntimeFeatureState(
                 feature: .afmServices,
                 mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
                 isAvailable: afmSnapshot.allServicesAvailable,
@@ -655,6 +695,17 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             RuntimeFeatureState(feature: .wallet, mode: .local, isAvailable: true, status: "Local policy bridge"),
             RuntimeFeatureState(feature: .downloads, mode: .native, isAvailable: true, status: "URLSession bridge")
         ]
+    }
+
+    private func recordChainTrustEvidence(from report: AFMNodeVerificationReport) -> ChainTrustStatus? {
+        let update = chainTrustSnapshot.recordAFMarketVerification(report)
+        featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            chainTrustSnapshot: chainTrustSnapshot
+        )
+        return update
     }
 
     private func decentralizedResolution(

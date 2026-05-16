@@ -889,6 +889,7 @@ struct AFMNodeVerificationReport: Codable, Equatable {
     var escrowID: String?
     var escrowContract: String?
     var transactionHash: String?
+    var blockNumber: Int?
     var proofID: String?
 
     init(task: AFMNodeTaskResult) {
@@ -897,6 +898,7 @@ struct AFMNodeVerificationReport: Codable, Equatable {
         self.escrowID = task.settlement.escrowID
         self.escrowContract = task.settlement.escrowContract
         self.transactionHash = task.settlement.transactionHash
+        self.blockNumber = task.settlement.blockNumber
         self.proofID = task.proof.proofID ?? task.proof.id
 
         var checks: [AFMVerificationCheck] = []

@@ -1142,6 +1142,7 @@ private struct RuntimePanelView: View {
 
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
 
+                ChainTrustPanelView(registry: browser.chainTrustSnapshot)
                 AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
                 OpenMindMemoryPanelView(
                     state: browser.openMindCapabilityState,
@@ -1155,6 +1156,49 @@ private struct RuntimePanelView: View {
         }
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-runtime")
+    }
+}
+
+private struct ChainTrustPanelView: View {
+    let registry: ChainTrustRegistry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Chain Trust", systemImage: "checkmark.shield")
+                .font(.headline)
+            Text(registry.runtimeStatusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(registry.fallbackWarning)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(registry.statuses.prefix(6)) { status in
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(status.displayName)
+                            .font(.subheadline.weight(.semibold))
+                        Text(status.displaySummary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(status.proofTypeSummary)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    Text(status.state.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(status.state.isProductionEvidence ? Color.green : Color.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("runtime-chain-trust")
     }
 }
 

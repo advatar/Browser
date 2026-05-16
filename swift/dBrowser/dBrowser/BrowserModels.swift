@@ -233,6 +233,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case tabs
     case decentralizedProtocols
     case architectureOverview
+    case chainTrust
     case afmServices
     case copilot
     case wallet
@@ -246,6 +247,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "Tabs and history"
         case .decentralizedProtocols: "IPFS, IPNS, ENS"
         case .architectureOverview: "Architecture"
+        case .chainTrust: "Chain trust"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -259,6 +261,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Gateway bridge"
         case .architectureOverview: "Light clients + AF Market + ZeroK"
+        case .chainTrust: "Gateway/RPC fallback"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -272,6 +275,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "rectangle.on.rectangle"
         case .decentralizedProtocols: "link"
         case .architectureOverview: "square.stack.3d.up"
+        case .chainTrust: "checkmark.shield"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -330,6 +334,17 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "The visible HTTPS starting points are https://zerok.cloud for ZeroK and https://llmos.showntell.dev for the LLM Gateway and LLM OS surface.",
                     "The app should send only selected, redacted page context to the gateway; browser history, long-term memory, and tab state remain in the Swift app unless a user action shares them.",
                     "Provider boundary: upstream LLM infrastructure can still correlate decrypted prompt content and timing unless future confidential inference or enclave-backed execution is added."
+                ]
+            )
+        case .chainTrust:
+            RuntimeFeatureExplanation(
+                overview: "Reports chain trust state through one Swift registry for browser resolution, wallet state, Copilot actions, and AFM settlement evidence.",
+                bridgeBehavior: "The current bridge labels gateway/RPC fallback separately from proof-checked settlement evidence and future embedded light-client verification.",
+                detailPoints: [
+                    "Bitcoin, Ethereum/EVM/L2s, Solana, Cosmos/Tendermint, Polkadot/Substrate, Avalanche, TRON, XRP Ledger, Sui, and Aptos report through the same status model.",
+                    "Gateway or RPC data stays marked as fallback and is not presented as local verification.",
+                    "AFMarket settlement receipts can raise a chain entry to proof-checked without implying full light-client verification.",
+                    "Future chain-specific clients can plug in verified, syncing, stale, failed, and unavailable states without changing UI contracts."
                 ]
             )
         case .afmServices:

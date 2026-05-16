@@ -17,6 +17,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var copilotRuns: [CopilotRun] = []
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
+    @Published var chainTrustSnapshot: ChainTrustRegistry
     @Published var afmServiceSnapshot: AFMServiceSnapshot
     @Published var llmRouterServiceSnapshot: LLMRouterServiceSnapshot
     @Published var selectedAFMPackID: String?
@@ -69,6 +70,7 @@ final class BrowserViewModel: ObservableObject {
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
+        self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         self.openMindCapabilityState = .disabled
@@ -228,6 +230,7 @@ final class BrowserViewModel: ObservableObject {
 
     func refreshRuntimeBridgeStatus() async {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
+        chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         llmModelOptions = LLMModelRegistry.models(
@@ -557,6 +560,8 @@ final class BrowserViewModel: ObservableObject {
                 return
             }
 
+            runtimeFeatureStates = runtimeBridge.featureStates
+            chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
             let provider = result.usageProviderKey ?? (result.mode == .service ? "afm" : "local")
             let finalUsage = CopilotCreditUsage.estimate(
                 prompt: renderedWithMemory?.prompt ?? prompt,
@@ -1125,6 +1130,13 @@ final class BrowserViewModel: ObservableObject {
             kind: .afMarketVerificationRecorded,
             message: "\(verificationReport.state.title): \(verificationReport.summary)"
         )
+        if let chainTrustUpdate = result.chainTrustUpdate {
+            appendCopilotEvent(
+                runID: runID,
+                kind: .chainTrustUpdated,
+                message: "Chain trust \(chainTrustUpdate.state.title): \(chainTrustUpdate.displaySummary)"
+            )
+        }
     }
 
     private func appendLLMRouterEvents(runID: UUID, result: CopilotRunResult) {
