@@ -19,6 +19,19 @@
 
 ## Active Task
 
+## Swift Chain Trust Registry Foundation Slice
+
+- [x] Triage shared chain-trust registry gap from #68.
+- [x] Create tracker issue for Swift chain trust registry foundation (#90).
+- [ ] Add shared Swift chain registry/status/proof/checkpoint models.
+- [ ] Seed supported chain families for Bitcoin, Ethereum/EVM/L2s, Solana, Cosmos/Tendermint, Polkadot/Substrate, Avalanche, TRON, XRP Ledger, Sui, and Aptos.
+- [ ] Surface chain trust state in Swift runtime status/UI without overstating gateway/RPC fallback.
+- [ ] Bind AFMarket settlement evidence into the chain trust registry.
+- [ ] Add focused Swift unit tests for registry coverage, fallback labeling, runtime status, and AFMarket settlement binding.
+- [ ] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift LLM Router Service Adapter Slice
 
 - [x] Triage remaining provider/tool-call gap from #72.
