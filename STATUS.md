@@ -19,6 +19,19 @@
 
 ## Active Task
 
+## Swift Bitcoin Light Client Foundation Slice
+
+- [x] Triage Bitcoin SPV/compact-filter gap from #59.
+- [x] Create tracker issue for Swift Bitcoin light-client verifier foundation (#91).
+- [x] Add Swift Bitcoin header/checkpoint/Merkle proof/service snapshot/sync models.
+- [x] Add a Swift Bitcoin light-client service endpoint configuration and HTTP client contract for future `./services` chain-trust endpoints.
+- [x] Implement local verifier primitives for header hashing, chain-work ordering, Merkle inclusion, stale headers, and reorg detection.
+- [x] Bind Bitcoin light-client snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests including known Bitcoin genesis header fixture coverage.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift Chain Trust Registry Foundation Slice
 
 - [x] Triage shared chain-trust registry gap from #68.

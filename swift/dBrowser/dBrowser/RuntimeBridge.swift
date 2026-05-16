@@ -37,6 +37,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
     var llmRouter: LLMRouterEndpointConfiguration
+    var bitcoinLightClient: BitcoinLightClientEndpointConfiguration
     var chainTrustRegistry: ChainTrustRegistry
 
     nonisolated init(
@@ -46,6 +47,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
         llmRouter: LLMRouterEndpointConfiguration = .local,
+        bitcoinLightClient: BitcoinLightClientEndpointConfiguration = .disabled,
         chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
@@ -54,6 +56,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
         self.llmRouter = llmRouter
+        self.bitcoinLightClient = bitcoinLightClient
         self.chainTrustRegistry = chainTrustRegistry
     }
 }
@@ -241,8 +244,13 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let configuration: RuntimeBridgeConfiguration
     private let afmServicesClient: AFMServicesClient
     private let llmRouterServiceClient: LLMRouterServiceClient
+    private let bitcoinLightClientServiceClient: BitcoinLightClientServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
+    @Published private(set) var bitcoinLightClientSnapshot: BitcoinLightClientServiceSnapshot = .fallback(
+        network: .mainnet,
+        lastError: "Bitcoin light-client service not checked yet."
+    )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
@@ -254,12 +262,18 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     init(
         configuration: RuntimeBridgeConfiguration,
         afmServicesClient: AFMServicesClient? = nil,
-        llmRouterServiceClient: LLMRouterServiceClient? = nil
+        llmRouterServiceClient: LLMRouterServiceClient? = nil,
+        bitcoinLightClientServiceClient: BitcoinLightClientServiceClient? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
         self.llmRouterServiceClient = llmRouterServiceClient ?? LLMRouterServiceClient(configuration: configuration.llmRouter)
+        self.bitcoinLightClientServiceClient = bitcoinLightClientServiceClient ?? BitcoinLightClientServiceClient(configuration: configuration.bitcoinLightClient)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
+        self.bitcoinLightClientSnapshot = .fallback(
+            network: configuration.bitcoinLightClient.network,
+            lastError: "Bitcoin light-client service not checked yet."
+        )
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: .unknown,
@@ -272,8 +286,11 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     func refreshStatus() async -> [RuntimeFeatureState] {
         async let afmSnapshot = afmServicesClient.snapshot()
         async let llmRouterSnapshot = llmRouterServiceClient.snapshot()
+        async let bitcoinSnapshot = bitcoinLightClientServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
+        bitcoinLightClientSnapshot = await bitcoinSnapshot
+        _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,

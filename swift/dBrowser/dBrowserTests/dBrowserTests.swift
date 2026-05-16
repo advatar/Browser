@@ -1388,6 +1388,140 @@ struct dBrowserTests {
         #expect(result.suggestions.contains { $0.contains("Chain trust Proof checked") })
     }
 
+    @Test func bitcoinLightClientVerifiesGenesisHeaderAndMerkleFixture() {
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+        let merkleProof = BitcoinMerkleProof(
+            transactionID: genesis.merkleRoot,
+            blockHash: genesis.validatedHash,
+            merkleRoot: genesis.merkleRoot,
+            transactionIndex: 0,
+            siblings: []
+        )
+        let inclusion = BitcoinTransactionInclusionProof(header: genesis, proof: merkleProof)
+        let result = inclusion.verify()
+
+        #expect(genesis.computedHash == "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")
+        #expect(genesis.validatesAdvertisedHash)
+        #expect(merkleProof.verifiesMerkleRoot)
+        #expect(result.verified)
+        #expect(result.state == .synced)
+        #expect(result.height == 0)
+    }
+
+    @Test func bitcoinHeaderTrackerOrdersByChainWorkAndLabelsReorgs() {
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+        let firstHeader = BitcoinBlockHeader(
+            height: 1,
+            version: 1,
+            previousBlockHash: genesis.validatedHash,
+            merkleRoot: String(repeating: "1", count: 64),
+            timestamp: 1_231_006_600,
+            bits: 0x1d00ffff,
+            nonce: 1,
+            chainWork: "02"
+        )
+        let weakerSibling = BitcoinBlockHeader(
+            height: 1,
+            version: 1,
+            previousBlockHash: genesis.validatedHash,
+            merkleRoot: String(repeating: "2", count: 64),
+            timestamp: 1_231_006_700,
+            bits: 0x1d00ffff,
+            nonce: 2,
+            chainWork: "01"
+        )
+        let strongerSibling = BitcoinBlockHeader(
+            height: 1,
+            version: 1,
+            previousBlockHash: genesis.validatedHash,
+            merkleRoot: String(repeating: "3", count: 64),
+            timestamp: 1_231_006_800,
+            bits: 0x1d00ffff,
+            nonce: 3,
+            chainWork: "03"
+        )
+        var tracker = BitcoinHeaderChainTracker(anchor: genesis)
+
+        let accepted = tracker.apply(firstHeader)
+        let stale = tracker.apply(weakerSibling)
+        let reorg = tracker.apply(strongerSibling)
+
+        #expect(accepted.transition == .accepted)
+        #expect(accepted.state == .synced)
+        #expect(stale.transition == .stale)
+        #expect(stale.state == .stale)
+        #expect(reorg.transition == .reorg)
+        #expect(reorg.state == .reorg)
+        #expect(reorg.reorgDepth == 1)
+        #expect(tracker.activeTip?.validatedHash == strongerSibling.validatedHash)
+    }
+
+    @MainActor
+    @Test func bitcoinLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let serviceHarness = Self.makeBitcoinLightClientSession(key: "bitcoinregistry") { request in
+            if request.url?.path == "/v1/bitcoin/status" {
+                return Self.jsonResponse(for: request, body: Self.bitcoinGenesisServiceStatus())
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = BitcoinLightClientServiceClient(
+            configuration: serviceHarness.configuration,
+            session: serviceHarness.session
+        )
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordBitcoinLightClientSnapshot(snapshot)
+        let bitcoin = registry.status(forChainRef: "bitcoin-mainnet")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .synced)
+        #expect(status.state == .verified)
+        #expect(status.trustSource == .embeddedLightClient)
+        #expect(status.latestCheckpoint?.height == 0)
+        #expect(bitcoin?.state == .verified)
+        #expect(bitcoin?.evidence.first?.source == .embeddedLightClient)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesBitcoinLightClientState() async {
+        let bitcoinHarness = Self.makeBitcoinLightClientSession(key: "bitcoinruntime") { request in
+            if request.url?.path == "/v1/bitcoin/status" {
+                return Self.jsonResponse(for: request, body: Self.bitcoinGenesisServiceStatus())
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "bitcoinruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                bitcoinLightClient: bitcoinHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(
+                configuration: bitcoinHarness.configuration,
+                session: bitcoinHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let bitcoin = bridge.chainTrustSnapshot.status(forChainRef: "bitcoin-mainnet")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(bitcoin?.state == .verified)
+        #expect(bitcoin?.latestCheckpoint?.blockHash == BitcoinBlockHeader.mainnetGenesis.validatedHash)
+        #expect(chainTrust?.mode == .local)
+        #expect(chainTrust?.status.contains("Bitcoin light-client verified") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -3539,6 +3673,46 @@ struct dBrowserTests {
             noEgress: true
         )
         return (endpoint, URLSession(configuration: configuration))
+    }
+
+    private static func makeBitcoinLightClientSession(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: BitcoinLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = BitcoinLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-bitcoin.test:4870")!,
+            network: .mainnet
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
+    private static func bitcoinGenesisServiceStatus() -> [String: Any] {
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+        return [
+            "ok": true,
+            "network": "mainnet",
+            "sync_state": "synced",
+            "source": "bitcoin-light-client",
+            "best_height": genesis.height,
+            "best_block_hash": genesis.validatedHash,
+            "best_header": [
+                "height": genesis.height,
+                "version": Int(genesis.version),
+                "previous_block_hash": genesis.previousBlockHash,
+                "merkle_root": genesis.merkleRoot,
+                "timestamp": Int(genesis.timestamp),
+                "bits": Int(genesis.bits),
+                "nonce": Int(genesis.nonce),
+                "hash": genesis.validatedHash,
+                "chain_work": genesis.chainWork ?? "01",
+                "source": "fixture"
+            ],
+            "peer_count": 3,
+            "filter_source": "bip157"
+        ]
     }
 
     private static func jsonResponse(

@@ -342,6 +342,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                 bridgeBehavior: "The current bridge labels gateway/RPC fallback separately from proof-checked settlement evidence and future embedded light-client verification.",
                 detailPoints: [
                     "Bitcoin, Ethereum/EVM/L2s, Solana, Cosmos/Tendermint, Polkadot/Substrate, Avalanche, TRON, XRP Ledger, Sui, and Aptos report through the same status model.",
+                    "Bitcoin has a Swift light-client contract for SPV header sync, BIP157/158 compact-filter readiness, Merkle inclusion checks, stale peers, and reorg transitions.",
                     "Gateway or RPC data stays marked as fallback and is not presented as local verification.",
                     "AFMarket settlement receipts can raise a chain entry to proof-checked without implying full light-client verification.",
                     "Future chain-specific clients can plug in verified, syncing, stale, failed, and unavailable states without changing UI contracts."
