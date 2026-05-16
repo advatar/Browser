@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Kline Runtime Boundary Decision
+
+- [x] Inspect `../Kline` app/docs/package structure and identify its runtime boundary.
+- [x] Create a GitHub issue deciding whether all of Kline should be integrated or kept as a separate agent runtime (#74).
+- [x] Capture overlaps with dBrowser Swift packages, likely integration boundaries, and recommendation.
+- [x] Verify the status-only change locally.
+- [x] Commit and push only the scoped status update.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+
 ## OpenClaw Integration Investigation Plan
 
 - [x] Inspect `../clawdex/openclaw` top-level product docs, package structure, Swift companion app surfaces, gateway/MCP/plugin/memory areas, and channel scope.
