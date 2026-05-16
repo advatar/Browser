@@ -4,3 +4,6 @@
 [submodule "KeyMeIn"]
 	path = KeyMeIn
 	url = git@github.com:advatar/KeyMeIn.git
+[submodule "web"]
+	path = web
+	url = git@github.com:advatar/trustless-web-explorer.git

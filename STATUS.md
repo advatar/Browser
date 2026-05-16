@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## Swift BrIAn Personal Memory Integration Plan
+
+- [x] Inspect `../OpenMind/BrIAn` README, OpenMind MCP client/server, OMPS routes, and control-plane notes.
+- [x] Create a GitHub issue for integrating Swift Strawberry equivalence with BrIAn/OpenMind MCP (#70).
+- [ ] Update the Swift Strawberry plan with BrIAn personal-memory integration requirements.
+- [ ] Verify the documentation-only change locally.
+- [ ] Commit and push only the scoped status and plan updates.
+
 ## Swift AFMarket Integration Plan
 
 - [x] Inspect `../AFMarket` marketplace, router, registry, node, contracts, pipelines, and Swift ZKAI surfaces.
