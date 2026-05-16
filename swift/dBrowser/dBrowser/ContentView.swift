@@ -1143,6 +1143,7 @@ private struct RuntimePanelView: View {
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
 
                 ChainTrustPanelView(registry: browser.chainTrustSnapshot)
+                WalletExplorerPanelView(browser: browser)
                 AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
                 OpenMindMemoryPanelView(
                     state: browser.openMindCapabilityState,
@@ -1199,6 +1200,260 @@ private struct ChainTrustPanelView: View {
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityIdentifier("runtime-chain-trust")
+    }
+}
+
+private struct WalletExplorerPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+    @State private var destinationText = ""
+    @State private var amountText = "1"
+    @State private var preview: WalletTransferPreview?
+    @State private var receipt: WalletTransferReceipt?
+    @State private var errorMessage: String?
+
+    private var portfolio: WalletPortfolioSnapshot {
+        browser.walletPortfolio
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Wallet & Explorers", systemImage: "wallet.pass")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    Task {
+                        if portfolio.isConnected {
+                            await browser.disconnectWallet()
+                            preview = nil
+                            receipt = nil
+                        } else {
+                            await browser.connectWallet()
+                        }
+                    }
+                } label: {
+                    Label(portfolio.isConnected ? "Disconnect" : "Connect", systemImage: portfolio.isConnected ? "xmark.circle" : "link")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text(portfolio.policySummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(portfolio.productionSigningStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if portfolio.isConnected, let activeNetwork = portfolio.activeNetwork, let activeAccount = portfolio.activeAccount {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activeNetwork.displayName)
+                            .font(.subheadline.weight(.semibold))
+                        Text(activeAccount.address)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text(activeAccount.balance.amountText + " " + activeAccount.balance.asset)
+                            .font(.caption)
+                            .foregroundStyle(activeAccount.balance.isVerified ? Color.green : Color.secondary)
+                    }
+                    Spacer()
+                    if let url = activeAccount.explorerURL() {
+                        Button {
+                            browser.navigate(url.absoluteString)
+                        } label: {
+                            Label("Explorer", systemImage: "arrow.up.forward")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Divider()
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], spacing: 8) {
+                    ForEach(portfolio.networks) { network in
+                        Button {
+                            Task {
+                                await browser.switchWalletNetwork(network.chainRef)
+                            }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: network.chainRef == portfolio.activeChainRef ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(network.chainRef == portfolio.activeChainRef ? Color.accentColor : Color.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(network.displayName)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+                                    Text(network.nativeAsset + " / " + (network.trustStatus(in: browser.chainTrustSnapshot)?.state.title ?? "Unregistered"))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(network.chainRef == portfolio.activeChainRef ? 0.16 : 0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Transfer Preview")
+                        .font(.subheadline.weight(.semibold))
+                    HStack {
+                        TextField("Destination", text: $destinationText)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("Amount", text: $amountText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 110)
+                    }
+                    HStack {
+                        Button {
+                            Task { await runPreview() }
+                        } label: {
+                            Label("Preview", systemImage: "doc.text.magnifyingglass")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            Task { await runSign() }
+                        } label: {
+                            Label("Policy Receipt", systemImage: "signature")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
+                if let preview {
+                    WalletPreviewSummaryView(preview: preview)
+                }
+                if let receipt {
+                    WalletReceiptSummaryView(receipt: receipt)
+                }
+            } else {
+                Text("No wallet is connected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !portfolio.recentReceipts.isEmpty {
+                Divider()
+                Text("Recent Receipts")
+                    .font(.subheadline.weight(.semibold))
+                ForEach(portfolio.recentReceipts.prefix(4)) { receipt in
+                    WalletReceiptSummaryView(receipt: receipt)
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("runtime-wallet-explorer")
+    }
+
+    private func transferRequest() -> WalletTransferRequest? {
+        guard let amount = Decimal(string: amountText.trimmingCharacters(in: .whitespacesAndNewlines)),
+              amount > Decimal.zero else {
+            errorMessage = "Enter a positive amount."
+            return nil
+        }
+        let destination = destinationText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackDestination = portfolio.activeAccount?.address ?? ""
+        errorMessage = nil
+        return WalletTransferRequest(
+            chainRef: portfolio.activeChainRef,
+            amount: amount,
+            asset: portfolio.activeNetwork?.nativeAsset,
+            destination: destination.isEmpty ? fallbackDestination : destination,
+            reason: "Runtime panel transfer preview"
+        )
+    }
+
+    private func runPreview() async {
+        guard let request = transferRequest() else { return }
+        preview = await browser.previewWalletTransfer(request)
+    }
+
+    private func runSign() async {
+        guard let request = transferRequest() else { return }
+        let signed = await browser.signWalletTransfer(request)
+        receipt = signed
+        preview = await browser.previewWalletTransfer(request)
+    }
+}
+
+private struct WalletPreviewSummaryView: View {
+    let preview: WalletTransferPreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(preview.status.rawValue, systemImage: preview.status == .rejected ? "xmark.circle" : "checkmark.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(preview.status == .rejected ? Color.red : Color.secondary)
+            Text(preview.reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(preview.chainTrustSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Text(preview.broadcastMode.title)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WalletReceiptSummaryView: View {
+    let receipt: WalletTransferReceipt
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(receipt.status.rawValue)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(receipt.amountText + " " + receipt.asset)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            Text(receipt.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(receipt.destination)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let signatureDigest = receipt.signatureDigest {
+                Text(signatureDigest)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

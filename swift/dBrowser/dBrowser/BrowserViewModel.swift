@@ -20,6 +20,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var chainTrustSnapshot: ChainTrustRegistry
     @Published var afmServiceSnapshot: AFMServiceSnapshot
     @Published var llmRouterServiceSnapshot: LLMRouterServiceSnapshot
+    @Published var walletPortfolio: WalletPortfolioSnapshot
     @Published var selectedAFMPackID: String?
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
     @Published var openMindContinuityState: OpenMindContinuityState
@@ -73,6 +74,7 @@ final class BrowserViewModel: ObservableObject {
         self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
+        self.walletPortfolio = runtimeBridge.walletPortfolio
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
@@ -233,6 +235,7 @@ final class BrowserViewModel: ObservableObject {
         chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
+        walletPortfolio = runtimeBridge.walletPortfolio
         llmModelOptions = LLMModelRegistry.models(
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot
@@ -248,6 +251,34 @@ final class BrowserViewModel: ObservableObject {
         if let selectedAFMPackID, !afmServiceSnapshot.availablePacks.contains(where: { $0.id == selectedAFMPackID }) {
             self.selectedAFMPackID = nil
         }
+    }
+
+    func connectWallet() async {
+        _ = await runtimeBridge.connectWallet()
+        walletPortfolio = runtimeBridge.walletPortfolio
+        runtimeFeatureStates = runtimeBridge.featureStates
+    }
+
+    func disconnectWallet() async {
+        _ = await runtimeBridge.disconnectWallet()
+        walletPortfolio = runtimeBridge.walletPortfolio
+        runtimeFeatureStates = runtimeBridge.featureStates
+    }
+
+    func switchWalletNetwork(_ chainRef: String) async {
+        _ = await runtimeBridge.switchWalletNetwork(chainRef)
+        walletPortfolio = runtimeBridge.walletPortfolio
+        runtimeFeatureStates = runtimeBridge.featureStates
+    }
+
+    func previewWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferPreview {
+        await runtimeBridge.previewWalletTransfer(request)
+    }
+
+    func signWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferReceipt {
+        let receipt = await runtimeBridge.signWalletTransfer(request)
+        walletPortfolio = runtimeBridge.walletPortfolio
+        return receipt
     }
 
     func selectAFMPack(_ id: String?) {

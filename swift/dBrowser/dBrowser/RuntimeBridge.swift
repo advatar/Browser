@@ -183,12 +183,18 @@ struct WalletBridgeInfo: Equatable {
     var address: String?
     var network: String
     var policy: String
+    var activeChainRef: String
+    var explorerURLString: String?
+    var productionSigningStatus: String
 
     static let disconnected = WalletBridgeInfo(
         isConnected: false,
         address: nil,
         network: "iOS local policy",
-        policy: "Connect a wallet before signing or spending."
+        policy: "Connect a wallet before signing or spending.",
+        activeChainRef: "ethereum-mainnet",
+        explorerURLString: nil,
+        productionSigningStatus: "Production signing adapters are not configured."
     )
 }
 
@@ -250,6 +256,7 @@ struct DownloadBridgeItem: Equatable, Identifiable {
 protocol RuntimeBridge: AnyObject {
     var featureStates: [RuntimeFeatureState] { get }
     var walletInfo: WalletBridgeInfo { get }
+    var walletPortfolio: WalletPortfolioSnapshot { get }
     var downloadItems: [DownloadBridgeItem] { get }
 
     func refreshStatus() async -> [RuntimeFeatureState]
@@ -257,7 +264,11 @@ protocol RuntimeBridge: AnyObject {
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
     func connectWallet() async -> WalletBridgeInfo
     func disconnectWallet() async -> WalletBridgeInfo
+    func switchWalletNetwork(_ chainRef: String) async -> WalletBridgeInfo
     func evaluateSpend(_ request: WalletSpendRequest) async -> WalletSpendDecision
+    func previewWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferPreview
+    func signWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferReceipt
+    func explorerURL(for target: BlockchainExplorerTarget) -> URL?
     func startDownload(_ url: URL, autoStart: Bool) async -> DownloadBridgeItem
     func cancelDownload(_ id: UUID) async -> DownloadBridgeItem?
 }
@@ -266,9 +277,11 @@ protocol RuntimeBridge: AnyObject {
 final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var featureStates: [RuntimeFeatureState]
     @Published private(set) var walletInfo: WalletBridgeInfo
+    @Published private(set) var walletPortfolio: WalletPortfolioSnapshot = .disconnected
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
 
     private let configuration: RuntimeBridgeConfiguration
+    private let explorerCatalog: BlockchainExplorerCatalog = .default
     private let afmServicesClient: AFMServicesClient
     private let llmRouterServiceClient: LLMRouterServiceClient
     private let bitcoinLightClientServiceClient: BitcoinLightClientServiceClient
@@ -324,7 +337,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         lastError: "Aptos Move light-client service not checked yet."
     )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
-    private var retainedWalletAddress: String?
+    private var retainedWalletSeed: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
     convenience init() {
@@ -407,6 +420,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             chainTrustSnapshot: configuration.chainTrustRegistry
         )
         self.walletInfo = .disconnected
+        self.walletPortfolio = .disconnected.withChainTrust(configuration.chainTrustRegistry)
     }
 
     func refreshStatus() async -> [RuntimeFeatureState] {
@@ -444,6 +458,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         _ = chainTrustSnapshot.recordXRPLLightClientSnapshot(xrplLightClientSnapshot)
         _ = chainTrustSnapshot.recordMoveLightClientSnapshot(suiMoveLightClientSnapshot)
         _ = chainTrustSnapshot.recordMoveLightClientSnapshot(aptosMoveLightClientSnapshot)
+        walletPortfolio = walletPortfolio.withChainTrust(chainTrustSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
@@ -714,42 +729,87 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     }
 
     func connectWallet() async -> WalletBridgeInfo {
-        let address = retainedWalletAddress ?? Self.makeWalletAddress()
-        retainedWalletAddress = address
-        walletInfo = WalletBridgeInfo(
+        let seed = retainedWalletSeed ?? UUID().uuidString
+        retainedWalletSeed = seed
+        let activeChainRef = walletPortfolio.activeChainRef
+        let networks = WalletNetwork.defaultNetworks(catalog: explorerCatalog)
+        let accounts = WalletPolicyEngine.makeAccounts(seed: seed, networks: networks)
+        walletPortfolio = WalletPortfolioSnapshot(
             isConnected: true,
-            address: address,
-            network: "iOS local policy",
-            policy: "Auto-approve low-value read-only actions; require confirmation for spend and signature requests."
-        )
+            activeChainRef: activeChainRef,
+            networks: networks,
+            accounts: accounts,
+            recentReceipts: walletPortfolio.recentReceipts,
+            policySummary: "Auto-approve transfer previews up to 25 native units; require approval above the local policy limit.",
+            productionSigningStatus: "Local policy receipts only. Secure Enclave, WalletConnect, and chain adapters are not configured."
+        ).withChainTrust(chainTrustSnapshot)
+        walletInfo = walletInfo(from: walletPortfolio)
+        refreshWalletFeatureState()
         return walletInfo
     }
 
     func disconnectWallet() async -> WalletBridgeInfo {
-        walletInfo = .disconnected
+        walletPortfolio = WalletPortfolioSnapshot.disconnected.withChainTrust(chainTrustSnapshot)
+        walletInfo = walletInfo(from: walletPortfolio)
+        refreshWalletFeatureState()
+        return walletInfo
+    }
+
+    func switchWalletNetwork(_ chainRef: String) async -> WalletBridgeInfo {
+        let normalized = ChainTrustStatus.normalized(chainRef)
+        guard walletPortfolio.network(forChainRef: normalized) != nil else {
+            return walletInfo
+        }
+        walletPortfolio.activeChainRef = normalized
+        walletInfo = walletInfo(from: walletPortfolio)
+        refreshWalletFeatureState()
         return walletInfo
     }
 
     func evaluateSpend(_ request: WalletSpendRequest) async -> WalletSpendDecision {
-        guard walletInfo.isConnected else {
-            return WalletSpendDecision(status: .rejected, reason: "Connect a wallet before evaluating spend policy.")
-        }
-
-        guard request.amount > Decimal.zero else {
-            return WalletSpendDecision(status: .rejected, reason: "Spend amount must be greater than zero.")
-        }
-
-        if request.amount <= Decimal(25) {
+        let preview = await previewWalletTransfer(
+            WalletTransferRequest(
+                chainRef: walletPortfolio.activeChainRef,
+                amount: request.amount,
+                asset: request.currency,
+                destination: request.destination,
+                reason: request.reason
+            )
+        )
+        switch preview.status {
+        case .ready:
             return WalletSpendDecision(
                 status: .approved,
-                reason: "Amount is within the local iOS policy limit."
+                reason: preview.reason
             )
+        case .needsApproval:
+            return WalletSpendDecision(status: .needsApproval, reason: preview.reason)
+        case .rejected:
+            return WalletSpendDecision(status: .rejected, reason: preview.reason)
         }
+    }
 
-        return WalletSpendDecision(
-            status: .needsApproval,
-            reason: "Amount exceeds the local iOS policy limit and needs explicit approval."
+    func previewWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferPreview {
+        WalletPolicyEngine.preview(
+            request: request,
+            portfolio: walletPortfolio,
+            chainTrust: chainTrustSnapshot
         )
+    }
+
+    func signWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferReceipt {
+        let preview = await previewWalletTransfer(request)
+        let receipt = WalletPolicyEngine.receipt(request: request, preview: preview)
+        walletPortfolio.recentReceipts.insert(receipt, at: 0)
+        if walletPortfolio.recentReceipts.count > 50 {
+            walletPortfolio.recentReceipts.removeLast(walletPortfolio.recentReceipts.count - 50)
+        }
+        walletInfo = walletInfo(from: walletPortfolio)
+        return receipt
+    }
+
+    func explorerURL(for target: BlockchainExplorerTarget) -> URL? {
+        explorerCatalog.url(for: target)
     }
 
     @discardableResult
@@ -984,6 +1044,29 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         return downloadItems[index]
     }
 
+    private func walletInfo(from portfolio: WalletPortfolioSnapshot) -> WalletBridgeInfo {
+        let account = portfolio.activeAccount
+        let network = portfolio.activeNetwork
+        return WalletBridgeInfo(
+            isConnected: portfolio.isConnected,
+            address: account?.address,
+            network: network?.displayName ?? "iOS local policy",
+            policy: portfolio.policySummary,
+            activeChainRef: portfolio.activeChainRef,
+            explorerURLString: account?.explorerURL(in: explorerCatalog)?.absoluteString,
+            productionSigningStatus: portfolio.productionSigningStatus
+        )
+    }
+
+    private func refreshWalletFeatureState() {
+        guard let index = featureStates.firstIndex(where: { $0.feature == .wallet }) else { return }
+        featureStates[index].status = walletPortfolio.isConnected
+            ? "\(walletPortfolio.activeNetwork?.displayName ?? "Wallet") policy receipt"
+            : "Local policy bridge"
+        featureStates[index].mode = .local
+        featureStates[index].isAvailable = true
+    }
+
     private static func isDecentralizedName(_ input: String) -> Bool {
         let lowercased = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !lowercased.isEmpty, !lowercased.contains(" ") else {
@@ -998,11 +1081,4 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         return lastPathComponent.isEmpty ? "download" : lastPathComponent
     }
 
-    private static func makeWalletAddress() -> String {
-        let raw = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
-        if raw.count >= 40 {
-            return "0x\(raw.prefix(40))"
-        }
-        return "0x\(raw)\(String(repeating: "0", count: 40 - raw.count))"
-    }
 }

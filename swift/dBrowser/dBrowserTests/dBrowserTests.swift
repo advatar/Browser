@@ -694,6 +694,116 @@ struct dBrowserTests {
         #expect(cancelled?.state == .cancelled)
     }
 
+    @Test func blockchainExplorerCatalogBuildsChainSpecificURLs() {
+        let catalog = BlockchainExplorerCatalog.default
+
+        let ethereumAccount = catalog.url(
+            for: BlockchainExplorerTarget(
+                chainRef: "ethereum-mainnet",
+                kind: .account,
+                value: "0xabc"
+            )
+        )
+        let bitcoinTransaction = catalog.url(
+            for: BlockchainExplorerTarget(
+                chainRef: "bitcoin-mainnet",
+                kind: .transaction,
+                value: "tx123"
+            )
+        )
+        let solanaAccount = catalog.url(
+            for: BlockchainExplorerTarget(
+                chainRef: "solana-mainnet",
+                kind: .account,
+                value: "So11111111111111111111111111111111111111112"
+            )
+        )
+
+        #expect(ethereumAccount?.absoluteString == "https://etherscan.io/address/0xabc")
+        #expect(bitcoinTransaction?.absoluteString == "https://mempool.space/tx/tx123")
+        #expect(solanaAccount?.absoluteString == "https://solscan.io/account/So11111111111111111111111111111111111111112")
+    }
+
+    @Test func walletNetworksCoverTrackedChainFamilies() {
+        let networks = WalletNetwork.defaultNetworks()
+        let families = Set(networks.map(\.family))
+
+        #expect(families.contains(.bitcoin))
+        #expect(families.contains(.ethereum))
+        #expect(families.contains(.evmLayer2))
+        #expect(families.contains(.solana))
+        #expect(families.contains(.cosmosTendermint))
+        #expect(families.contains(.polkadotSubstrate))
+        #expect(families.contains(.avalanche))
+        #expect(families.contains(.tron))
+        #expect(families.contains(.xrpLedger))
+        #expect(families.contains(.sui))
+        #expect(families.contains(.aptos))
+        #expect(networks.allSatisfy { $0.explorer != nil })
+    }
+
+    @MainActor
+    @Test func runtimeBridgeWalletExplorerPreviewsAndRecordsPolicyReceipts() async {
+        let bridge = MobileRuntimeBridge()
+
+        let connected = await bridge.connectWallet()
+        #expect(connected.isConnected)
+        #expect(connected.address?.hasPrefix("0x") == true)
+        #expect(connected.explorerURLString?.contains("etherscan.io/address") == true)
+        #expect(bridge.walletPortfolio.accounts.count == bridge.walletPortfolio.networks.count)
+
+        let switched = await bridge.switchWalletNetwork("base-sepolia")
+        #expect(switched.activeChainRef == "base-sepolia")
+        guard let activeAddress = bridge.walletPortfolio.activeAccount?.address else {
+            Issue.record("Expected active wallet account")
+            return
+        }
+
+        let request = WalletTransferRequest(
+            amount: Decimal(10),
+            destination: activeAddress,
+            reason: "Test transfer"
+        )
+        let preview = await bridge.previewWalletTransfer(request)
+        #expect(preview.status == .ready)
+        #expect(preview.requiresApproval == false)
+        #expect(preview.broadcastMode == .unavailable)
+        #expect(preview.chainTrustSummary.contains("Base Sepolia"))
+        #expect(preview.explorerURL?.absoluteString.contains("sepolia.basescan.org/address") == true)
+
+        let receipt = await bridge.signWalletTransfer(request)
+        #expect(receipt.status == .policySigned)
+        #expect(receipt.transactionHash == nil)
+        #expect(receipt.signatureDigest?.isEmpty == false)
+        #expect(receipt.broadcastMode == .unavailable)
+        #expect(bridge.walletPortfolio.recentReceipts.first?.id == receipt.id)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeWalletPolicyRejectsInvalidTransfersAndRequiresApprovalAboveLimit() async {
+        let bridge = MobileRuntimeBridge()
+        let disconnectedPreview = await bridge.previewWalletTransfer(
+            WalletTransferRequest(amount: Decimal(1), destination: "0xabc", reason: "Disconnected")
+        )
+        #expect(disconnectedPreview.status == .rejected)
+
+        _ = await bridge.connectWallet()
+        let invalidAmount = await bridge.previewWalletTransfer(
+            WalletTransferRequest(amount: Decimal.zero, destination: "0xabc", reason: "Invalid")
+        )
+        #expect(invalidAmount.status == .rejected)
+
+        let largeTransfer = await bridge.previewWalletTransfer(
+            WalletTransferRequest(amount: Decimal(100), destination: "0x1111111111111111111111111111111111111111", reason: "Large")
+        )
+        #expect(largeTransfer.status == .needsApproval)
+        let receipt = await bridge.signWalletTransfer(
+            WalletTransferRequest(amount: Decimal(100), destination: "0x1111111111111111111111111111111111111111", reason: "Large")
+        )
+        #expect(receipt.status == .needsApproval)
+        #expect(receipt.signatureDigest == nil)
+    }
+
     @MainActor
     @Test func runtimeBridgeUsesAFMServicesForStatusAndCopilot() async {
         let serviceHarness = Self.makeAFMServiceSession(key: "online") { request in
