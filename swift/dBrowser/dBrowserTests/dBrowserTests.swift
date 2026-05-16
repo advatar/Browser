@@ -83,6 +83,24 @@ struct dBrowserTests {
         }
     }
 
+    @Test func gatewayStartingPointsIncludeRequiredHTTPSGateways() {
+        let points = RuntimeGatewayStartingPoint.featured
+        let urls = Set(points.map(\.urlString))
+
+        #expect(urls.contains("https://llmos.showntell.dev"))
+        #expect(urls.contains("https://zerok.cloud"))
+        #expect(points.first { $0.urlString == "https://zerok.cloud" }?.isZeroKnowledgeGateway == true)
+
+        for point in points {
+            let resolved = BrowserURLResolver.resolve(point.urlString)
+            guard case .web(let url) = resolved else {
+                Issue.record("Expected HTTPS gateway URL for \(point.title)")
+                continue
+            }
+            #expect(url.scheme == "https")
+        }
+    }
+
     @Test func bundledLLMSelectsIPhoneSizedGemma4Model() {
         let selection = BundledLLMSelection.recommended
         let profile = selection.profile
@@ -335,6 +353,15 @@ struct dBrowserTests {
 
         model.addActivePageBookmark()
         #expect(model.bookmarks.contains { $0.urlString == "https://example.com" })
+    }
+
+    @MainActor
+    @Test func defaultBookmarksExposeRequiredGateways() {
+        let model = BrowserViewModel()
+        let urls = Set(model.bookmarks.map(\.urlString))
+
+        #expect(urls.contains("https://llmos.showntell.dev"))
+        #expect(urls.contains("https://zerok.cloud"))
     }
 
     @MainActor

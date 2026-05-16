@@ -108,6 +108,57 @@ struct BrowserBookmark: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let urlString: String
+
+    static let defaults: [BrowserBookmark] = [
+        BrowserBookmark(title: "Zero Knowledge Gateway", urlString: RuntimeGatewayStartingPoint.zeroKnowledgeGateway.urlString),
+        BrowserBookmark(title: "LLM OS Show and Tell", urlString: RuntimeGatewayStartingPoint.llmOS.urlString),
+        BrowserBookmark(title: "Advatar Browser", urlString: "https://github.com/advatar/browser"),
+        BrowserBookmark(title: "DuckDuckGo", urlString: "https://duckduckgo.com")
+    ]
+}
+
+struct RuntimeGatewayStartingPoint: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let description: String
+    let urlString: String
+    let systemImage: String
+    let isZeroKnowledgeGateway: Bool
+
+    init(
+        title: String,
+        description: String,
+        urlString: String,
+        systemImage: String,
+        isZeroKnowledgeGateway: Bool = false
+    ) {
+        self.id = urlString
+        self.title = title
+        self.description = description
+        self.urlString = urlString
+        self.systemImage = systemImage
+        self.isZeroKnowledgeGateway = isZeroKnowledgeGateway
+    }
+
+    static let zeroKnowledgeGateway = RuntimeGatewayStartingPoint(
+        title: "Zero Knowledge Gateway",
+        description: "Primary gateway for zero-knowledge browser capabilities and proofs.",
+        urlString: "https://zerok.cloud",
+        systemImage: "shield.lefthalf.filled",
+        isZeroKnowledgeGateway: true
+    )
+
+    static let llmOS = RuntimeGatewayStartingPoint(
+        title: "LLM OS",
+        description: "Show-and-tell runtime surface for LLM OS integration.",
+        urlString: "https://llmos.showntell.dev",
+        systemImage: "sparkles"
+    )
+
+    static let featured: [RuntimeGatewayStartingPoint] = [
+        zeroKnowledgeGateway,
+        llmOS
+    ]
 }
 
 struct DecentralizedStartingPoint: Identifiable, Equatable {

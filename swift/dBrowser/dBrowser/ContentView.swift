@@ -658,6 +658,10 @@ private struct BrowserHomeView: View {
                     }
                 }
 
+                RuntimeGatewayStartingPointsView(points: RuntimeGatewayStartingPoint.featured) { point in
+                    browser.navigate(point.urlString)
+                }
+
                 DecentralizedStartingPointsView(points: DecentralizedStartingPoint.featured) { point in
                     browser.navigate(point.address)
                 }
@@ -672,6 +676,62 @@ private struct BrowserHomeView: View {
         .sheet(item: $selectedFeature) { feature in
             RuntimeFeatureDetailView(state: feature)
         }
+    }
+}
+
+private struct RuntimeGatewayStartingPointsView: View {
+    let points: [RuntimeGatewayStartingPoint]
+    let onOpen: (RuntimeGatewayStartingPoint) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Connect through gateways", systemImage: "shield.lefthalf.filled")
+                .font(.headline)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+                ForEach(points) { point in
+                    Button {
+                        onOpen(point)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Image(systemName: point.systemImage)
+                                    .frame(width: 22)
+                                    .foregroundStyle(point.isZeroKnowledgeGateway ? Color.accentColor : Color.secondary)
+                                Text(point.title)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                Spacer()
+                                Image(systemName: "arrow.up.forward")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(point.description)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+
+                            Text(point.urlString)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Color.accentColor)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(point.title)
+                    .accessibilityHint("Open gateway")
+                    .accessibilityIdentifier("gateway-start-\(point.title.lowercased().replacingOccurrences(of: " ", with: "-"))")
+                }
+            }
+        }
+        .accessibilityIdentifier("gateway-starting-points")
     }
 }
 

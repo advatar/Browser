@@ -38,11 +38,24 @@ final class dBrowserUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["ipfs-starting-points"].waitForExistence(timeout: 5))
 
         let docsButton = app.buttons["ipfs-start-ipfs-docs"]
-        XCTAssertTrue(docsButton.exists)
+        makeVisible(docsButton, in: app)
+        XCTAssertTrue(docsButton.isHittable)
         docsButton.tap()
 
         let gatewayText = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "dweb.link")).firstMatch
         XCTAssertTrue(gatewayText.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testGatewayStartingPointsRenderRequiredURLs() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.otherElements["gateway-starting-points"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["gateway-start-zero-knowledge-gateway"].exists)
+        XCTAssertTrue(app.buttons["gateway-start-llm-os"].exists)
+        XCTAssertTrue(app.staticTexts["https://zerok.cloud"].exists)
+        XCTAssertTrue(app.staticTexts["https://llmos.showntell.dev"].exists)
     }
 
     @MainActor
@@ -65,6 +78,13 @@ final class dBrowserUITests: XCTestCase {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
             XCUIApplication().launch()
+        }
+    }
+
+    @MainActor
+    private func makeVisible(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<5 where !element.isHittable {
+            app.swipeUp()
         }
     }
 }

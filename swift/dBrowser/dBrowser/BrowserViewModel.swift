@@ -8,10 +8,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var addressText: String
     @Published var selectedPanel: BrowserPanel?
     @Published var history: [BrowserHistoryEntry] = []
-    @Published var bookmarks: [BrowserBookmark] = [
-        BrowserBookmark(title: "Advatar Browser", urlString: "https://github.com/advatar/browser"),
-        BrowserBookmark(title: "DuckDuckGo", urlString: "https://duckduckgo.com")
-    ]
+    @Published var bookmarks: [BrowserBookmark] = BrowserBookmark.defaults
     @Published var webCommand: BrowserWebCommandRequest?
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
 

@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## Zero Knowledge Gateway Entry Points
+
+- [x] Capture required gateway URLs for the Swift shell.
+- [x] Add first-class LLM OS and zero-knowledge gateway navigation targets.
+- [x] Add focused tests for required gateway URLs.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit the scoped gateway change.
+
 ## iOS URL Autocomplete
 
 - [x] Inspect Swift browser history and address-entry flow.
