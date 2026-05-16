@@ -16,6 +16,7 @@
     "dev:registry": "pnpm --filter @browser/afm-registry dev",
     "dev:pipelines": "pnpm --filter @browser/afm-pipelines dev",
     "dev:node": "pnpm --filter @browser/afm-node dev",
+    "dev:chain-trust": "pnpm --filter @browser/chain-trust-service dev",
     "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
     "prepare": "husky"
   },
@@ -33,6 +34,7 @@
     "services/registry",
     "services/pipelines",
     "services/node",
+    "services/chain-trust",
     "apps/afm-marketplace"
   ],
   "lint-staged": {

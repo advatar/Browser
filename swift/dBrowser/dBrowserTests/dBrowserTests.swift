@@ -3450,13 +3450,14 @@ struct dBrowserTests {
             targetID: "mem-1",
             correctionText: "Correction from Copilot panel"
         )
-        let completed = await waitForOpenMindCorrection(in: model)
+        if let task {
+            await task.value
+        }
         let correctionBody = capturedRequests.body(for: "/mcp/tools/gmem.create_correction")
         let sourceBody = correctionBody?["source"] as? [String: Any]
         let events = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
 
         #expect(task != nil)
-        #expect(completed)
         #expect(model.latestOpenMindCorrection?.correctionID == "corr-vm")
         #expect(model.latestOpenMindCorrection?.status == .recorded)
         #expect(model.openMindReviewTasks.first?.id == "review-after-correction")

@@ -19,6 +19,18 @@
 
 ## Active Task
 
+## Local Chain Trust Bitcoin Service Slice
+
+- [x] Triage remaining Bitcoin service gap from #59.
+- [x] Create tracker issue for local chain-trust Bitcoin service (#92).
+- [x] Add `services/chain-trust` workspace package with health, snapshot, lint, and self-test commands.
+- [x] Expose fixture-backed Bitcoin status endpoints for the Swift `/v1/bitcoin/status` contract.
+- [x] Expose Bitcoin transaction inclusion verification endpoints that check header hash and Merkle evidence locally.
+- [x] Add root workspace script coverage for the chain-trust service.
+- [x] Verify service lint/self-test plus Swift tests/build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift Bitcoin Light Client Foundation Slice
 
 - [x] Triage Bitcoin SPV/compact-filter gap from #59.

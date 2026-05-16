@@ -3,4 +3,5 @@ packages:
   - 'services/router'
   - 'services/registry'
   - 'services/pipelines'
+  - 'services/chain-trust'
   - 'apps/afm-marketplace'
