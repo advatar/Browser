@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Swift Cosmos/Tendermint Chain Trust Foundation Slice
+
+- [x] Triage Cosmos/Tendermint light-client gap from #62.
+- [x] Create tracker issue for Swift Cosmos/Tendermint chain trust foundation (#95).
+- [x] Add Swift Cosmos chain metadata, endpoint, Tendermint header, validator set, commit signature, trust-period, conflict evidence, and service snapshot models.
+- [x] Add fixture-backed Tendermint header/commit validation with validator-power threshold checks.
+- [x] Add trust-period expiry and conflicting commit detection with explicit stale/failed states.
+- [x] Add Cosmos service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind Cosmos snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for chain routing, header verification, expiry, conflict handling, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift Solana Chain Trust Foundation Slice
 
 - [x] Triage Solana light-client gap from #61.

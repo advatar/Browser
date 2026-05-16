@@ -1858,6 +1858,163 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("Solana Devnet proof checked") == true)
     }
 
+    @Test func cosmosChainRoutingAndFallbackAreExplicit() {
+        #expect(CosmosChain.known(from: "cosmoshub-4") == .cosmosHub)
+        #expect(CosmosChain.known(from: "cosmos-hub") == .cosmosHub)
+        #expect(CosmosChain.known(from: "osmosis") == .osmosis)
+        #expect(CosmosChain.cosmosHub.bech32Prefix == "cosmos")
+
+        let fallback = CosmosLightClientServiceSnapshot.fallback(
+            chain: .cosmosHub,
+            lastError: "disabled"
+        )
+
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("trusted RPC fallback remains labeled"))
+    }
+
+    @Test func tendermintHeaderCommitVerifiesValidatorPowerThreshold() {
+        let bundle = Self.cosmosHeaderBundle(chain: .cosmosHub)
+        let result = bundle.verify(nowUnixSeconds: 1_778_889_600)
+        var weakBundle = bundle
+        weakBundle.commit.signatures = [bundle.commit.signatures[0]]
+        let weakResult = weakBundle.verify(nowUnixSeconds: 1_778_889_600)
+
+        #expect(bundle.validatorSet.validatesHash)
+        #expect(bundle.validatorSet.totalVotingPower == 100)
+        #expect(result.verified)
+        #expect(result.state == .synced)
+        #expect(result.chainRef == "cosmos-hub")
+        #expect(weakResult.verified == false)
+        #expect(weakResult.state == .failed)
+        #expect(weakResult.summary.contains("two-thirds"))
+    }
+
+    @Test func tendermintTrustPeriodExpiryAndConflictingCommitsAreExplicit() {
+        let bundle = Self.cosmosHeaderBundle(chain: .cosmosHub)
+        let expiredResult = bundle.verify(nowUnixSeconds: bundle.trustPolicy.trustedTimeUnixSeconds + bundle.trustPolicy.trustPeriodSeconds + 1)
+        var conflictBundle = bundle
+        let conflictingHash = TendermintHex.sha256Hex("conflicting-block")
+        conflictBundle.conflictingCommit = TendermintCommit(
+            height: bundle.header.height,
+            round: 0,
+            blockIDHash: conflictingHash,
+            signatures: [
+                TendermintCommitSignature(validatorAddress: bundle.validatorSet.validators[0].address, blockIDHash: conflictingHash),
+                TendermintCommitSignature(validatorAddress: bundle.validatorSet.validators[1].address, blockIDHash: conflictingHash)
+            ],
+            source: "fixture"
+        )
+        let conflictResult = conflictBundle.verify(nowUnixSeconds: 1_778_889_600)
+
+        #expect(expiredResult.verified == false)
+        #expect(expiredResult.state == .stale)
+        #expect(expiredResult.summary.contains("expired"))
+        #expect(conflictResult.verified == false)
+        #expect(conflictResult.state == .failed)
+        #expect(conflictResult.summary.contains("Conflicting Tendermint commits"))
+    }
+
+    @MainActor
+    @Test func cosmosLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let cosmosHarness = Self.makeCosmosLightClientSession(key: "cosmosregistry", chain: .cosmosHub) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/cosmos/status" {
+                return Self.jsonResponse(for: request, body: Self.cosmosServiceStatus(chain: .cosmosHub))
+            }
+            if request.url?.path == "/v1/cosmos/verify-header" {
+                return Self.jsonResponse(for: request, body: Self.cosmosProofResultBody(
+                    verified: true,
+                    state: "synced",
+                    chain: .cosmosHub
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = CosmosLightClientServiceClient(
+            configuration: cosmosHarness.configuration,
+            session: cosmosHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyHeaderViaService(Self.cosmosHeaderBundle(chain: .cosmosHub))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordCosmosLightClientSnapshot(snapshot)
+        let cosmos = registry.status(forChainRef: "cosmos-hub")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .synced)
+        #expect(snapshot.latestHeader?.height == 19_700_000)
+        #expect(status.state == .verified)
+        #expect(status.trustSource == .embeddedLightClient)
+        #expect(cosmos?.evidence.first?.source == .embeddedLightClient)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .synced)
+        #expect(capturedRequests.body(for: "/v1/cosmos/verify-header")?["validator_set"] != nil)
+    }
+
+    @MainActor
+    @Test func cosmosLightClientFallsBackWhenServiceDisabled() async {
+        let client = CosmosLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordCosmosLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesCosmosLightClientState() async {
+        let cosmosHarness = Self.makeCosmosLightClientSession(key: "cosmosruntime", chain: .osmosis) { request in
+            if request.url?.path == "/v1/cosmos/status" {
+                return Self.jsonResponse(for: request, body: Self.cosmosServiceStatus(
+                    chain: .osmosis,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "cosmosruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                cosmosLightClient: cosmosHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(
+                configuration: cosmosHarness.configuration,
+                session: cosmosHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let osmosis = bridge.chainTrustSnapshot.status(forChainRef: "osmosis")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(osmosis?.state == .proofChecked)
+        #expect(osmosis?.trustSource == .localProof)
+        #expect(osmosis?.displaySummary.contains("proof-checked evidence") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Osmosis proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4056,6 +4213,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeCosmosLightClientSession(
+        key: String,
+        chain: CosmosChain = .cosmosHub,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: CosmosLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = CosmosLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-cosmos.test:4870")!,
+            chain: chain
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -4147,6 +4319,28 @@ struct dBrowserTests {
         ]
     }
 
+    private static func cosmosServiceStatus(
+        chain: CosmosChain,
+        syncState: String = "synced",
+        trustPeriodExpired: Bool = false
+    ) -> [String: Any] {
+        let bundle = cosmosHeaderBundle(chain: chain)
+        return [
+            "ok": true,
+            "chain": chain.chainID,
+            "chain_ref": chain.chainRef,
+            "chain_id": chain.chainID,
+            "sync_state": syncState,
+            "source": "cosmos-tendermint-light-client",
+            "latest_header": cosmosHeaderBody(bundle.header),
+            "validator_set": cosmosValidatorSetBody(bundle.validatorSet),
+            "peer_count": 2,
+            "proof_source": "fixture-tendermint-commit",
+            "trust_period_expired": trustPeriodExpired,
+            "trust_expires_at_unix_seconds": bundle.trustPolicy.trustedTimeUnixSeconds + bundle.trustPolicy.trustPeriodSeconds
+        ]
+    }
+
     private static func evmProofBundle(chain: EVMChain) -> EVMLocalProofBundle {
         let subject = "0x1111111111111111111111111111111111111111"
         let leaf = EVMLocalProof.fixtureLeafHash(kind: .account, subject: subject, value: "0x01")
@@ -4222,6 +4416,92 @@ struct dBrowserTests {
         return SolanaProofBundle(snapshot: snapshot, proof: proof)
     }
 
+    private static func cosmosHeaderBundle(chain: CosmosChain) -> TendermintHeaderVerificationBundle {
+        let validators = [
+            TendermintValidator(address: String(repeating: "a1", count: 20), publicKey: "cosmos-pubkey-a", votingPower: 40, name: "validator-a"),
+            TendermintValidator(address: String(repeating: "b2", count: 20), publicKey: "cosmos-pubkey-b", votingPower: 35, name: "validator-b"),
+            TendermintValidator(address: String(repeating: "c3", count: 20), publicKey: "cosmos-pubkey-c", votingPower: 25, name: "validator-c")
+        ]
+        let validatorSet = TendermintValidatorSet(
+            chain: chain,
+            height: 19_700_000,
+            validators: validators,
+            source: "fixture"
+        )
+        let header = TendermintHeader(
+            chain: chain,
+            height: validatorSet.height,
+            timeUnixSeconds: 1_778_889_600,
+            lastBlockIDHash: TendermintHex.sha256Hex("\(chain.chainID)-19699999"),
+            validatorsHash: validatorSet.hash,
+            nextValidatorsHash: validatorSet.hash,
+            appHash: TendermintHex.sha256Hex("\(chain.chainID)-19700000-app"),
+            dataHash: TendermintHex.sha256Hex("\(chain.chainID)-19700000-data"),
+            evidenceHash: TendermintHex.sha256Hex("\(chain.chainID)-19700000-evidence"),
+            proposerAddress: validators[0].address,
+            source: "fixture"
+        )
+        let commit = TendermintCommit(
+            height: header.height,
+            round: 0,
+            blockIDHash: header.hash,
+            signatures: [
+                TendermintCommitSignature(validatorAddress: validators[0].address, blockIDHash: header.hash),
+                TendermintCommitSignature(validatorAddress: validators[1].address, blockIDHash: header.hash),
+                TendermintCommitSignature(validatorAddress: validators[2].address, blockIDHash: header.hash, signed: false)
+            ],
+            source: "fixture"
+        )
+        let trustPolicy = TendermintTrustPolicy(
+            trustedHeight: header.height - 10,
+            trustedTimeUnixSeconds: 1_778_800_000,
+            trustPeriodSeconds: chain.trustPeriodSeconds
+        )
+        return TendermintHeaderVerificationBundle(
+            header: header,
+            validatorSet: validatorSet,
+            commit: commit,
+            trustPolicy: trustPolicy
+        )
+    }
+
+    private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
+        [
+            "chain": header.chain.chainID,
+            "chain_ref": header.chain.chainRef,
+            "chain_id": header.chain.chainID,
+            "height": header.height,
+            "time_unix_seconds": header.timeUnixSeconds,
+            "last_block_id_hash": header.lastBlockIDHash,
+            "validators_hash": header.validatorsHash,
+            "next_validators_hash": header.nextValidatorsHash,
+            "app_hash": header.appHash,
+            "data_hash": header.dataHash ?? "",
+            "evidence_hash": header.evidenceHash ?? "",
+            "proposer_address": header.proposerAddress,
+            "source": header.source ?? "fixture"
+        ]
+    }
+
+    private static func cosmosValidatorSetBody(_ validatorSet: TendermintValidatorSet) -> [String: Any] {
+        [
+            "chain": validatorSet.chain.chainID,
+            "chain_ref": validatorSet.chain.chainRef,
+            "chain_id": validatorSet.chain.chainID,
+            "height": validatorSet.height,
+            "validators": validatorSet.validators.map { validator in
+                [
+                    "address": validator.address,
+                    "public_key": validator.publicKey ?? "",
+                    "voting_power": validator.votingPower,
+                    "name": validator.name ?? ""
+                ] as [String: Any]
+            },
+            "hash": validatorSet.hash,
+            "source": validatorSet.source ?? "fixture"
+        ]
+    }
+
     private static func evmProofResultBody(
         verified: Bool,
         state: String,
@@ -4257,6 +4537,24 @@ struct dBrowserTests {
             "slot": 281_474_976_710,
             "root_slot": 281_474_976_700,
             "summary": "Solana \(kind) fixture proof checked."
+        ]
+    }
+
+    private static func cosmosProofResultBody(
+        verified: Bool,
+        state: String,
+        chain: CosmosChain
+    ) -> [String: Any] {
+        let bundle = cosmosHeaderBundle(chain: chain)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": chain.chainRef,
+            "chain_id": chain.chainID,
+            "height": bundle.header.height,
+            "block_hash": bundle.header.hash,
+            "validator_set_hash": bundle.validatorSet.hash,
+            "summary": "Tendermint header \(bundle.header.height) verified."
         ]
     }
 

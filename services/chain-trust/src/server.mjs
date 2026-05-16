@@ -194,12 +194,111 @@ const solanaFixtureProof = {
   source: mode
 };
 
+const cosmosChains = {
+  'cosmoshub-4': {
+    chain: 'cosmoshub-4',
+    chain_id: 'cosmoshub-4',
+    chain_ref: 'cosmos-hub',
+    display_name: 'Cosmos Hub',
+    bech32_prefix: 'cosmos',
+    sync_state: 'synced',
+    trust_period_seconds: 1209600
+  },
+  'cosmos-hub': {
+    chain: 'cosmoshub-4',
+    chain_id: 'cosmoshub-4',
+    chain_ref: 'cosmos-hub',
+    display_name: 'Cosmos Hub',
+    bech32_prefix: 'cosmos',
+    sync_state: 'synced',
+    trust_period_seconds: 1209600
+  },
+  'osmosis-1': {
+    chain: 'osmosis-1',
+    chain_id: 'osmosis-1',
+    chain_ref: 'osmosis',
+    display_name: 'Osmosis',
+    bech32_prefix: 'osmo',
+    sync_state: 'proof_checked',
+    trust_period_seconds: 1209600
+  },
+  osmosis: {
+    chain: 'osmosis-1',
+    chain_id: 'osmosis-1',
+    chain_ref: 'osmosis',
+    display_name: 'Osmosis',
+    bech32_prefix: 'osmo',
+    sync_state: 'proof_checked',
+    trust_period_seconds: 1209600
+  },
+  'juno-1': {
+    chain: 'juno-1',
+    chain_id: 'juno-1',
+    chain_ref: 'juno',
+    display_name: 'Juno',
+    bech32_prefix: 'juno',
+    sync_state: 'proof_checked',
+    trust_period_seconds: 1209600
+  }
+};
+const cosmosValidatorA = 'a1'.repeat(20);
+const cosmosValidatorB = 'b2'.repeat(20);
+const cosmosValidatorC = 'c3'.repeat(20);
+const cosmosFixtureValidators = [
+  { address: cosmosValidatorA, public_key: 'cosmos-pubkey-a', voting_power: 40, name: 'validator-a' },
+  { address: cosmosValidatorB, public_key: 'cosmos-pubkey-b', voting_power: 35, name: 'validator-b' },
+  { address: cosmosValidatorC, public_key: 'cosmos-pubkey-c', voting_power: 25, name: 'validator-c' }
+];
+const cosmosFixtureValidatorSetHash = tendermintValidatorSetHash(cosmosFixtureValidators);
+const cosmosFixtureHeader = {
+  chain: 'cosmoshub-4',
+  chain_ref: 'cosmos-hub',
+  chain_id: 'cosmoshub-4',
+  height: 19700000,
+  time_unix_seconds: 1778889600,
+  last_block_id_hash: sha256HexFromString('cosmoshub-4|19699999'),
+  validators_hash: cosmosFixtureValidatorSetHash,
+  next_validators_hash: cosmosFixtureValidatorSetHash,
+  app_hash: sha256HexFromString('cosmoshub-4|19700000|app'),
+  data_hash: sha256HexFromString('cosmoshub-4|19700000|data'),
+  evidence_hash: sha256HexFromString('cosmoshub-4|19700000|evidence'),
+  proposer_address: cosmosValidatorA,
+  source: mode
+};
+const cosmosFixtureHeaderHash = tendermintHeaderHash(cosmosFixtureHeader);
+const cosmosFixtureValidatorSet = {
+  chain: 'cosmoshub-4',
+  chain_ref: 'cosmos-hub',
+  chain_id: 'cosmoshub-4',
+  height: cosmosFixtureHeader.height,
+  validators: cosmosFixtureValidators,
+  hash: cosmosFixtureValidatorSetHash,
+  source: mode
+};
+const cosmosFixtureCommit = {
+  height: cosmosFixtureHeader.height,
+  round: 0,
+  block_id_hash: cosmosFixtureHeaderHash,
+  signatures: [
+    { validator_address: cosmosValidatorA, block_id_hash: cosmosFixtureHeaderHash, signed: true, signature: 'fixture-sig-a' },
+    { validator_address: cosmosValidatorB, block_id_hash: cosmosFixtureHeaderHash, signed: true, signature: 'fixture-sig-b' },
+    { validator_address: cosmosValidatorC, block_id_hash: cosmosFixtureHeaderHash, signed: false, signature: null }
+  ],
+  source: mode
+};
+const cosmosFixtureTrustPolicy = {
+  trusted_height: cosmosFixtureHeader.height - 10,
+  trusted_time_unix_seconds: 4101235200,
+  trust_period_seconds: 1209600
+};
+
 if (args.has('--snapshot')) {
   console.log(JSON.stringify({
     service: '@browser/chain-trust-service',
     bitcoin: bitcoinStatus,
     evm: evmStatusFor('ethereum-mainnet'),
-    solana: solanaStatusFor('mainnet-beta')
+    solana: solanaStatusFor('mainnet-beta'),
+    cosmos: cosmosStatusFor('cosmoshub-4')
   }, null, 2));
   process.exit(0);
 }
@@ -208,6 +307,7 @@ if (args.has('--lint')) {
   assertGenesisFixture();
   assertEvmFixture();
   assertSolanaFixture();
+  assertCosmosFixture();
   console.log('[chain-trust] schema OK');
   process.exit(0);
 }
@@ -216,6 +316,7 @@ if (args.has('--self-test')) {
   assertGenesisFixture();
   assertEvmFixture();
   assertSolanaFixture();
+  assertCosmosFixture();
   const result = verifyBitcoinTransaction({
     header: genesisHeader,
     proof: {
@@ -252,6 +353,18 @@ if (args.has('--self-test')) {
     process.exit(1);
   }
 
+  const cosmosResult = verifyCosmosHeader({
+    header: cosmosFixtureHeader,
+    validator_set: cosmosFixtureValidatorSet,
+    commit: cosmosFixtureCommit,
+    trust_policy: cosmosFixtureTrustPolicy
+  });
+
+  if (!cosmosResult.verified || cosmosResult.state !== 'synced') {
+    console.error('[chain-trust] Cosmos self-test failed:', cosmosResult.summary);
+    process.exit(1);
+  }
+
   console.log('[chain-trust] self-test complete');
   process.exit(0);
 }
@@ -282,6 +395,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
     return sendJson(res, 200, solanaStatusFor(url.searchParams.get('cluster')));
+  }
+
+  if (req.method === 'GET' && (url.pathname === '/v1/cosmos/status' || url.pathname === '/cosmos/status')) {
+    return sendJson(res, 200, cosmosStatusFor(url.searchParams.get('chain')));
   }
 
   if (req.method === 'POST' && (url.pathname === '/v1/bitcoin/verify-transaction' || url.pathname === '/bitcoin/verify-transaction')) {
@@ -331,6 +448,24 @@ const server = http.createServer(async (req, res) => {
         chain_ref: null,
         slot: null,
         root_slot: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/cosmos/verify-header' || url.pathname === '/cosmos/verify-header')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifyCosmosHeader(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        chain_id: null,
+        height: null,
+        block_hash: null,
+        validator_set_hash: null,
         summary: String(err.message ?? err)
       });
     }
@@ -395,6 +530,38 @@ function solanaStatusFor(requestedCluster) {
     proof_source: 'fixture-local-merkle',
     root_lag: slotRoot.slot - slotRoot.root_slot,
     max_root_lag: 512,
+    mode
+  };
+}
+
+function cosmosStatusFor(requestedChain) {
+  const chain = resolveCosmosChain(requestedChain);
+  const header = {
+    ...cosmosFixtureHeader,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id
+  };
+  const validatorSet = {
+    ...cosmosFixtureValidatorSet,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id
+  };
+  return {
+    ok: true,
+    service_available: true,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id,
+    sync_state: chain.sync_state,
+    source: mode,
+    latest_header: header,
+    validator_set: validatorSet,
+    peer_count: 0,
+    proof_source: 'fixture-tendermint-commit',
+    trust_period_expired: false,
+    trust_expires_at_unix_seconds: cosmosFixtureTrustPolicy.trusted_time_unix_seconds + chain.trust_period_seconds,
     mode
   };
 }
@@ -513,6 +680,80 @@ function verifySolanaProof(payload) {
   };
 }
 
+function verifyCosmosHeader(payload) {
+  const header = requireObject(payload.header, 'header');
+  const validatorSet = requireObject(payload.validator_set ?? payload.validatorSet, 'validator_set');
+  const commit = requireObject(payload.commit, 'commit');
+  const trustPolicy = payload.trust_policy ?? payload.trustPolicy ?? cosmosFixtureTrustPolicy;
+  const chain = resolveCosmosChain(header.chain_id ?? header.chain_ref ?? header.chain);
+  const validatorSetChain = resolveCosmosChain(validatorSet.chain_id ?? validatorSet.chain_ref ?? validatorSet.chain ?? chain.chain_id);
+  const height = Number(header.height);
+  const commitHeight = Number(commit.height);
+  const validatorSetHash = normalizeHex(requireString(validatorSet.hash, 'validator_set.hash'));
+  const computedValidatorSetHash = tendermintValidatorSetHash(Array.isArray(validatorSet.validators) ? validatorSet.validators : []);
+  const headerValidatorsHash = normalizeHex(requireString(header.validators_hash ?? header.validatorsHash, 'header.validators_hash'));
+  const headerHash = tendermintHeaderHash(header);
+  const commitBlockHash = normalizeHex(requireString(commit.block_id_hash ?? commit.blockIDHash, 'commit.block_id_hash'));
+
+  if (chain.chain_ref !== validatorSetChain.chain_ref) {
+    return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Tendermint header chain does not match validator set chain.');
+  }
+
+  if (!Number.isFinite(height) || height !== commitHeight) {
+    return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Tendermint commit height does not match the header height.');
+  }
+
+  if (commitBlockHash !== headerHash) {
+    return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Tendermint commit signed a different block ID.');
+  }
+
+  if (validatorSetHash !== computedValidatorSetHash || headerValidatorsHash !== validatorSetHash) {
+    return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Tendermint validator set hash does not match the header.');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const trustedTime = Number(trustPolicy.trusted_time_unix_seconds ?? trustPolicy.trustedTimeUnixSeconds ?? 0);
+  const trustPeriod = Number(trustPolicy.trust_period_seconds ?? trustPolicy.trustPeriodSeconds ?? chain.trust_period_seconds);
+  if (Number.isFinite(trustedTime) && Number.isFinite(trustPeriod) && now > trustedTime + trustPeriod) {
+    return {
+      verified: false,
+      state: 'stale',
+      chain_ref: chain.chain_ref,
+      chain_id: chain.chain_id,
+      height: Number.isFinite(height) ? height : null,
+      block_hash: headerHash,
+      validator_set_hash: validatorSetHash,
+      summary: 'Tendermint trusted period expired before this header could be verified.'
+    };
+  }
+
+  const conflictingCommit = payload.conflicting_commit ?? payload.conflictingCommit;
+  if (conflictingCommit) {
+    const conflictHeight = Number(conflictingCommit.height);
+    const conflictBlockHash = normalizeHex(requireString(conflictingCommit.block_id_hash ?? conflictingCommit.blockIDHash, 'conflicting_commit.block_id_hash'));
+    if (conflictHeight === height
+        && conflictBlockHash !== commitBlockHash
+        && hasTendermintTwoThirdsPower(validatorSet.validators, signedAddresses(conflictingCommit))) {
+      return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Conflicting Tendermint commits both reached the voting-power threshold.');
+    }
+  }
+
+  if (!hasTendermintTwoThirdsPower(validatorSet.validators, signedAddresses(commit))) {
+    return cosmosFailure(chain, height, headerHash, validatorSetHash, 'Tendermint commit did not reach the two-thirds voting-power threshold.');
+  }
+
+  return {
+    verified: true,
+    state: chain.chain_ref === 'cosmos-hub' ? 'synced' : 'proof_checked',
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id,
+    height: Number.isFinite(height) ? height : null,
+    block_hash: headerHash,
+    validator_set_hash: validatorSetHash,
+    summary: `Tendermint header ${Number.isFinite(height) ? height : 'unknown'} verified with two-thirds validator power.`
+  };
+}
+
 function verifyBitcoinTransaction(payload) {
   const header = requireObject(payload.header, 'header');
   const proof = requireObject(payload.proof, 'proof');
@@ -598,6 +839,22 @@ function assertSolanaFixture() {
   }
 }
 
+function assertCosmosFixture() {
+  const computedValidatorSetHash = tendermintValidatorSetHash(cosmosFixtureValidators);
+  if (computedValidatorSetHash !== cosmosFixtureValidatorSetHash) {
+    throw new Error(`Cosmos validator fixture mismatch: ${computedValidatorSetHash}`);
+  }
+  const result = verifyCosmosHeader({
+    header: cosmosFixtureHeader,
+    validator_set: cosmosFixtureValidatorSet,
+    commit: cosmosFixtureCommit,
+    trust_policy: cosmosFixtureTrustPolicy
+  });
+  if (!result.verified) {
+    throw new Error(`Cosmos header fixture mismatch: ${result.summary}`);
+  }
+}
+
 function failure(transactionID, blockHash, height, summary) {
   return {
     verified: false,
@@ -635,6 +892,19 @@ function solanaFailure(proofID, kind, chainRef, slot, rootSlot, summary) {
   };
 }
 
+function cosmosFailure(chain, height, blockHash, validatorSetHash, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id,
+    height: Number.isFinite(height) ? height : null,
+    block_hash: blockHash,
+    validator_set_hash: validatorSetHash,
+    summary
+  };
+}
+
 function resolveEvmChain(requestedChain) {
   if (!requestedChain) {
     return evmChains['ethereum-mainnet'];
@@ -667,6 +937,24 @@ function resolveSolanaCluster(requestedCluster) {
     return solanaClusters['mainnet-beta'];
   }
   return solanaClusters['mainnet-beta'];
+}
+
+function resolveCosmosChain(requestedChain) {
+  if (!requestedChain) {
+    return cosmosChains['cosmoshub-4'];
+  }
+  const normalized = String(requestedChain)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (cosmosChains[normalized]) {
+    return cosmosChains[normalized];
+  }
+  if (normalized === 'cosmos' || normalized === 'cosmoshub') {
+    return cosmosChains['cosmoshub-4'];
+  }
+  return cosmosChains['cosmoshub-4'];
 }
 
 function evmFixtureLeafHash(kind, subject, key, value) {
@@ -714,6 +1002,53 @@ function computeSolanaLocalMerkleRoot(leafHash, witnesses) {
       : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
   }
   return node.toString('hex');
+}
+
+function tendermintValidatorSetHash(validators) {
+  const payload = validators
+    .map(validator => `${normalizeHex(requireString(validator.address, 'validator.address'))}:${Number(validator.voting_power ?? validator.votingPower)}`)
+    .sort()
+    .join('|');
+  return sha256HexFromString(payload);
+}
+
+function tendermintHeaderHash(header) {
+  const chain = resolveCosmosChain(header.chain_id ?? header.chain_ref ?? header.chain);
+  return sha256HexFromString([
+    chain.chain_id,
+    String(Number(header.height)),
+    String(Number(header.time_unix_seconds ?? header.timeUnixSeconds)),
+    normalizeHex(requireString(header.last_block_id_hash ?? header.lastBlockIDHash, 'header.last_block_id_hash')),
+    normalizeHex(requireString(header.validators_hash ?? header.validatorsHash, 'header.validators_hash')),
+    normalizeHex(requireString(header.next_validators_hash ?? header.nextValidatorsHash, 'header.next_validators_hash')),
+    normalizeHex(requireString(header.app_hash ?? header.appHash, 'header.app_hash')),
+    header.data_hash ?? header.dataHash ? normalizeHex(header.data_hash ?? header.dataHash) : '',
+    header.evidence_hash ?? header.evidenceHash ? normalizeHex(header.evidence_hash ?? header.evidenceHash) : '',
+    normalizeHex(requireString(header.proposer_address ?? header.proposerAddress, 'header.proposer_address'))
+  ].join('|'));
+}
+
+function signedAddresses(commit) {
+  return new Set((Array.isArray(commit.signatures) ? commit.signatures : [])
+    .filter(signature => signature.signed !== false)
+    .map(signature => normalizeHex(requireString(signature.validator_address ?? signature.validatorAddress, 'signature.validator_address'))));
+}
+
+function hasTendermintTwoThirdsPower(validators, addresses) {
+  let totalPower = 0;
+  let signedPower = 0;
+  for (const validator of Array.isArray(validators) ? validators : []) {
+    const power = Number(validator.voting_power ?? validator.votingPower);
+    if (!Number.isFinite(power) || power < 0) {
+      continue;
+    }
+    totalPower += power;
+    const address = normalizeHex(requireString(validator.address, 'validator.address'));
+    if (addresses.has(address)) {
+      signedPower += power;
+    }
+  }
+  return signedPower * 3 > totalPower * 2;
 }
 
 function readJson(req) {
