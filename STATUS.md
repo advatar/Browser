@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift OpenMind Evidence Bundle And Step-Up Slice
+
+- [x] Triage the remaining BrIAn/OpenMind evidence and step-up gaps from #70.
+- [x] Create tracker issue for evidence bundle recall and step-up requests (#83).
+- [x] Add typed Swift OpenMind evidence bundle and step-up request models.
+- [x] Extend OpenMindMemoryClient recall with evidence bundle retrieval and resilient fallback.
+- [x] Add a Swift step-up request action using the denied recall intent.
+- [x] Surface evidence bundle and step-up request state in Copilot/OpenMind UI.
+- [x] Add focused Swift unit tests for evidence bundles and step-up requests.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-openmind-evidence-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-openmind-evidence-tests -only-testing:dBrowserTests` passed.
+
 ## Swift LLM Conversation Persistence Slice
 
 - [x] Triage the remaining persistence gap from #72.

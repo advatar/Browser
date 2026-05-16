@@ -23,6 +23,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var openMindContinuityState: OpenMindContinuityState
     @Published var openMindPostureState: OpenMindPostureState
     @Published var latestOpenMindRecall: OpenMindMemoryRecallResult?
+    @Published var latestOpenMindStepUpRequest: OpenMindStepUpRequest?
     @Published var latestOpenMindWriteback: OpenMindWritebackOutcome?
     @Published var llmConversation: LLMConversation
     @Published var llmModelOptions: [LLMModelProfile]
@@ -412,6 +413,7 @@ final class BrowserViewModel: ObservableObject {
         llmConversation = LLMConversation(activeModelID: model.id)
         selectedLLMModelID = model.id
         latestOpenMindRecall = nil
+        latestOpenMindStepUpRequest = nil
         latestOpenMindWriteback = nil
         persistLLMConversation()
     }
@@ -469,12 +471,14 @@ final class BrowserViewModel: ObservableObject {
 
         let task = Task { @MainActor in
             appendCopilotEvent(runID: runID, kind: .memoryAccessStarted, message: "Requested governed memory from OpenMind.")
+            latestOpenMindStepUpRequest = nil
             let memoryRecall = await openMindMemoryClient.recall(
                 prompt: prompt,
                 pageURLString: tab.urlString,
                 pageSnapshot: snapshot
             )
             latestOpenMindRecall = memoryRecall
+            latestOpenMindStepUpRequest = memoryRecall.stepUpRequest
             appendCopilotEvent(
                 runID: runID,
                 kind: copilotEventKind(for: memoryRecall),
@@ -559,6 +563,28 @@ final class BrowserViewModel: ObservableObject {
         }
         copilotTasks[runID] = task
         return runID
+    }
+
+    @discardableResult
+    func requestOpenMindStepUp() -> Task<Void, Never>? {
+        guard let recall = latestOpenMindRecall,
+              recall.decision.status == .stepUpRequired,
+              let intent = recall.intent else {
+            return nil
+        }
+
+        return Task { @MainActor in
+            let request = await openMindMemoryClient.requestStepUpGrant(
+                intent: intent,
+                decision: recall.decision,
+                justification: recall.decision.stepUpPrompt ?? recall.decision.reason
+            )
+            latestOpenMindStepUpRequest = request
+            if var updatedRecall = latestOpenMindRecall {
+                updatedRecall.stepUpRequest = request
+                latestOpenMindRecall = updatedRecall
+            }
+        }
     }
 
     @discardableResult

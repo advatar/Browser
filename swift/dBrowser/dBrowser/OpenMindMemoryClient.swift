@@ -306,10 +306,175 @@ struct OpenMindMemoryRecord: Codable, Equatable, Identifiable {
     var evidenceURLString: String?
 }
 
+struct OpenMindEvidenceBundleQuery: Codable, Equatable {
+    var text: String
+    var purpose: String?
+}
+
+struct OpenMindEvidenceBundleScope: Codable, Equatable {
+    var domains: [String]
+    var maxSensitivity: String?
+    var outputMode: String?
+}
+
+struct OpenMindEvidenceBundleItem: Codable, Equatable, Identifiable {
+    var kind: String
+    var id: String
+    var summary: String
+    var confidence: Double?
+    var evidenceRefs: [String]
+    var why: String?
+    var sensitivity: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case id
+        case summary
+        case confidence
+        case evidenceRefs
+        case why
+        case sensitivity
+    }
+
+    init(
+        kind: String,
+        id: String,
+        summary: String,
+        confidence: Double?,
+        evidenceRefs: [String],
+        why: String?,
+        sensitivity: String?
+    ) {
+        self.kind = kind
+        self.id = id
+        self.summary = summary
+        self.confidence = confidence
+        self.evidenceRefs = evidenceRefs
+        self.why = why
+        self.sensitivity = sensitivity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "memory"
+        self.id = try container.decode(String.self, forKey: .id)
+        self.summary = try container.decode(String.self, forKey: .summary)
+        self.confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
+        self.evidenceRefs = try container.decodeIfPresent([String].self, forKey: .evidenceRefs) ?? []
+        self.why = try container.decodeIfPresent(String.self, forKey: .why)
+        self.sensitivity = try container.decodeIfPresent(String.self, forKey: .sensitivity)
+    }
+}
+
+struct OpenMindEvidenceBundle: Codable, Equatable, Identifiable {
+    var bundleID: String
+    var profile: String?
+    var createdAt: String?
+    var query: OpenMindEvidenceBundleQuery?
+    var scope: OpenMindEvidenceBundleScope?
+    var items: [OpenMindEvidenceBundleItem]
+    var governanceNotes: [String]
+
+    var id: String { bundleID }
+
+    private enum CodingKeys: String, CodingKey {
+        case bundleID = "bundleId"
+        case profile
+        case createdAt
+        case query
+        case scope
+        case items
+        case governanceNotes
+    }
+
+    init(
+        bundleID: String,
+        profile: String?,
+        createdAt: String?,
+        query: OpenMindEvidenceBundleQuery?,
+        scope: OpenMindEvidenceBundleScope?,
+        items: [OpenMindEvidenceBundleItem],
+        governanceNotes: [String]
+    ) {
+        self.bundleID = bundleID
+        self.profile = profile
+        self.createdAt = createdAt
+        self.query = query
+        self.scope = scope
+        self.items = items
+        self.governanceNotes = governanceNotes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.bundleID = try container.decode(String.self, forKey: .bundleID)
+        self.profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        self.createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        self.query = try container.decodeIfPresent(OpenMindEvidenceBundleQuery.self, forKey: .query)
+        self.scope = try container.decodeIfPresent(OpenMindEvidenceBundleScope.self, forKey: .scope)
+        self.items = try container.decodeIfPresent([OpenMindEvidenceBundleItem].self, forKey: .items) ?? []
+        self.governanceNotes = try container.decodeIfPresent([String].self, forKey: .governanceNotes) ?? []
+    }
+}
+
+struct OpenMindStepUpRequest: Codable, Equatable, Identifiable {
+    var requestID: String
+    var status: String
+    var operation: String?
+    var requestedScopes: [String]
+    var purpose: String?
+    var requestedTTL: String?
+    var justification: String?
+
+    var id: String { requestID }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID = "requestId"
+        case status
+        case operation
+        case requestedScopes
+        case purpose
+        case requestedTTL = "requestedTtl"
+        case justification
+    }
+
+    init(
+        requestID: String,
+        status: String,
+        operation: String?,
+        requestedScopes: [String],
+        purpose: String?,
+        requestedTTL: String?,
+        justification: String?
+    ) {
+        self.requestID = requestID
+        self.status = status
+        self.operation = operation
+        self.requestedScopes = requestedScopes
+        self.purpose = purpose
+        self.requestedTTL = requestedTTL
+        self.justification = justification
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.requestID = try container.decode(String.self, forKey: .requestID)
+        self.status = try container.decodeIfPresent(String.self, forKey: .status) ?? "pending"
+        self.operation = try container.decodeIfPresent(String.self, forKey: .operation)
+        self.requestedScopes = try container.decodeIfPresent([String].self, forKey: .requestedScopes) ?? []
+        self.purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
+        self.requestedTTL = try container.decodeIfPresent(String.self, forKey: .requestedTTL)
+        self.justification = try container.decodeIfPresent(String.self, forKey: .justification)
+    }
+}
+
 struct OpenMindMemoryRecallResult: Codable, Equatable {
     var decision: OpenMindAccessDecision
     var memories: [OpenMindMemoryRecord]
     var notices: [String]
+    var intent: OpenMindAccessIntent? = nil
+    var evidenceBundle: OpenMindEvidenceBundle? = nil
+    var stepUpRequest: OpenMindStepUpRequest? = nil
 
     nonisolated static func unavailable(_ message: String) -> OpenMindMemoryRecallResult {
         OpenMindMemoryRecallResult(
@@ -388,6 +553,34 @@ final class OpenMindMemoryClient {
     private struct MemorySearchResponse: Decodable {
         var memories: [OpenMindMemoryRecord]
         var notices: [String]?
+    }
+
+    private struct EvidenceBundleRequest: Encodable {
+        var clientID: String
+        var query: String
+        var purpose: String
+        var domains: [String]
+        var maxSensitivity: String
+        var limit: Int
+    }
+
+    private struct StepUpGrantIntent: Encodable {
+        var operation: String
+        var purpose: String
+        var requiredScopes: [String]
+        var requestedDomains: [String]
+        var outputMode: String
+        var reasonCodes: [String]
+        var prompt: String
+        var pageURLString: String?
+        var snapshotCommitment: String?
+    }
+
+    private struct StepUpGrantRequest: Encodable {
+        var clientID: String
+        var intent: StepUpGrantIntent
+        var justification: String
+        var requestedTtl: String
     }
 
     private struct WritebackEnvelope: Encodable {
@@ -501,10 +694,12 @@ final class OpenMindMemoryClient {
                 return OpenMindMemoryRecallResult(
                     decision: decision,
                     memories: [],
-                    notices: [decision.reason]
+                    notices: [decision.reason],
+                    intent: intent
                 )
             }
 
+            let evidenceBundle = try? await retrieveEvidenceBundle(intent: intent, limit: limit)
             let search: MemorySearchResponse = try await send(
                 method: "POST",
                 path: "/mcp/tools/mind.search_memories",
@@ -516,11 +711,67 @@ final class OpenMindMemoryClient {
             )
             return OpenMindMemoryRecallResult(
                 decision: decision,
-                memories: search.memories,
-                notices: search.notices ?? []
+                memories: Self.mergedMemories(search.memories, evidenceBundle: evidenceBundle),
+                notices: search.notices ?? [],
+                intent: intent,
+                evidenceBundle: evidenceBundle
             )
         } catch {
             return .unavailable(error.localizedDescription)
+        }
+    }
+
+    func retrieveEvidenceBundle(
+        intent: OpenMindAccessIntent,
+        limit: Int = 5
+    ) async throws -> OpenMindEvidenceBundle {
+        try await send(
+            method: "POST",
+            path: "/mcp/tools/mind.retrieve_evidence_bundle",
+            body: EvidenceBundleRequest(
+                clientID: configuration.clientID,
+                query: intent.prompt,
+                purpose: intent.purpose,
+                domains: Self.domains(from: intent.pageURLString),
+                maxSensitivity: intent.sensitivityCeiling,
+                limit: max(1, min(limit, 20))
+            )
+        )
+    }
+
+    func requestStepUpGrant(
+        intent: OpenMindAccessIntent,
+        decision: OpenMindAccessDecision,
+        justification: String? = nil,
+        requestedTtl: String = "PT1H"
+    ) async -> OpenMindStepUpRequest? {
+        guard configuration.httpBaseURL != nil else {
+            return nil
+        }
+
+        do {
+            return try await send(
+                method: "POST",
+                path: "/mcp/tools/gateway.request_step_up_grant",
+                body: StepUpGrantRequest(
+                    clientID: configuration.clientID,
+                    intent: StepUpGrantIntent(
+                        operation: "memory.search",
+                        purpose: intent.purpose,
+                        requiredScopes: decision.allowedScopes.isEmpty ? ["mind.read.basic"] : decision.allowedScopes,
+                        requestedDomains: Self.domains(from: intent.pageURLString),
+                        outputMode: "summary_only",
+                        reasonCodes: ["copilot_recall_step_up"],
+                        prompt: intent.prompt,
+                        pageURLString: intent.pageURLString,
+                        snapshotCommitment: intent.snapshotCommitment
+                    ),
+                    justification: justification ?? decision.stepUpPrompt ?? decision.reason,
+                    requestedTtl: requestedTtl
+                )
+            )
+        } catch {
+            return nil
         }
     }
 
@@ -578,6 +829,37 @@ final class OpenMindMemoryClient {
             hash &*= 0x100000001b3
         }
         return "fnv1a64:\(String(hash, radix: 16))"
+    }
+
+    private static func domains(from pageURLString: String?) -> [String] {
+        guard let pageURLString,
+              let host = URL(string: pageURLString)?.host,
+              !host.isEmpty else {
+            return []
+        }
+        return [host]
+    }
+
+    private static func mergedMemories(
+        _ memories: [OpenMindMemoryRecord],
+        evidenceBundle: OpenMindEvidenceBundle?
+    ) -> [OpenMindMemoryRecord] {
+        var seen = Set(memories.map(\.id))
+        var merged = memories
+        guard let evidenceBundle else { return merged }
+
+        for item in evidenceBundle.items where seen.insert(item.id).inserted {
+            merged.append(
+                OpenMindMemoryRecord(
+                    id: item.id,
+                    summary: item.summary,
+                    source: "OpenMind evidence bundle \(evidenceBundle.bundleID)",
+                    sensitivity: item.sensitivity,
+                    evidenceURLString: "mind://evidence/bundle/\(evidenceBundle.bundleID)"
+                )
+            )
+        }
+        return merged
     }
 
     private func send<Response: Decodable>(method: String, path: String) async throws -> Response {

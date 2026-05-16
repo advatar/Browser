@@ -791,6 +791,35 @@ private struct CopilotPanelView: View {
                                     .lineLimit(2)
                             }
                         }
+                        if let bundle = recall.evidenceBundle {
+                            Divider()
+                            Label("Evidence bundle \(bundle.bundleID): \(bundle.items.count) item\(bundle.items.count == 1 ? "" : "s").", systemImage: "doc.badge.magnifyingglass")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let note = bundle.governanceNotes.first {
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        if recall.decision.status == .stepUpRequired {
+                            Divider()
+                            Button {
+                                _ = browser.requestOpenMindStepUp()
+                            } label: {
+                                Label("Request step-up", systemImage: "checkmark.shield")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled((browser.latestOpenMindStepUpRequest ?? recall.stepUpRequest) != nil)
+                            .accessibilityIdentifier("copilot-openmind-step-up")
+                        }
+                        if let stepUpRequest = browser.latestOpenMindStepUpRequest ?? recall.stepUpRequest {
+                            Divider()
+                            Label(openMindStepUpSummary(stepUpRequest), systemImage: "checkmark.shield")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         if let writeback = browser.latestOpenMindWriteback {
                             Divider()
                             Label(openMindWritebackSummary(writeback), systemImage: openMindWritebackSystemImage(writeback))
@@ -877,6 +906,11 @@ private struct CopilotPanelView: View {
         }
     }
 
+    private func openMindStepUpSummary(_ request: OpenMindStepUpRequest) -> String {
+        let scopeText = request.requestedScopes.isEmpty ? "" : " for \(request.requestedScopes.joined(separator: ", "))"
+        return "Step-up \(request.status)\(scopeText): \(request.requestID)"
+    }
+
     private func openMindWritebackSystemImage(_ outcome: OpenMindWritebackOutcome) -> String {
         switch outcome.status {
         case .recorded:
@@ -893,7 +927,11 @@ private struct CopilotPanelView: View {
     private func openMindRecallSummary(_ recall: OpenMindMemoryRecallResult) -> String {
         switch recall.decision.status {
         case .allowed:
-            return "Allowed \(recall.memories.count) item\(recall.memories.count == 1 ? "" : "s")."
+            let memoryText = "Allowed \(recall.memories.count) item\(recall.memories.count == 1 ? "" : "s")."
+            guard let evidenceBundle = recall.evidenceBundle else {
+                return memoryText
+            }
+            return "\(memoryText) Evidence bundle has \(evidenceBundle.items.count) item\(evidenceBundle.items.count == 1 ? "" : "s")."
         case .denied:
             return "Denied: \(recall.decision.reason)"
         case .stepUpRequired:

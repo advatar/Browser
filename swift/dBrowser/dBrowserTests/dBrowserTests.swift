@@ -1375,6 +1375,35 @@ struct dBrowserTests {
                 ])
             }
 
+            if path == "/mcp/tools/mind.retrieve_evidence_bundle" {
+                return Self.jsonResponse(for: request, body: [
+                    "bundleId": "evb-1",
+                    "profile": "OMSEM-0.1",
+                    "createdAt": "2026-05-16T00:00:00Z",
+                    "query": [
+                        "text": "Summarize this page",
+                        "purpose": "copilot_recall"
+                    ],
+                    "scope": [
+                        "domains": ["example.com"],
+                        "maxSensitivity": "normal",
+                        "outputMode": "evidence_summary"
+                    ],
+                    "items": [
+                        [
+                            "kind": "memory",
+                            "id": "mem-evidence",
+                            "summary": "Evidence says user prefers audited memory.",
+                            "confidence": 0.88,
+                            "evidenceRefs": ["event-1"],
+                            "why": "matched",
+                            "sensitivity": "normal"
+                        ]
+                    ],
+                    "governanceNotes": ["policy filtered"]
+                ])
+            }
+
             if path == "/mcp/tools/mind.add_memory" {
                 return Self.jsonResponse(for: request, body: [
                     "status": "recorded",
@@ -1401,6 +1430,10 @@ struct dBrowserTests {
         )
         #expect(recall.decision.status == .allowed)
         #expect(recall.memories.first?.id == "mem-1")
+        #expect(recall.memories.contains { $0.id == "mem-evidence" })
+        #expect(recall.evidenceBundle?.bundleID == "evb-1")
+        #expect(recall.evidenceBundle?.items.first?.evidenceRefs == ["event-1"])
+        #expect(recall.intent?.purpose == "copilot_recall")
         #expect(recall.notices == ["one item redacted"])
 
         let outcome = await client.writeback(
@@ -1419,6 +1452,7 @@ struct dBrowserTests {
     }
 
     @MainActor @Test func openMindMemoryClientHandlesDeniedStepUpAndUnavailableStates() async {
+        let capturedStepRequests = JSONRequestCapture()
         let deniedHarness = Self.makeOpenMindMemorySession(key: "denied") { request in
             if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
                 return Self.jsonResponse(for: request, body: [
@@ -1431,7 +1465,10 @@ struct dBrowserTests {
             return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
         }
         let stepHarness = Self.makeOpenMindMemorySession(key: "step") { request in
-            if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
+            let path = request.url?.path ?? ""
+            capturedStepRequests.capture(request)
+
+            if path == "/mcp/tools/gateway.evaluate_access_intent" {
                 return Self.jsonResponse(for: request, body: [
                     "status": "stepUpRequired",
                     "allowedScopes": [],
@@ -1440,6 +1477,19 @@ struct dBrowserTests {
                     "stepUpPrompt": "Confirm memory access"
                 ])
             }
+
+            if path == "/mcp/tools/gateway.request_step_up_grant" {
+                return Self.jsonResponse(for: request, body: [
+                    "requestId": "step-1",
+                    "status": "pending",
+                    "operation": "memory.search",
+                    "requestedScopes": ["mind.read.basic"],
+                    "purpose": "copilot_recall",
+                    "requestedTtl": "PT1H",
+                    "justification": "Confirm memory access"
+                ])
+            }
+
             return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
         }
         let unavailableHarness = Self.makeOpenMindMemorySession(key: "down") { request in
@@ -1450,10 +1500,23 @@ struct dBrowserTests {
             configuration: deniedHarness.configuration,
             session: deniedHarness.session
         ).recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
-        let stepUp = await OpenMindMemoryClient(
+        let stepClient = OpenMindMemoryClient(
             configuration: stepHarness.configuration,
             session: stepHarness.session
-        ).recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
+        )
+        let stepUp = await stepClient.recall(prompt: "Find memory", pageURLString: nil, pageSnapshot: nil)
+        let stepRequest: OpenMindStepUpRequest?
+        if let intent = stepUp.intent {
+            stepRequest = await stepClient.requestStepUpGrant(
+                intent: intent,
+                decision: stepUp.decision,
+                justification: stepUp.decision.stepUpPrompt
+            )
+        } else {
+            stepRequest = nil
+        }
+        let stepBody = capturedStepRequests.body(for: "/mcp/tools/gateway.request_step_up_grant")
+        let stepIntentBody = stepBody?["intent"] as? [String: Any]
         let unavailable = await OpenMindMemoryClient(
             configuration: unavailableHarness.configuration,
             session: unavailableHarness.session
@@ -1463,6 +1526,11 @@ struct dBrowserTests {
         #expect(denied.memories.isEmpty)
         #expect(stepUp.decision.status == .stepUpRequired)
         #expect(stepUp.decision.stepUpPrompt == "Confirm memory access")
+        #expect(stepUp.intent?.purpose == "copilot_recall")
+        #expect(stepRequest?.requestID == "step-1")
+        #expect(stepRequest?.requestedScopes == ["mind.read.basic"])
+        #expect(stepBody?["justification"] as? String == "Confirm memory access")
+        #expect(stepIntentBody?["operation"] as? String == "memory.search")
         #expect(unavailable.decision.status == .unavailable)
     }
 
@@ -1580,6 +1648,85 @@ struct dBrowserTests {
         #expect(model.latestOpenMindRecall?.memories.first?.id == "mem-1")
         #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessStarted } == true)
         #expect(model.copilotRuns.first?.events.contains { $0.kind == .memoryAccessCompleted } == true)
+    }
+
+    @MainActor
+    @Test func copilotRequestsOpenMindStepUpGrantFromRecallIntent() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "copilotstep") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/tools/gateway.evaluate_access_intent" {
+                return Self.jsonResponse(for: request, body: [
+                    "status": "stepUpRequired",
+                    "allowedScopes": [],
+                    "reason": "grant required",
+                    "redactionCount": 0,
+                    "stepUpPrompt": "Confirm memory access"
+                ])
+            }
+
+            if path == "/mcp/tools/gateway.request_step_up_grant" {
+                return Self.jsonResponse(for: request, body: [
+                    "requestId": "step-copilot",
+                    "status": "pending",
+                    "operation": "memory.search",
+                    "requestedScopes": ["mind.read.basic"],
+                    "purpose": "copilot_recall",
+                    "requestedTtl": "PT1H",
+                    "justification": "Confirm memory access"
+                ])
+            }
+
+            if path == "/mcp/tools/mind.search_memories" {
+                return Self.jsonResponse(for: request, status: 500, body: ["error": "search should wait for step-up"])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let offlineServices = Self.makeAFMServiceSession(key: "copilotstepafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: offlineServices.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineServices.configuration,
+                session: offlineServices.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(
+            runtimeBridge: bridge,
+            openMindMemoryClient: OpenMindMemoryClient(
+                configuration: memoryHarness.configuration,
+                session: memoryHarness.session
+            )
+        )
+        model.navigate("https://example.com/private")
+
+        guard let runID = model.runCopilot(prompt: "Find private memory") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+
+        #expect(completed)
+        #expect(model.latestOpenMindRecall?.decision.status == .stepUpRequired)
+        #expect(model.latestOpenMindStepUpRequest == nil)
+
+        let stepTask = model.requestOpenMindStepUp()
+        let requested = await waitForOpenMindStepUpRequest(in: model)
+        let stepBody = capturedRequests.body(for: "/mcp/tools/gateway.request_step_up_grant")
+        let stepIntentBody = stepBody?["intent"] as? [String: Any]
+
+        #expect(stepTask != nil)
+        #expect(requested)
+        #expect(model.latestOpenMindStepUpRequest?.requestID == "step-copilot")
+        #expect(model.latestOpenMindRecall?.stepUpRequest?.requestID == "step-copilot")
+        #expect(capturedRequests.body(for: "/mcp/tools/mind.search_memories") == nil)
+        #expect(stepBody?["justification"] as? String == "Confirm memory access")
+        #expect(stepIntentBody?["prompt"] as? String == "Find private memory")
+        #expect((stepIntentBody?["requestedDomains"] as? [String]) == ["example.com"])
     }
 
     @MainActor
@@ -1822,6 +1969,17 @@ struct dBrowserTests {
     ) async -> Bool {
         for _ in 0..<40 {
             if model.copilotRuns.first(where: { $0.id == id })?.status == status {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+
+    @MainActor
+    private func waitForOpenMindStepUpRequest(in model: BrowserViewModel) async -> Bool {
+        for _ in 0..<40 {
+            if model.latestOpenMindStepUpRequest != nil {
                 return true
             }
             try? await Task.sleep(nanoseconds: 10_000_000)
