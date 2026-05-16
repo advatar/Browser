@@ -31,6 +31,7 @@ final class BrowserViewModel: ObservableObject {
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
     private let smartHistoryStore: SmartHistoryStore
+    private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
     private var smartHistoryExcludedDomains: Set<String>
     private var copilotTasks: [UUID: Task<Void, Never>] = [:]
@@ -44,13 +45,20 @@ final class BrowserViewModel: ObservableObject {
         runtimeBridge: MobileRuntimeBridge,
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
+        llmConversationStore: LLMConversationStore = LLMConversationStore(),
         openMindMemoryClient: OpenMindMemoryClient? = nil
     ) {
         let tab = BrowserTab(urlString: initialURL)
         let smartHistoryPayload = smartHistoryStore.load()
+        let initialLLMModelOptions = LLMModelRegistry.models(afmSnapshot: runtimeBridge.afmServiceSnapshot)
+        let restoredLLMState = Self.restoredLLMState(
+            from: llmConversationStore.load(),
+            models: initialLLMModelOptions
+        )
         self.runtimeBridge = runtimeBridge
         self.workflowStore = copilotWorkflowStore
         self.smartHistoryStore = smartHistoryStore
+        self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
@@ -58,14 +66,17 @@ final class BrowserViewModel: ObservableObject {
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
-        self.llmModelOptions = LLMModelRegistry.models(afmSnapshot: runtimeBridge.afmServiceSnapshot)
-        self.selectedLLMModelID = LLMModelRegistry.defaultModelID
-        self.llmConversation = LLMConversation(activeModelID: LLMModelRegistry.defaultModelID)
+        self.llmModelOptions = initialLLMModelOptions
+        self.selectedLLMModelID = restoredLLMState.selectedModelID
+        self.llmConversation = restoredLLMState.conversation
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
         self.history = smartHistoryPayload.history
         self.copilotWorkflows = copilotWorkflowStore.load()
+        if restoredLLMState.shouldPersist {
+            persistLLMConversation()
+        }
     }
 
     var activeTabIndex: Int? {
@@ -203,6 +214,7 @@ final class BrowserViewModel: ObservableObject {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmModelOptions = LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)
+        normalizeSelectedLLMModelIfNeeded()
         let openMindState = await openMindMemoryClient.refreshRuntimeState()
         openMindCapabilityState = openMindState.capability
         openMindContinuityState = openMindState.continuity
@@ -223,10 +235,12 @@ final class BrowserViewModel: ObservableObject {
 
     func selectLLMModel(_ id: String) {
         guard let model = llmModelOptions.first(where: { $0.id == id }) else { return }
+        guard model.availability.isRunnable else { return }
         guard selectedLLMModelID != id else { return }
         let previous = selectedLLMModelID
         selectedLLMModelID = id
         llmConversation.switchModel(to: id, displayName: model.displayName)
+        persistLLMConversation()
         appendConversationLinkedCopilotEvent(
             kind: .modelSwitched,
             message: "Conversation switched model from \(previous) to \(model.displayName)."
@@ -365,6 +379,7 @@ final class BrowserViewModel: ObservableObject {
                 )
             )
         }
+        persistLLMConversation()
 
         let renderedContext = LLMConversationContextRenderer.render(
             conversation: llmConversation,
@@ -383,6 +398,22 @@ final class BrowserViewModel: ObservableObject {
             renderedContext: renderedContext,
             recordsAssistantMessage: true
         )
+    }
+
+    func startNewLLMConversation() {
+        let previousConversationID = llmConversation.id
+        let activeConversationRunIDs = copilotRuns
+            .filter { $0.conversationID == previousConversationID && ($0.status == .queued || $0.status == .running) }
+            .map(\.id)
+        activeConversationRunIDs.forEach(cancelCopilotRun)
+
+        normalizeSelectedLLMModelIfNeeded()
+        let model = activeLLMModel
+        llmConversation = LLMConversation(activeModelID: model.id)
+        selectedLLMModelID = model.id
+        latestOpenMindRecall = nil
+        latestOpenMindWriteback = nil
+        persistLLMConversation()
     }
 
     @discardableResult
@@ -432,6 +463,7 @@ final class BrowserViewModel: ObservableObject {
                 )
             )
             assert(conversationID == llmConversation.id)
+            persistLLMConversation()
         }
         requestPageSnapshot()
 
@@ -457,6 +489,7 @@ final class BrowserViewModel: ObservableObject {
                         relatedRunID: runID
                     )
                 )
+                persistLLMConversation()
             }
 
             guard !Task.isCancelled, isCopilotRunActive(runID) else { return }
@@ -833,6 +866,48 @@ final class BrowserViewModel: ObservableObject {
         workflowStore.save(copilotWorkflows)
     }
 
+    private func persistLLMConversation() {
+        llmConversationStore.save(
+            LLMConversationStorePayload(
+                conversation: llmConversation,
+                selectedModelID: selectedLLMModelID
+            )
+        )
+    }
+
+    private func normalizeSelectedLLMModelIfNeeded() {
+        let restoredModel = Self.restoredLLMModel(for: selectedLLMModelID, models: llmModelOptions)
+        guard restoredModel.id != selectedLLMModelID else { return }
+        selectedLLMModelID = restoredModel.id
+        llmConversation.switchModel(to: restoredModel.id, displayName: restoredModel.displayName)
+        persistLLMConversation()
+    }
+
+    private static func restoredLLMState(
+        from payload: LLMConversationStorePayload,
+        models: [LLMModelProfile]
+    ) -> (conversation: LLMConversation, selectedModelID: String, shouldPersist: Bool) {
+        let requestedModelID = payload.selectedModelID.isEmpty ? payload.conversation.activeModelID : payload.selectedModelID
+        let restoredModel = restoredLLMModel(for: requestedModelID, models: models)
+        var conversation = payload.conversation
+        var shouldPersist = payload.selectedModelID != restoredModel.id || payload.conversation.activeModelID != restoredModel.id
+        if conversation.activeModelID != restoredModel.id {
+            conversation.switchModel(to: restoredModel.id, displayName: restoredModel.displayName)
+            shouldPersist = true
+        }
+        return (conversation, restoredModel.id, shouldPersist)
+    }
+
+    private static func restoredLLMModel(for id: String, models: [LLMModelProfile]) -> LLMModelProfile {
+        if let model = models.first(where: { $0.id == id && $0.availability.isRunnable }) {
+            return model
+        }
+        if let defaultModel = models.first(where: { $0.id == LLMModelRegistry.defaultModelID }) {
+            return defaultModel
+        }
+        return models[0]
+    }
+
     private func targetElement(for action: BrowserDOMAction) -> DOMElementRecord? {
         guard let latestDOMQueryResult else { return nil }
         if let elementIndex = action.elementIndex {
@@ -874,6 +949,7 @@ final class BrowserViewModel: ObservableObject {
                 toModelID: model.id
             )
         )
+        persistLLMConversation()
     }
 
     private func appendProviderFallback(runID: UUID, requestedModel: LLMModelProfile, actualMode: RuntimeBridgeMode) {
@@ -886,6 +962,7 @@ final class BrowserViewModel: ObservableObject {
                 relatedRunID: runID
             )
         )
+        persistLLMConversation()
         appendCopilotEvent(runID: runID, kind: .providerFallback, message: message)
     }
 
@@ -917,6 +994,7 @@ final class BrowserViewModel: ObservableObject {
                 relatedMessageID: assistantMessage.id
             )
         )
+        persistLLMConversation()
     }
 
     private func appendAFMarketEvents(runID: UUID, result: CopilotRunResult) {

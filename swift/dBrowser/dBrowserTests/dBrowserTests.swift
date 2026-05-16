@@ -369,6 +369,77 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func llmConversationStoreRestoresConversationAndModelSelection() async {
+        let storeURL = Self.temporaryJSONStoreURL(named: "llm-conversation-restore")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+
+        let firstModel = makeIsolatedBrowserViewModel(
+            llmConversationStore: LLMConversationStore(fileURL: storeURL)
+        )
+        firstModel.navigate("https://example.com")
+        firstModel.selectLLMModel(LLMModelRegistry.afMarketRouterID)
+        guard let runID = firstModel.sendLLMMessage("Persist this conversation state.") else {
+            Issue.record("Expected persisted conversation run ID")
+            return
+        }
+        firstModel.cancelCopilotRun(runID)
+
+        let restoredModel = makeIsolatedBrowserViewModel(
+            llmConversationStore: LLMConversationStore(fileURL: storeURL)
+        )
+
+        #expect(restoredModel.llmConversation.id == firstModel.llmConversation.id)
+        #expect(restoredModel.selectedLLMModelID == LLMModelRegistry.afMarketRouterID)
+        #expect(restoredModel.llmConversation.activeModelID == LLMModelRegistry.afMarketRouterID)
+        #expect(restoredModel.llmConversation.messages.contains { $0.text == "Persist this conversation state." })
+        #expect(restoredModel.copilotRuns.isEmpty)
+    }
+
+    @MainActor
+    @Test func llmConversationResetClearsPersistedThread() {
+        let storeURL = Self.temporaryJSONStoreURL(named: "llm-conversation-reset")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+
+        let model = makeIsolatedBrowserViewModel(
+            llmConversationStore: LLMConversationStore(fileURL: storeURL)
+        )
+        model.navigate("https://example.com")
+        guard let runID = model.sendLLMMessage("This should be cleared.") else {
+            Issue.record("Expected reset test conversation run ID")
+            return
+        }
+        model.cancelCopilotRun(runID)
+        let previousConversationID = model.llmConversation.id
+
+        model.startNewLLMConversation()
+        let restoredModel = makeIsolatedBrowserViewModel(
+            llmConversationStore: LLMConversationStore(fileURL: storeURL)
+        )
+
+        #expect(model.llmConversation.id != previousConversationID)
+        #expect(model.llmConversation.messages.isEmpty)
+        #expect(restoredModel.llmConversation.id == model.llmConversation.id)
+        #expect(restoredModel.llmConversation.messages.isEmpty)
+    }
+
+    @MainActor
+    @Test func llmConversationRestoreFallsBackFromUnavailableModel() {
+        let unavailableConversation = LLMConversation(activeModelID: LLMModelRegistry.llmGatewayID)
+        let store = LLMConversationStore.ephemeral(
+            seed: LLMConversationStorePayload(
+                conversation: unavailableConversation,
+                selectedModelID: LLMModelRegistry.llmGatewayID
+            )
+        )
+
+        let model = makeIsolatedBrowserViewModel(llmConversationStore: store)
+
+        #expect(model.selectedLLMModelID == LLMModelRegistry.defaultModelID)
+        #expect(model.llmConversation.activeModelID == LLMModelRegistry.defaultModelID)
+        #expect(model.llmConversation.events.contains { $0.kind == .modelSwitched })
+    }
+
+    @MainActor
     @Test func decentralizedStartingPointsResolveToRenderableGatewayURLs() async {
         let bridge = MobileRuntimeBridge()
 
@@ -1764,6 +1835,7 @@ struct dBrowserTests {
         runtimeBridge: MobileRuntimeBridge? = nil,
         workflowStore: CopilotWorkflowStore = .ephemeral(),
         smartHistoryStore: SmartHistoryStore = .ephemeral(),
+        llmConversationStore: LLMConversationStore = .ephemeral(),
         openMindMemoryClient: OpenMindMemoryClient? = nil
     ) -> BrowserViewModel {
         BrowserViewModel(
@@ -1771,8 +1843,14 @@ struct dBrowserTests {
             runtimeBridge: runtimeBridge ?? MobileRuntimeBridge(),
             copilotWorkflowStore: workflowStore,
             smartHistoryStore: smartHistoryStore,
+            llmConversationStore: llmConversationStore,
             openMindMemoryClient: openMindMemoryClient
         )
+    }
+
+    private static func temporaryJSONStoreURL(named name: String) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("dbrowser-\(name)-\(UUID().uuidString).json")
     }
 
     private static func makeAFMServiceSession(

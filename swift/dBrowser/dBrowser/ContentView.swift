@@ -619,6 +619,15 @@ private struct CopilotPanelView: View {
                         Text("Conversation")
                             .font(.headline)
                         Spacer()
+                        Button {
+                            browser.startNewLLMConversation()
+                        } label: {
+                            Label("New", systemImage: "plus.message")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Start a new conversation")
+                        .accessibilityIdentifier("copilot-new-conversation")
+
                         Picker(
                             "Model",
                             selection: Binding(
@@ -627,7 +636,9 @@ private struct CopilotPanelView: View {
                             )
                         ) {
                             ForEach(browser.llmModelOptions) { model in
-                                Text(model.displayName).tag(model.id)
+                                Text(model.displayName)
+                                    .tag(model.id)
+                                    .disabled(!model.availability.isRunnable)
                             }
                         }
                         .pickerStyle(.menu)

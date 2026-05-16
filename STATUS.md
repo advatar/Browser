@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift LLM Conversation Persistence Slice
+
+- [x] Triage the remaining persistence gap from #72.
+- [x] Create tracker issue for persisted Swift LLM conversation state (#82).
+- [x] Add a JSON-backed Swift LLM conversation store with ephemeral test support.
+- [x] Load and validate persisted conversation/model state in BrowserViewModel.
+- [x] Persist conversation mutations after messages, model switches, context events, and fallbacks.
+- [x] Add a UI action to start a fresh persisted conversation.
+- [x] Add focused Swift unit tests for restore and reset behavior.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-llm-persistence-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-persistence-tests -only-testing:dBrowserTests` passed.
+
 ## Swift LLM Conversation And Model Switching Slice
 
 - [x] Triage open Swift LLM issue #72 and choose the first implementation slice.

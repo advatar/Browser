@@ -386,6 +386,70 @@ struct LLMConversation: Codable, Equatable, Identifiable {
     }
 }
 
+struct LLMConversationStorePayload: Codable, Equatable {
+    var conversation: LLMConversation
+    var selectedModelID: String
+
+    nonisolated init(
+        conversation: LLMConversation = LLMConversation(activeModelID: LLMModelRegistry.defaultModelID),
+        selectedModelID: String = LLMModelRegistry.defaultModelID
+    ) {
+        self.conversation = conversation
+        self.selectedModelID = selectedModelID
+    }
+}
+
+final class LLMConversationStore {
+    private let fileURL: URL?
+    private var memoryPayload: LLMConversationStorePayload
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    nonisolated init(
+        fileURL: URL? = LLMConversationStore.defaultFileURL(),
+        seed: LLMConversationStorePayload = LLMConversationStorePayload()
+    ) {
+        self.fileURL = fileURL
+        self.memoryPayload = seed
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    nonisolated static func ephemeral(seed: LLMConversationStorePayload = LLMConversationStorePayload()) -> LLMConversationStore {
+        LLMConversationStore(fileURL: nil, seed: seed)
+    }
+
+    func load() -> LLMConversationStorePayload {
+        guard let fileURL else { return memoryPayload }
+        guard let data = try? Data(contentsOf: fileURL) else {
+            return LLMConversationStorePayload()
+        }
+        return (try? decoder.decode(LLMConversationStorePayload.self, from: data)) ?? LLMConversationStorePayload()
+    }
+
+    func save(_ payload: LLMConversationStorePayload) {
+        guard let fileURL else {
+            memoryPayload = payload
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try encoder.encode(payload)
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            assertionFailure("Failed to save LLM conversation: \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func defaultFileURL() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("dBrowser", isDirectory: true)
+            .appendingPathComponent("llm-conversation.json")
+    }
+}
+
 struct LLMRenderedConversationContext: Codable, Equatable {
     var prompt: String
     var includedMessageIDs: [UUID]
