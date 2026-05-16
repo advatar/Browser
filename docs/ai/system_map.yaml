@@ -1,55 +1,81 @@
-version: 1
+version: 2
+
+product:
+  status: swift_only
+  canonical_docs:
+    - docs/ARCHITECTURE.md
+    - docs/README.md
+  current_app:
+    path: swift/dBrowser
+    project: swift/dBrowser/dBrowser.xcodeproj
+    scheme: dBrowser
 
 components:
-  tauri_gui:
-    description: Desktop app (Tauri v2). Rust backend in crates/gui, UI served from orbit-shell-ui.
-    path: crates/gui
-    config: crates/gui/tauri.conf.json
-    agent_runtime:
-      manifests:
-        - configs/agent_apps.json
-        - configs/agent_app_schedules.json
-      events:
-        - agent://approval-request
-        - agent://run-event
-        - browser://history-updated
-    native_content_webviews:
-      mode: per-tab child webviews (no iframe)
-      state:
-        - AppState.content_tab_webviews
-        - AppState.active_content_tab
-        - AppState.content_bounds
-      commands:
-        - activate_tab_webview
-        - close_tab_webview
-        - navigate_to
-        - set_content_bounds
-        - content_go_back
-        - content_go_forward
-        - content_reload
-        - content_stop
-    legacy_frontend:
-      status: deprecated
-      placeholder: crates/gui/src/index.html
-      removed_paths:
-        - crates/gui/src/js
-    depends_on:
-      - orbit_shell_ui
-      - llm_router_lib
-    dev:
-      frontend_dev_url: http://localhost:5174
-    artifacts:
-      macos_app_bundle: target/release/bundle/macos/*.app
-      macos_dmg: target/release/bundle/dmg/*.dmg
+  swift_app:
+    description: Native SwiftUI browser and agent app.
+    path: swift/dBrowser/dBrowser
+    owns:
+      - browser_chrome
+      - tabs
+      - address_resolution
+      - wkwebview_rendering
+      - approvals
+      - runtime_status
 
-  orbit_shell_ui:
-    description: Frontend used by the Tauri GUI (built via beforeBuildCommand).
-    path: orbit-shell-ui
-    dev:
-      vite_dev_server: http://localhost:5174
-    build_output:
-      dist: orbit-shell-ui/dist
+  browser_runtime_bridge:
+    description: Swift boundary for decentralized resolution, Copilot, AFMarket services, wallet policy, downloads, and future package integrations.
+    path: swift/dBrowser/dBrowser/RuntimeBridge.swift
+    target_packages:
+      - BrowserAutomationKit
+      - AgentRuntimeKit
+      - LLMConversationKit
+      - AFMarketKit
+      - OpenMindMemoryKit
+      - ChainTrustKit
+      - WalletPolicyKit
+      - DecentralizedContentKit
 
-  llm_router_lib:
-    description: Rust library used by the GUI for model routing (not a network service).
-    path: services/llm-router
+  llm_conversation:
+    description: Desktop-style conversation surface with provider-neutral context, streamed runs, and mid-conversation model switching.
+    status: planned
+    issue: 72
+    target_package: LLMConversationKit
+    related_packages:
+      - BundledLLMKit
+      - LLMGatewayKit
+      - AgentRuntimeKit
+
+  afmarket:
+    description: External AFMarket contracts for runner-pack discovery, routing, node dispatch, attestation, proof, and settlement.
+    path: ../AFMarket
+    issue: 69
+    target_package: AFMarketKit
+
+  brian_openmind:
+    description: External BrIAn/OpenMind personal memory store accessed through MCP/OMPS only.
+    path: ../OpenMind/BrIAn
+    issue: 70
+    target_package: OpenMindMemoryKit
+
+  chain_trust:
+    description: Shared trust-state registry and chain-specific Swift light-client packages.
+    status: planned
+    issues:
+      - 59
+      - 60
+      - 61
+      - 62
+      - 63
+      - 64
+      - 65
+      - 66
+      - 67
+      - 68
+
+reference_only:
+  rust_tauri_runtime:
+    description: Historical implementation reference for behavior, contracts, fixtures, and tests. Not current product runtime.
+    paths:
+      - crates
+      - orbit-shell-ui
+      - services

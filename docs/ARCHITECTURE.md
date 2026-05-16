@@ -1,745 +1,442 @@
-# Architecture Guide
+# dBrowser Current Architecture And Plan
 
-## Overview
+This is the single source of truth for the current dBrowser architecture and implementation plan.
 
-The Decentralized Web Browser is built as a modular, peer-to-peer system that eliminates reliance on centralized infrastructure. This document provides a comprehensive overview of the system architecture, design decisions, and component interactions.
+The product has transitioned to Swift completely. The current app is the native Swift app under `swift/dBrowser`. Any capability that exists only in the old Rust/Tauri runtime is historical implementation evidence, not current product functionality. Rust-only functionality must be recreated as Swift packages and integrated with the Swift app before it counts as supported.
 
-## Table of Contents
+## Current Product Boundary
 
-- [System Architecture](#system-architecture)
-- [Core Components](#core-components)
-- [Data Flow](#data-flow)
-- [Network Architecture](#network-architecture)
-- [Security Model](#security-model)
-- [Storage Architecture](#storage-architecture)
-- [Component Interactions](#component-interactions)
+Current product:
 
-## System Architecture
+- Native Swift app: `swift/dBrowser`.
+- SwiftUI shell: `ContentView.swift`.
+- Browser state and navigation: `BrowserViewModel.swift` and `BrowserModels.swift`.
+- Web rendering: `BrowserWebView.swift` wrapping `WKWebView`.
+- Runtime integration boundary: `RuntimeBridge.swift`.
+- AFMarket service client: `AFMServicesClient.swift`.
+- Local MLX model selection: `BundledLLM.swift`.
+- Unit tests: `swift/dBrowser/dBrowserTests/dBrowserTests.swift`.
 
-### High-Level Overview
+Legacy/reference only:
 
-```mermaid
-graph TB
-    subgraph "User Interface Layer"
-        UI[Browser UI]
-        Tabs[Tab Management]
-        AddressBar[Address Bar]
-        WalletUI[Wallet Interface]
-    end
-    
-    subgraph "Application Layer"
-        Router[Content Router]
-        Renderer[Web Renderer]
-        WalletCore[Wallet Core]
-        Extensions[Extension System]
-    end
-    
-    subgraph "Service Layer"
-        P2P[P2P Network Service]
-        IPFS[IPFS Service]
-        Blockchain[Blockchain Service]
-        Storage[Local Storage]
-    end
-    
-    subgraph "Network Layer"
-        libp2p[libp2p Stack]
-        DHT[Kademlia DHT]
-        Bitswap[Bitswap Protocol]
-        Gossipsub[Gossipsub]
-    end
-    
-    subgraph "Blockchain Clients"
-        Substrate[Substrate Client]
-        Ethereum[Ethereum Light Client]
-        Bitcoin[Bitcoin Light Client]
-    end
-    
-    UI --> Router
-    Tabs --> Renderer
-    AddressBar --> Router
-    WalletUI --> WalletCore
-    
-    Router --> P2P
-    Router --> IPFS
-    Renderer --> Extensions
-    WalletCore --> Blockchain
-    
-    P2P --> libp2p
-    IPFS --> Bitswap
-    Blockchain --> Substrate
-    Blockchain --> Ethereum
-    Blockchain --> Bitcoin
-    
-    libp2p --> DHT
-    libp2p --> Gossipsub
-    Storage --> IPFS
-```
+- Rust crates under `crates/`.
+- Tauri GUI and runtime frontend.
+- Old Rust agent runtime, wallet, IPFS, p2p, updater, AFM, and light-client code.
+- Old Node service docs unless they describe external contracts the Swift app still calls.
 
-### Component Hierarchy
+The migration rule is simple: if Swift cannot call it through a Swift package or a documented service contract, it is not current architecture.
 
-```mermaid
-classDiagram
-    class BrowserApp {
-        +start()
-        +shutdown()
-        +handle_events()
-    }
-    
-    class UIManager {
-        +create_window()
-        +manage_tabs()
-        +handle_user_input()
-    }
-    
-    class ContentRouter {
-        +route_request(url)
-        +resolve_content()
-        +cache_content()
-    }
-    
-    class P2PService {
-        +initialize_network()
-        +discover_peers()
-        +handle_messages()
-    }
-    
-    class IPFSService {
-        +get_content(cid)
-        +pin_content(cid)
-        +publish_content()
-    }
-    
-    class BlockchainService {
-        +connect_client()
-        +sync_headers()
-        +submit_transaction()
-    }
-    
-    class WalletService {
-        +create_wallet()
-        +sign_transaction()
-        +manage_keys()
-    }
-    
-    BrowserApp --> UIManager
-    BrowserApp --> ContentRouter
-    BrowserApp --> P2PService
-    
-    ContentRouter --> IPFSService
-    ContentRouter --> BlockchainService
-    
-    P2PService --> IPFSService
-    BlockchainService --> WalletService
-```
+## Product Goal
 
-## Core Components
+dBrowser is a native Swift browser and agent surface for decentralized browsing, local-first AI, governed personal memory, AFMarket task execution, and chain-verified wallet/protocol state.
 
-### 1. P2P Networking Layer
+The app should:
 
-The P2P networking layer is built on libp2p and provides the foundation for all decentralized communication.
+- Load normal web pages in `WKWebView`.
+- Resolve IPFS, IPNS, ENS, and other decentralized addresses through verified light-client paths where possible, with clearly labeled gateway fallback.
+- Provide a desktop-class LLM conversation UI similar in scope to Claude Desktop or ChatGPT Desktop.
+- Let the user switch the active LLM at any point while preserving conversation context.
+- Let the LLM surface read and operate the real active page through typed, approval-gated automation.
+- Use local MLX models by default when they are suitable.
+- Route larger or specialized work through AFMarket runner packs.
+- Retrieve and write personal memory only through BrIAn/OpenMind MCP policy gates.
+- Keep wallet signing, spend policy, memory writeback, downloads, and destructive page actions behind explicit user approval.
+- Surface proof, attestation, settlement, and light-client trust state in the UI.
 
-```mermaid
-graph LR
-    subgraph "libp2p Stack"
-        Transport[Transport Layer]
-        Muxing[Stream Multiplexing]
-        Security[Security Layer]
-        Discovery[Peer Discovery]
-    end
-    
-    subgraph "Protocols"
-        Kademlia[Kademlia DHT]
-        Bitswap[Bitswap]
-        Gossipsub[Gossipsub]
-        Identify[Identify]
-    end
-    
-    subgraph "Network Transports"
-        TCP[TCP]
-        QUIC[QUIC]
-        WebSocket[WebSocket]
-    end
-    
-    Transport --> TCP
-    Transport --> QUIC
-    Transport --> WebSocket
-    
-    Muxing --> Yamux[Yamux]
-    Security --> Noise[Noise Protocol]
-    
-    Discovery --> mDNS[mDNS]
-    Discovery --> Bootstrap[Bootstrap Nodes]
-    
-    Kademlia --> Discovery
-    Bitswap --> Muxing
-    Gossipsub --> Security
-```
+## Current Swift App
 
-#### Key Features:
-- **Multi-transport support**: TCP, QUIC, WebSocket
-- **Security**: Noise protocol for encryption
-- **Multiplexing**: Yamux for stream management
-- **Discovery**: mDNS and bootstrap nodes
+The current Swift app already has a usable shell:
 
-### 2. IPFS Integration
+| Surface | Current implementation | Status |
+| --- | --- | --- |
+| Browser chrome | `ContentView.swift` renders toolbar, address bar, tab strip, status bar, home, panels | Current |
+| Web rendering | `BrowserWebView.swift` owns a `WKWebView`, navigation delegate, back/forward/reload/stop commands | Current |
+| Tabs/history/bookmarks | `BrowserViewModel.swift` manages in-memory tabs, history, bookmarks, autocomplete | Current |
+| URL resolution | `BrowserURLResolver` accepts HTTP/HTTPS, blocks unsupported schemes, delegates IPFS/IPNS/ENS to runtime bridge | Current |
+| Runtime status | `MobileRuntimeBridge` exposes feature states for browsing, decentralized protocols, AFM, Copilot, wallet, downloads | Current |
+| AFM service checks | `AFMServicesClient` checks router, registry, and pipelines health and calls `/route`, `/packs`, `/jobs` | Prototype |
+| Copilot | `runCopilot` routes through AFM services when available, otherwise returns deterministic local fallback | Prototype |
+| Wallet | Local typed policy simulator for connect/disconnect/spend decision | Prototype |
+| Downloads | Native `URLSession` download tracking with queued/downloading/completed/cancelled/failed states | Current |
+| Bundled LLM | Gemma 4 E2B IT 4-bit MLX through `mlx-swift-lm` packages | Current selection, inference integration next |
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Browser
-    participant IPFS
-    participant DHT
-    participant Peers
-    
-    User->>Browser: Request ipfs://QmHash
-    Browser->>IPFS: Resolve content
-    IPFS->>DHT: Find providers
-    DHT-->>IPFS: Provider list
-    IPFS->>Peers: Request blocks
-    Peers-->>IPFS: Content blocks
-    IPFS->>Browser: Assembled content
-    Browser->>User: Display content
-```
+Current limitations:
 
-#### IPFS Service Architecture:
+- No typed `WKWebView` automation bridge yet.
+- No DOM snapshot, click/type/scroll/wait action channel yet.
+- Copilot run state is a single result, not a conversation-first streamed/cancellable run ledger.
+- No model registry or mid-conversation model switching yet.
+- History/bookmarks/workflows are in-memory.
+- Decentralized protocols use gateway fallback today.
+- Wallet and chain trust are policy simulators until Swift light clients and signing are integrated.
 
-```mermaid
-classDiagram
-    class IPFSNode {
-        +bitswap: Bitswap
-        +blockstore: BlockStore
-        +dag: DAGService
-        +pin_manager: PinManager
-        
-        +get(cid: CID) Content
-        +put(data: bytes) CID
-        +pin(cid: CID)
-        +unpin(cid: CID)
-    }
-    
-    class Bitswap {
-        +want_list: WantList
-        +ledger: Ledger
-        
-        +want_block(cid: CID)
-        +provide_block(block: Block)
-        +handle_message(msg: Message)
-    }
-    
-    class BlockStore {
-        +get(cid: CID) Block
-        +put(block: Block)
-        +has(cid: CID) bool
-        +delete(cid: CID)
-    }
-    
-    class PinManager {
-        +pin_set: HashSet
-        
-        +pin(cid: CID, recursive: bool)
-        +unpin(cid: CID)
-        +is_pinned(cid: CID) bool
-    }
-    
-    IPFSNode --> Bitswap
-    IPFSNode --> BlockStore
-    IPFSNode --> PinManager
-    Bitswap --> BlockStore
-```
-
-### 3. Blockchain Integration
-
-The blockchain layer supports multiple chains through a unified interface:
+## Swift System Map
 
 ```mermaid
 graph TD
-    subgraph "Blockchain Service"
-        ClientManager[Client Manager]
-        TxPool[Transaction Pool]
-        StateSync[State Synchronization]
-    end
-    
-    subgraph "Light Clients"
-        SubstrateClient[Substrate Client]
-        EthereumClient[Ethereum Client]
-        BitcoinClient[Bitcoin Client]
-    end
-    
-    subgraph "Wallet Integration"
-        KeyManager[Key Manager]
-        Signer[Transaction Signer]
-        HWWallet[Hardware Wallet]
-    end
-    
-    ClientManager --> SubstrateClient
-    ClientManager --> EthereumClient
-    ClientManager --> BitcoinClient
-    
-    TxPool --> Signer
-    StateSync --> SubstrateClient
-    StateSync --> EthereumClient
-    
-    Signer --> KeyManager
-    Signer --> HWWallet
+  User["User"] --> SwiftUI["SwiftUI Shell"]
+  SwiftUI --> ViewModel["BrowserViewModel"]
+  ViewModel --> WebView["WKWebView"]
+  ViewModel --> Runtime["MobileRuntimeBridge"]
+
+  Runtime --> AFM["AFMarketKit"]
+  Runtime --> Memory["OpenMindMemoryKit"]
+  Runtime --> Chain["ChainTrustKit"]
+  Runtime --> Wallet["WalletPolicyKit"]
+  Runtime --> Conversation["LLMConversationKit"]
+  Conversation --> LLM["BundledLLMKit / LLMGatewayKit"]
+  Runtime --> Automation["BrowserAutomationKit"]
+  Runtime --> Content["DecentralizedContentKit"]
+
+  AFM --> AFMarket["../AFMarket router / registry / node / pipelines"]
+  Memory --> BrIAn["../OpenMind/BrIAn MCP / OMPS"]
+  Chain --> LightClients["Bitcoin / Ethereum / Solana / Cosmos / Substrate / other light clients"]
+  LLM --> ZeroK["ZeroK / LLM Gateway"]
+  Content --> IPFS["IPFS / IPNS"]
 ```
 
-#### Substrate Client Architecture:
+The Swift app owns UI, state, approvals, and user-visible trust labels. Swift packages provide reusable capability boundaries. External projects provide service contracts, but the app should not depend on hidden Rust-only implementation paths.
 
-```mermaid
-classDiagram
-    class SubstrateClient {
-        +config: SubstrateConfig
-        +client: Client
-        +runtime: Runtime
-        
-        +connect() Result
-        +get_block(hash: Hash) Block
-        +submit_extrinsic(ext: Extrinsic) Hash
-        +subscribe_events() EventStream
-    }
-    
-    class Transaction {
-        +from: AccountId
-        +to: AccountId
-        +amount: Balance
-        +nonce: u32
-        +signature: Option~Signature~
-        
-        +sign(keypair: KeyPair)
-        +verify() bool
-        +encode() Vec~u8~
-    }
-    
-    class Wallet {
-        +keys: HashMap~String, KeyPair~
-        +default_key: Option~String~
-        
-        +create_key(name: String) KeyPair
-        +sign_transaction(tx: Transaction) Signature
-        +get_address(name: String) AccountId
-    }
-    
-    class KeyPair {
-        +key_type: KeyType
-        +public_key: PublicKey
-        +private_key: PrivateKey
-        
-        +from_seed(seed: [u8]) KeyPair
-        +sign(message: [u8]) Signature
-        +verify(message: [u8], sig: Signature) bool
-    }
-    
-    SubstrateClient --> Transaction
-    Wallet --> KeyPair
-    Transaction --> KeyPair
+## Package Architecture
+
+Create Swift packages under `swift/Packages` as capabilities move out of old Rust-only code.
+
+| Package | Responsibility | Recreates or integrates |
+| --- | --- | --- |
+| `BrowserAutomationKit` | Typed `WKWebView` request/response bridge, DOM snapshots, page actions, timeouts, redaction | Old browser automation and DOM action concepts |
+| `AgentRuntimeKit` | Copilot runs, tool calls, approvals, cancellation, ledger, credit accounting, saved workflows | Old agent-core and ai-agent runtime |
+| `LLMConversationKit` | Persistent conversations, messages, model registry, provider-neutral context ledger, model-switch events, prompt rendering | Old LLM/Copilot UX concepts, rebuilt for Swift |
+| `AFMarketKit` | AFMarket marketplace, router, registry, node install/dispatch, leases, attestation, proof, settlement models | `../AFMarket` contracts and old AFM Rust crates |
+| `OpenMindMemoryKit` | MCP client configuration, OMPS resources/tools, governed recall, step-up, memory writeback | `../OpenMind/BrIAn` OpenMind MCP packages |
+| `ChainTrustKit` | Shared chain trust registry, light-client status, fallback labels, proof result models | Old blockchain/light-client concepts |
+| `BitcoinLightClientKit` | Bitcoin SPV or compact-filter verification | Old `btc-light` concepts, implemented natively for Swift |
+| `EthereumLightClientKit` | Ethereum and EVM-family light clients, ENS proofs, wallet state proofs | Old `eth-light` concepts |
+| `SolanaLightClientKit` | Solana proof verification and finalized state checks | New Swift package |
+| `TendermintLightClientKit` | Cosmos SDK and Tendermint client verification | New Swift package |
+| `SubstrateLightClientKit` | Polkadot/Substrate verification, likely through Swift-compatible smoldot integration | Old Substrate ideas |
+| `WalletPolicyKit` | Local keys, Secure Enclave, WalletConnect, spend/signature policy, approvals | Old walletd and wallet store concepts |
+| `DecentralizedContentKit` | IPFS/IPNS resolution, content verification, gateway fallback labels, future embedded node | Old IPFS/p2p concepts |
+| `BundledLLMKit` | Local MLX model discovery, loading, inference, token accounting | Current `BundledLLM.swift` extracted into package |
+| `LLMGatewayKit` | ZeroK/LLM Gateway encrypted envelopes, token-class padding, usage tickets, provider boundary labels | ZeroK/LLM Gateway contracts |
+| `UpdateDistributionKit` | Signed update manifests, content-addressed release fetch, integrity checks | Old updater concepts |
+| `DiagnosticsKit` | Local logs, test diagnostics, user-exportable support bundles, telemetry policy | Old telemetry concepts |
+
+Package rule:
+
+- No package may silently use an RPC/gateway as the trust root if the UI says verified.
+- Mock, local, gateway, remote, and proof-verified modes must be distinct model states.
+- Every package needs unit tests and fixture coverage before UI wiring.
+
+## Current External Integrations
+
+### AFMarket
+
+AFMarket lives in `../AFMarket` and is the source of truth for runner-pack discovery, expert routing, node dispatch, attested AFM execution, and ZK settlement.
+
+Current Swift app surface:
+
+- `AFMServiceEndpointConfiguration` defaults to local router, registry, and pipelines endpoints.
+- `AFMServicesClient` checks `/health`, reads `/packs`, posts `/route`, and posts `/jobs`.
+- `MobileRuntimeBridge.runCopilot` uses AFM services when available.
+
+Target Swift package:
+
+- `AFMarketKit`.
+
+Required contracts:
+
+- Marketplace UI and pack API from `../AFMarket/afm-marketplace-starter`.
+- Runner pack schemas from `../AFMarket/afm-marketplace-starter/lib/schema.ts` and `../AFMarket/pipelines/src/types.ts`.
+- Registry schemas from `../AFMarket/registry/src/schemas.ts`.
+- Router schemas from `../AFMarket/router/src/schemas.ts`.
+- Node install API from `../AFMarket/node/src/http.rs`.
+- API contracts from `../AFMarket/docs/api-contracts.md`.
+- EVM escrow and verifier contracts from `../AFMarket/contracts`.
+- Swift attested run shape from `../AFMarket/ZKAI/ZKAI/AFMTaskRunner.swift`.
+
+Implementation plan:
+
+- Add AFMarket endpoint configuration for marketplace, registry, router, node agent, and settlement chain.
+- Add Codable models for packs, registry bundles, experts, router tasks, routes, node installs, result envelopes, proofs, and settlement metadata.
+- Add a marketplace surface for browsing and installing runner packs.
+- Install selected packs through `POST /packs/install`.
+- Route Copilot runs through AFMarket when a compatible pack is selected.
+- Reflect lease, dispatch, attestation, proof, and settlement status in Copilot activity.
+- Bind AFMarket proof and escrow status into credit metering and chain trust UI.
+
+Issue: #69.
+
+### BrIAn And OpenMind MCP
+
+BrIAn lives in `../OpenMind/BrIAn` and is the personal memory store and OpenMind control plane. dBrowser must interact with it through MCP/OMPS contracts, never by reading BrIAn storage directly.
+
+Target Swift package:
+
+- `OpenMindMemoryKit`.
+
+Required contracts:
+
+- Swift MCP client and OMPS client from `../OpenMind/BrIAn/Packages/OpenMindMCPClient`.
+- Swift MCP server and OMPS core from `../OpenMind/BrIAn/Packages/OpenMindMCPServer`.
+- MCP resources such as `mind://profile`, `mind://state`, `mind://continuity`, `mind://memories`, `mind://capabilities`, posture, grants, authorizations, and recommendations.
+- MCP tools such as `mind.search_memories`, `mind.retrieve_evidence_bundle`, `mind.add_memory`, `event.append`, `proposal.create`, `gateway.evaluate_access_intent`, and step-up grant tools.
+
+Implementation plan:
+
+- Add BrIAn/OpenMind MCP endpoint configuration for stdio and HTTP transports.
+- Negotiate capabilities before any recall or writeback.
+- Build access intents from prompt, page URL, page snapshot metadata, requested purpose, sensitivity ceiling, and output mode.
+- Evaluate access before recall through `gateway.evaluate_access_intent`.
+- Retrieve only policy-gated memory context and surface allowed, redacted, blocked, and unavailable states.
+- Require explicit user approval for memory writeback.
+- Attach run ID, tab ID, page snapshot commitment, idempotency key, source metadata, and base revision where available.
+- Reflect BrIAn posture, continuity, grants, authorizations, and step-up state in Copilot activity.
+
+Issue: #70.
+
+### ZeroK And LLM Gateway
+
+ZeroK is the privacy and proof-oriented LLM gateway path. The Swift app currently exposes `https://zerok.cloud` and `https://llmos.showntell.dev` as runtime gateway starting points.
+
+Target Swift packages:
+
+- `LLMGatewayKit`.
+- `BundledLLMKit`.
+
+Implementation plan:
+
+- Use local MLX models first when suitable.
+- Send only selected and redacted page context to a gateway.
+- Use encrypted envelopes, token-class padding, usage tickets, replay protection, and user-visible provider boundary labels.
+- Keep browser history, personal memory, and tab state local unless the user explicitly shares context.
+- Label provider exposure honestly: upstream providers may correlate decrypted prompt content and timing unless confidential inference is added.
+
+### Blockchain Light Clients
+
+The Swift runtime should not treat RPC or HTTP gateways as trust roots for chain-backed state. The app needs a shared `ChainTrustKit` registry first, then chain-specific Swift light-client packages.
+
+Shared trust states:
+
+- `unavailable`
+- `syncing`
+- `verified`
+- `proofChecked`
+- `rpcFallback`
+- `gatewayFallback`
+- `stale`
+- `failed`
+
+Each chain adapter must expose:
+
+- chain ID and network name
+- sync height or checkpoint
+- trust source
+- supported proof types
+- last verification error
+- fallback reason
+
+Required chain packages:
+
+- Bitcoin SPV or compact-filter client (#59).
+- Ethereum and EVM-family clients (#60).
+- Solana verification (#61).
+- Cosmos SDK and Tendermint clients (#62).
+- Polkadot/Substrate client (#63).
+- Avalanche verification (#64).
+- TRON light-client or proof-verified fallback (#65).
+- XRP Ledger verification (#66).
+- Sui and Aptos Move-chain clients (#67).
+
+Bitcoin note:
+
+- Bitcoin Core is a full-node client, not the embeddable Swift light client.
+- Bitcoin does not ship a single official embeddable Swift light client with Bitcoin Core.
+- A mobile Swift app should use SPV or compact-filter verification.
+- A pruned/full Bitcoin Core node can be an optional desktop/server companion, but it must not be represented as the iOS embedded runtime.
+- As of May 2026, bitcoin.org lists unpruned Bitcoin Core storage as over 750 GB and pruned storage as around 7 GB, after still downloading and validating the chain.
+
+### KeyMeIn
+
+`KeyMeIn` is not an active dependency in the current Swift app.
+
+Adopt it only if dBrowser needs production attestation-gated signing, identity-gated authorization, threshold signing, JWKS receipt verification, or an external signing policy system. The integration point should be `WalletPolicyKit` or gateway authorization, not browser rendering.
+
+## LLM Conversation And Page Automation Plan
+
+The key gap is a first-class Swift LLM surface that can hold real conversation context, switch models without losing that context, and operate the active `WKWebView` page through approved typed actions.
+
+The target UI should feel like a native desktop chat app:
+
+- Persistent conversation list.
+- Main message timeline with streamed assistant output.
+- Composer with model picker, page-context attachment, file/context attachments, and stop/regenerate controls.
+- Visible run activity for tool calls, memory access, AFMarket dispatch, chain verification, and approvals.
+- Per-message model identity and boundary labels: local MLX, ZeroK/LLM Gateway, AFMarket runner pack, or other provider.
+- Clear empty, loading, offline, provider-failed, and context-compressed states.
+
+Context continuity rule:
+
+- Conversation history is stored as a provider-neutral ledger.
+- The ledger records user messages, assistant messages, tool calls, page snapshots, memory citations, approvals, run events, model choices, and model-switch events.
+- Switching models appends an event; it does not rewrite canonical history.
+- Each model adapter renders prompts from the same canonical ledger.
+- When a target model has a smaller context window, the app creates an explicit summary artifact that remains linked to the source messages.
+- Context compression is visible in run activity and must not silently discard approvals, memory denials, wallet decisions, or page-action history.
+- Tool permissions and approval gates do not change just because the user changes models.
+
+P0 implementation sequence:
+
+1. Add `LLMConversationKit` with persistent conversations, messages, runs, model registry, and model-switch events.
+2. Add provider-neutral context ledger and adapter-specific prompt rendering.
+3. Add context-window accounting and explicit summary artifacts for smaller model windows.
+4. Add `BrowserAutomationKit` with typed tab-scoped command/results.
+5. Add DOM query extraction with strict payload caps and redaction.
+6. Add typed page actions: click, type, focus, submit, scroll, navigate, wait, stop.
+7. Add page snapshots for conversation context.
+8. Replace single-result Copilot execution with streamed `CopilotRun` state.
+9. Add cancellation and user takeover.
+10. Meter credits only when model work happens.
+
+Approval gates:
+
+- Form submit.
+- Downloads.
+- Wallet signing or spend.
+- Cross-origin navigation.
+- Destructive or purchase-like clicks.
+- Credential or password fields.
+- Memory writeback.
+- AFMarket settlement.
+
+Issues: #50 through #58 and #72.
+
+## Swift Recreation Of Rust-Only Functionality
+
+Rust-only functionality must be recreated as Swift packages and integrated with `swift/dBrowser`.
+
+| Legacy Rust/Tauri area | Swift replacement | Required integration |
+| --- | --- | --- |
+| `crates/gui` Tauri browser shell | Existing SwiftUI/WKWebView shell | Keep improving `swift/dBrowser` only |
+| `crates/agent-core`, `crates/ai-agent` | `AgentRuntimeKit` and `LLMConversationKit` | Conversations, model switching, Copilot runs, approvals, ledger, tool routing, credits |
+| `crates/ipfs`, `crates/p2p` | `DecentralizedContentKit` | IPFS/IPNS resolution and content verification |
+| `crates/blockchain`, `crates/walletd` | `WalletPolicyKit` and `ChainTrustKit` | Wallet state, signing, broadcast, proof labels |
+| `crates/btc-light`, `crates/eth-light` | chain-specific Swift light-client packages | Verified chain state in the runtime UI |
+| `crates/afm-node`, `crates/afm-zkvm` | `AFMarketKit` plus external AFMarket node contracts | Pack install, dispatch, attestation, proof, settlement |
+| `crates/updater` | `UpdateDistributionKit` | Signed/content-addressed update checks if needed |
+| Rust telemetry/security helpers | `DiagnosticsKit` and Swift app policy | Local diagnostics and privacy controls |
+| Tauri commands and TypeScript UI | SwiftUI views and Swift async clients | No Tauri command bridge in current product |
+
+Do not keep dual product paths. The Rust code can be mined for behavior, contracts, fixtures, and tests, but the deliverable is Swift package code and Swift app integration. Reference Rust modules should be named from issues when they are useful, then treated as source material rather than runtime dependencies.
+
+## Data And Trust Boundaries
+
+| Boundary | Rule |
+| --- | --- |
+| Web content to app | `WKWebView` loads only allowed URL schemes. Future automation uses audited scripts only, never arbitrary model JavaScript. |
+| Copilot to page | Typed commands, tab IDs, timeouts, redaction, approvals, and cancellation. |
+| Copilot to memory | OpenMind access intent first; approved context only; blocked memory stays visible as a notice without hidden content. |
+| Copilot to AFMarket | Pack, lease, dispatch, attestation, proof, and settlement states are visible. Mock states are labeled. |
+| App to LLM | Conversation context is provider-neutral. Local MLX first where possible. Gateway calls carry selected/redacted context only. |
+| App to chain | Light-client verified or explicitly labeled fallback. RPC fallback is transport, not trust. |
+| App to wallet | Secure Enclave, WalletConnect, or policy-backed signing; spend and signature requests require explicit approval. |
+
+## User Flows
+
+Normal browsing:
+
+1. User enters an HTTP/HTTPS address or search terms.
+2. `BrowserURLResolver` normalizes the input.
+3. `BrowserWebView` loads the URL through `WKWebView`.
+4. Navigation updates flow back into Swift tab state.
+
+Decentralized address:
+
+1. User enters IPFS, IPNS, ENS, or compatible name.
+2. Swift blocks direct WebKit loading for unsupported schemes.
+3. `MobileRuntimeBridge` resolves through current gateway fallback.
+4. Future `DecentralizedContentKit` and chain packages replace fallback with verified resolution.
+5. UI labels the trust source.
+
+LLM conversation:
+
+1. User opens the LLM surface with or without an active tab.
+2. User selects a model or keeps the current default.
+3. App stores messages and selected context in the provider-neutral ledger.
+4. App builds a page snapshot and access intent when browser context is attached.
+5. BrIAn/OpenMind gates personal memory.
+6. AFMarket routes to a runner pack when selected and available.
+7. Local MLX or gateway model executes the approved prompt.
+8. User may switch models at any point; the next turn is rendered from the same ledger.
+9. Page actions, memory writes, downloads, wallet operations, and settlement require approval.
+10. Run activity shows model, events, usage, trust state, and final output.
+
+Memory writeback:
+
+1. User explicitly asks to remember, correct, or save an event.
+2. Swift creates a write proposal with source metadata.
+3. BrIAn/OpenMind applies policy and step-up if needed.
+4. The app records success, denial, or review-required state.
+
+AFMarket task:
+
+1. User selects or accepts an AFMarket runner pack.
+2. Swift installs or verifies the pack through the configured node/market contracts.
+3. Router selects an expert or pack.
+4. Node dispatches and executes.
+5. Attestation/proof/settlement states feed back to Copilot activity and wallet UI.
+
+## Implementation Roadmap
+
+P0: Swift shell and automation
+
+- Keep `swift/dBrowser` as the only current app.
+- Add the desktop-style LLM conversation UI and model-switching context ledger.
+- Add `BrowserAutomationKit`.
+- Add page snapshots and DOM actions.
+- Add streamed Copilot runs, cancellation, approvals, and credit metering.
+- Persist history, bookmarks, workflows, and run records locally.
+
+P1: Memory, AFMarket, and local LLM
+
+- Add `OpenMindMemoryKit` for BrIAn MCP.
+- Add `AFMarketKit` for pack discovery, install, route, dispatch, proof, and settlement.
+- Extract `BundledLLMKit` and wire real MLX inference for Gemma 4 E2B IT 4-bit.
+- Add `LLMGatewayKit` for ZeroK/LLM Gateway calls.
+
+P2: Decentralized trust
+
+- Add `ChainTrustKit`.
+- Add Bitcoin, Ethereum/EVM, Solana, Cosmos/Tendermint, Substrate, Avalanche, TRON, XRPL, Sui, and Aptos adapters.
+- Replace IPFS/IPNS/ENS gateway fallback with verified Swift packages where possible.
+- Add wallet signing with Secure Enclave, WalletConnect, or explicit external signer policies.
+
+P3: Distribution and hardening
+
+- Add signed/content-addressed updates if still needed.
+- Add diagnostics export.
+- Add UI tests around high-risk approval flows.
+- Remove or archive legacy Rust/Tauri code once Swift parity is complete.
+
+## Verification
+
+Required validation for docs and Swift app changes:
+
+```sh
+git diff --check
+LC_ALL=C grep -n '[^ -~]' docs/ARCHITECTURE.md docs/README.md README.md STATUS.md STRAWBERRY_SWIFT.md || true
+xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'
+xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests
 ```
 
-## Data Flow
+Rust, pnpm, and Tauri commands are not current-product validation gates anymore. Run them only when mining or retiring legacy code.
 
-### Content Resolution Flow
+## Documentation Policy
 
-```mermaid
-flowchart TD
-    Start([User enters URL]) --> Parse{Parse URL scheme}
-    
-    Parse -->|ipfs://| IPFS[IPFS Resolution]
-    Parse -->|ipns://| IPNS[IPNS Resolution]
-    Parse -->|ens://| ENS[ENS Resolution]
-    Parse -->|http://| Bridge[Bridge Plugin]
-    
-    IPFS --> Cache{Check Cache}
-    IPNS --> ResolveName[Resolve IPNS Name]
-    ENS --> QueryENS[Query ENS Contract]
-    
-    Cache -->|Hit| Display[Display Content]
-    Cache -->|Miss| FetchIPFS[Fetch from IPFS]
-    
-    ResolveName --> FetchIPFS
-    QueryENS --> FetchIPFS
-    
-    FetchIPFS --> DHT[Query DHT for Providers]
-    DHT --> RequestBlocks[Request Blocks from Peers]
-    RequestBlocks --> Verify[Verify Block Hashes]
-    Verify --> Assemble[Assemble Content]
-    Assemble --> Display
-    
-    Bridge --> Warning[Show Centralization Warning]
-    Warning --> HTTPRequest[Make HTTP Request]
-    HTTPRequest --> Display
-```
+This file is the canonical architecture and plan. `docs/README.md` points here. Files under `docs/ai/` are supporting metadata for tools, not narrative documentation.
 
-### Transaction Flow
+When architecture changes:
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant UI
-    participant Wallet
-    participant Blockchain
-    participant Network
-    
-    User->>UI: Initiate transaction
-    UI->>Wallet: Create transaction
-    Wallet->>Wallet: Sign transaction
-    Wallet->>Blockchain: Submit transaction
-    Blockchain->>Network: Broadcast to peers
-    Network-->>Blockchain: Transaction included
-    Blockchain-->>UI: Transaction confirmed
-    UI-->>User: Show confirmation
-```
-
-## Network Architecture
-
-### Peer Discovery and Connection Management
-
-```mermaid
-graph TB
-    subgraph "Discovery Methods"
-        Bootstrap[Bootstrap Nodes]
-        mDNS[Local mDNS]
-        DHT[Kademlia DHT]
-        PeerExchange[Peer Exchange]
-    end
-    
-    subgraph "Connection Management"
-        ConnManager[Connection Manager]
-        PeerStore[Peer Store]
-        AddrBook[Address Book]
-    end
-    
-    subgraph "Protocol Handlers"
-        IdentifyHandler[Identify Handler]
-        PingHandler[Ping Handler]
-        KadHandler[Kademlia Handler]
-        BitswapHandler[Bitswap Handler]
-    end
-    
-    Bootstrap --> ConnManager
-    mDNS --> ConnManager
-    DHT --> PeerStore
-    PeerExchange --> AddrBook
-    
-    ConnManager --> IdentifyHandler
-    ConnManager --> PingHandler
-    PeerStore --> KadHandler
-    AddrBook --> BitswapHandler
-```
-
-### Network Topology
-
-```mermaid
-graph LR
-    subgraph "Local Node"
-        LocalPeer[Local Peer]
-        Protocols[Protocol Stack]
-    end
-    
-    subgraph "Direct Peers"
-        Peer1[Peer 1]
-        Peer2[Peer 2]
-        Peer3[Peer 3]
-    end
-    
-    subgraph "DHT Network"
-        DHTNode1[DHT Node 1]
-        DHTNode2[DHT Node 2]
-        DHTNode3[DHT Node 3]
-    end
-    
-    subgraph "Content Providers"
-        Provider1[Provider 1]
-        Provider2[Provider 2]
-        Provider3[Provider 3]
-    end
-    
-    LocalPeer <--> Peer1
-    LocalPeer <--> Peer2
-    LocalPeer <--> Peer3
-    
-    Peer1 <--> DHTNode1
-    Peer2 <--> DHTNode2
-    Peer3 <--> DHTNode3
-    
-    DHTNode1 <--> Provider1
-    DHTNode2 <--> Provider2
-    DHTNode3 <--> Provider3
-```
-
-## Security Model
-
-### Trust Boundaries
-
-```mermaid
-graph TB
-    subgraph "Trusted Zone"
-        LocalStorage[Local Storage]
-        PrivateKeys[Private Keys]
-        WalletCore[Wallet Core]
-    end
-    
-    subgraph "Semi-Trusted Zone"
-        VerifiedContent[Verified Content]
-        SignedTransactions[Signed Transactions]
-        PinnedContent[Pinned Content]
-    end
-    
-    subgraph "Untrusted Zone"
-        NetworkPeers[Network Peers]
-        ExternalContent[External Content]
-        BridgePlugins[Bridge Plugins]
-    end
-    
-    subgraph "Verification Layer"
-        HashVerification[Hash Verification]
-        SignatureVerification[Signature Verification]
-        ConsensusVerification[Consensus Verification]
-    end
-    
-    LocalStorage -.->|Protected| PrivateKeys
-    PrivateKeys -.->|Isolated| WalletCore
-    
-    NetworkPeers -->|Verify| HashVerification
-    ExternalContent -->|Verify| SignatureVerification
-    BridgePlugins -->|Verify| ConsensusVerification
-    
-    HashVerification --> VerifiedContent
-    SignatureVerification --> SignedTransactions
-    ConsensusVerification --> PinnedContent
-```
-
-### Cryptographic Architecture
-
-```mermaid
-classDiagram
-    class CryptoProvider {
-        <<interface>>
-        +sign(data: bytes, key: PrivateKey) Signature
-        +verify(data: bytes, sig: Signature, key: PublicKey) bool
-        +hash(data: bytes) Hash
-        +encrypt(data: bytes, key: PublicKey) bytes
-        +decrypt(data: bytes, key: PrivateKey) bytes
-    }
-    
-    class Sr25519Provider {
-        +sign(data: bytes, key: Sr25519PrivateKey) Sr25519Signature
-        +verify(data: bytes, sig: Sr25519Signature, key: Sr25519PublicKey) bool
-        +generate_keypair() (Sr25519PrivateKey, Sr25519PublicKey)
-    }
-    
-    class Ed25519Provider {
-        +sign(data: bytes, key: Ed25519PrivateKey) Ed25519Signature
-        +verify(data: bytes, sig: Ed25519Signature, key: Ed25519PublicKey) bool
-        +generate_keypair() (Ed25519PrivateKey, Ed25519PublicKey)
-    }
-    
-    class EcdsaProvider {
-        +sign(data: bytes, key: EcdsaPrivateKey) EcdsaSignature
-        +verify(data: bytes, sig: EcdsaSignature, key: EcdsaPublicKey) bool
-        +generate_keypair() (EcdsaPrivateKey, EcdsaPublicKey)
-    }
-    
-    CryptoProvider <|-- Sr25519Provider
-    CryptoProvider <|-- Ed25519Provider
-    CryptoProvider <|-- EcdsaProvider
-```
-
-## Storage Architecture
-
-### Local Storage Hierarchy
-
-```mermaid
-graph TB
-    subgraph "Application Data"
-        Config[Configuration]
-        Cache[Content Cache]
-        Bookmarks[Bookmarks]
-        History[Browse History]
-    end
-    
-    subgraph "IPFS Storage"
-        Blockstore[Block Store]
-        Datastore[Data Store]
-        Keystore[Key Store]
-        PinSet[Pin Set]
-    end
-    
-    subgraph "Blockchain Data"
-        ChainState[Chain State]
-        TxHistory[Transaction History]
-        WalletData[Wallet Data]
-        Metadata[Chain Metadata]
-    end
-    
-    subgraph "Security Storage"
-        EncryptedKeys[Encrypted Keys]
-        Certificates[Certificates]
-        TrustedPeers[Trusted Peers]
-    end
-    
-    Config --> Blockstore
-    Cache --> Datastore
-    Bookmarks --> PinSet
-    
-    ChainState --> WalletData
-    TxHistory --> Metadata
-    
-    EncryptedKeys --> Keystore
-    Certificates --> TrustedPeers
-```
-
-### Data Persistence Strategy
-
-```mermaid
-sequenceDiagram
-    participant App
-    participant StorageManager
-    participant LocalDB
-    participant IPFS
-    participant Backup
-    
-    App->>StorageManager: Store data
-    StorageManager->>LocalDB: Write to local storage
-    StorageManager->>IPFS: Pin important data
-    StorageManager->>Backup: Create backup
-    
-    Note over StorageManager: Periodic cleanup
-    StorageManager->>LocalDB: Remove old cache
-    StorageManager->>IPFS: Unpin unused content
-    
-    App->>StorageManager: Retrieve data
-    StorageManager->>LocalDB: Check local storage
-    alt Data not found locally
-        StorageManager->>IPFS: Fetch from IPFS
-        StorageManager->>LocalDB: Cache locally
-    end
-    StorageManager-->>App: Return data
-```
-
-## Component Interactions
-
-### Inter-Component Communication
-
-```mermaid
-graph LR
-    subgraph "Frontend (Tauri)"
-        WebView[WebView]
-        TauriCore[Tauri Core]
-        JSBridge[JS Bridge]
-    end
-    
-    subgraph "Backend (Rust)"
-        AppCore[Application Core]
-        Services[Service Layer]
-        Network[Network Layer]
-    end
-    
-    subgraph "Communication Channels"
-        IPC[IPC Messages]
-        Events[Event System]
-        Commands[Command Interface]
-    end
-    
-    WebView <--> JSBridge
-    JSBridge <--> TauriCore
-    TauriCore <--> IPC
-    
-    IPC <--> AppCore
-    AppCore <--> Services
-    Services <--> Network
-    
-    Events --> WebView
-    Commands --> Services
-```
-
-### Event Flow Architecture
-
-```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    
-    Idle --> Processing: User Action
-    Processing --> NetworkRequest: Content Request
-    Processing --> WalletOperation: Transaction Request
-    Processing --> ConfigUpdate: Settings Change
-    
-    NetworkRequest --> PeerDiscovery: Find Providers
-    NetworkRequest --> ContentFetch: Fetch Content
-    NetworkRequest --> ContentVerify: Verify Content
-    
-    WalletOperation --> KeyManagement: Access Keys
-    WalletOperation --> TransactionSign: Sign Transaction
-    WalletOperation --> TransactionBroadcast: Broadcast Transaction
-    
-    ConfigUpdate --> StorageUpdate: Update Storage
-    ConfigUpdate --> UIUpdate: Update Interface
-    
-    ContentVerify --> Success: Valid Content
-    ContentVerify --> Error: Invalid Content
-    
-    TransactionBroadcast --> Success: Transaction Sent
-    TransactionBroadcast --> Error: Transaction Failed
-    
-    Success --> Idle
-    Error --> Idle
-    StorageUpdate --> Idle
-    UIUpdate --> Idle
-```
-
-## Design Decisions
-
-### 1. Modular Architecture
-- **Rationale**: Enables independent development and testing of components
-- **Trade-offs**: Increased complexity vs. maintainability
-- **Implementation**: Rust workspace with separate crates
-
-### 2. libp2p for Networking
-- **Rationale**: Mature, well-tested P2P networking stack
-- **Benefits**: Multi-transport, security, protocol extensibility
-- **Challenges**: Learning curve, dependency management
-
-### 3. Tauri for UI
-- **Rationale**: Native performance with web technologies
-- **Benefits**: Cross-platform, security, small bundle size
-- **Trade-offs**: Limited to desktop platforms initially
-
-### 4. Embedded Light Clients
-- **Rationale**: Eliminates dependency on external RPC providers
-- **Benefits**: True decentralization, privacy, reliability
-- **Challenges**: Resource usage, sync time, complexity
-
-## Performance Considerations
-
-### Resource Management
-
-```mermaid
-pie title Resource Allocation
-    "Network I/O" : 35
-    "Content Processing" : 25
-    "UI Rendering" : 20
-    "Blockchain Sync" : 15
-    "Storage Operations" : 5
-```
-
-### Optimization Strategies
-
-1. **Lazy Loading**: Load components only when needed
-2. **Content Caching**: Aggressive caching of frequently accessed content
-3. **Peer Selection**: Optimize peer selection for performance
-4. **Background Processing**: Move heavy operations to background threads
-5. **Memory Management**: Efficient memory usage with Rust's ownership model
-
-## Future Architecture Considerations
-
-### Scalability Improvements
-- Mobile platform support
-- WebAssembly plugins
-- Advanced caching strategies
-- Distributed computation
-
-### Security Enhancements
-- Hardware security module integration
-- Zero-knowledge proof verification
-- Advanced privacy features
-- Formal verification of critical components
-
-This architecture provides a solid foundation for a truly decentralized browser while maintaining performance, security, and user experience standards.
+- Update this file first.
+- Update linked GitHub issues when scope changes.
+- Do not add parallel narrative docs.
+- If a detail only applies to legacy Rust/Tauri code, label it as legacy or omit it.

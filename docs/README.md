@@ -1,29 +1,16 @@
-# Browser Project Documentation
+# dBrowser Documentation
 
-This directory contains comprehensive documentation for the Decentralized Web Browser project.
+The current documentation source of truth is:
 
-## Documentation Structure
+- [Current Architecture And Plan](ARCHITECTURE.md)
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed system architecture and design decisions
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development setup, workflows, and contribution guidelines
-- **[USER_GUIDE.md](USER_GUIDE.md)** - End-user documentation and usage instructions
-- **[API.md](API.md)** - API documentation and code-level references
-- **[KEYMEIN.md](KEYMEIN.md)** - Research note on current `KeyMeIn` usage and adoption guidance
+dBrowser has transitioned to Swift completely. Older Rust/Tauri documentation has been consolidated into the canonical architecture only where it still describes behavior, contracts, fixtures, or tests that must be recreated as Swift packages.
 
-## Quick Navigation
+The current LLM product target is a native desktop conversation surface with persistent context and mid-conversation model switching.
 
-### For Developers
-- [Getting Started](DEVELOPMENT.md#getting-started)
-- [Architecture Overview](ARCHITECTURE.md#overview)
-- [API Reference](API.md)
+Supporting metadata:
 
-### For Users
-- [Installation Guide](USER_GUIDE.md#installation)
-- [Basic Usage](USER_GUIDE.md#basic-usage)
-- [Configuration](USER_GUIDE.md#configuration)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- `docs/ai/dev_commands.yaml`
+- `docs/ai/system_map.yaml`
 
-### For Contributors
-- [Development Setup](DEVELOPMENT.md#development-setup)
-- [Code Standards](DEVELOPMENT.md#code-standards)
-- [Testing Guidelines](DEVELOPMENT.md#testing)
+Do not add new parallel narrative docs under `docs/`. Update `ARCHITECTURE.md` instead.

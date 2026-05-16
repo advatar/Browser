@@ -1,38 +1,19 @@
-version: 1
+version: 2
 
 commands:
-  - name: deps
-    description: Install workspace dependencies needed for local development.
-    cmd: make deps
+  - name: markdown_hygiene
+    description: Check the current documentation set for whitespace and non-ASCII drift.
+    cmd: git diff --check -- README.md STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md docs/README.md docs/ai/system_map.yaml docs/ai/dev_commands.yaml && LC_ALL=C grep -n '[^ -~]' README.md STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md docs/README.md docs/ai/system_map.yaml docs/ai/dev_commands.yaml || true
 
-  - name: lint_product_strict
-    description: Run strict lint gate for production crates used by CI.
-    cmd: cargo clippy -p gui -p blockchain -p ai-agent -p updater -p agent-core --all-targets
+  - name: build_swift_app
+    description: Build the current Swift dBrowser app.
+    cmd: xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'
 
-  - name: test_rust_gui
-    description: Run Rust unit + integration tests for the Tauri GUI crate.
-    cmd: cargo test -p gui
+  - name: test_swift_unit
+    description: Run the focused Swift unit-test lane used for architecture and runtime model changes.
+    cmd: xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests
 
-  - name: test_runtime_frontend
-    description: Run runtime frontend unit tests (native webview command path checks).
-    cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run test
-
-  - name: build_frontend_gui
-    description: Install and build the runtime GUI frontend (Vite).
-    cmd: npm --prefix orbit-shell-ui ci && npm --prefix orbit-shell-ui run build
-
-  - name: build_legacy_frontend_placeholder
-    description: Build the deprecated placeholder frontend in crates/gui (sanity only).
-    cmd: npm --prefix crates/gui run build
-
-  - name: build_gui_release
-    description: Build the Tauri GUI in release mode (bundles all default artifacts).
-    cmd: make build
-
-  - name: package_macos_dmg
-    description: Build and export a macOS DMG into dist/ (developer mode).
-    cmd: make dmg
-
-  - name: package_macos_dmg_prod
-    description: Build DMG with strict signature and notarization validation.
-    cmd: make dmg-prod
+  - name: inspect_rust_reference
+    description: Read legacy Rust/Tauri behavior only when reimplementing a capability as Swift packages.
+    cmd: rg -n 'TODO|Copilot|agent|wallet|ipfs|light|AFM|LLM' crates orbit-shell-ui services
+    current_product_gate: false

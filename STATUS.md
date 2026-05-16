@@ -19,13 +19,31 @@
 
 ## Active Task
 
+## Documentation Consolidation Plan
+
+- [x] Inventory existing `./docs` narrative files and supporting metadata.
+- [x] Create a GitHub issue for consolidating docs into one current architecture and plan (#71).
+- [x] Create a GitHub issue for Swift LLM desktop UI and context-preserving model switching (#72).
+- [x] Read the current docs and identify the architecture, integrations, and implementation roadmap to preserve.
+- [x] Consolidate narrative docs into one canonical current architecture and plan.
+- [x] Verify Markdown hygiene and local build/test requirements.
+- [x] Commit and push only the scoped documentation/status updates.
+
 ## Swift BrIAn Personal Memory Integration Plan
 
 - [x] Inspect `../OpenMind/BrIAn` README, OpenMind MCP client/server, OMPS routes, and control-plane notes.
 - [x] Create a GitHub issue for integrating Swift Strawberry equivalence with BrIAn/OpenMind MCP (#70).
-- [ ] Update the Swift Strawberry plan with BrIAn personal-memory integration requirements.
-- [ ] Verify the documentation-only change locally.
-- [ ] Commit and push only the scoped status and plan updates.
+- [x] Update the Swift Strawberry plan with BrIAn personal-memory integration requirements.
+- [x] Verify the documentation-only change locally.
+- [x] Commit and push only the scoped status and plan updates.
+
+Validation notes:
+
+- `git diff --check -- README.md STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md docs/README.md docs/ai/system_map.yaml docs/ai/dev_commands.yaml` passed.
+- `LC_ALL=C grep -n '[^ -~]' README.md STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md docs/README.md docs/ai/system_map.yaml docs/ai/dev_commands.yaml || true` produced no non-ASCII matches.
+- `ruby -e "require 'yaml'; ARGV.each { |f| YAML.load_file(f); puts f }" docs/ai/system_map.yaml docs/ai/dev_commands.yaml` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
 
 ## Swift AFMarket Integration Plan
 

@@ -2,12 +2,16 @@
 
 This is the Swift-app version of `STRAWBERRY.md`. It targets the native app under `swift/dBrowser` instead of the Rust/Tauri runtime.
 
+The Rust code remains useful reference material for behavior, contracts, fixtures, and tests. It is not a supported runtime path. Anything still implemented only in Rust must be recreated as Swift packages and wired into the Swift app.
+
 ## Goal
 
 Close the Strawberry-equivalence gaps in the Swift app:
 
 - Copilot can read the real active page.
 - Copilot can click, type, scroll, navigate, and wait in the real `WKWebView`.
+- The LLM surface feels like a native desktop chat app, with persistent conversations and streamed responses.
+- Users can switch the active LLM at any point while preserving conversation context.
 - Important actions remain approval-gated.
 - Users see live run activity and can stop/take over.
 - AI credit usage is metered only when model work happens.
@@ -26,7 +30,7 @@ The Swift app already has the right shell, but not the automation primitives:
 - `swift/dBrowser/dBrowser/ContentView.swift` renders the Copilot panel as one prompt/result flow.
 - `swift/dBrowser/dBrowserTests/dBrowserTests.swift` already covers URL resolution, runtime features, AFM services, history, bookmarks, and autocomplete.
 
-The missing pieces are a typed `WKWebView` request/response bridge, real DOM extraction/actions, streaming run state, persistent workflow/history storage, and chain verification beyond gateway/RPC fallback.
+The missing pieces are a desktop-style LLM conversation surface, model registry, context-preserving model switching, typed `WKWebView` request/response bridge, real DOM extraction/actions, streaming run state, persistent workflow/history storage, and chain verification beyond gateway/RPC fallback.
 
 ## GitHub Issue Map
 
@@ -46,6 +50,14 @@ AFMarket integration:
 
 - #69 - Integrate `../AFMarket` runner packs, routing, node dispatch, attested AFM execution, and ZK settlement.
 
+Personal memory integration:
+
+- #70 - Integrate `../OpenMind/BrIAn` personal memory over OpenMind MCP and OMPS.
+
+LLM conversation integration:
+
+- #72 - Build Swift LLM chat UI with model switching and context continuity.
+
 Chain trust and light-client issues:
 
 - #68 - Add a shared light-client registry and trust-state UI.
@@ -60,6 +72,27 @@ Chain trust and light-client issues:
 - #67 - Integrate Move-chain light clients for Sui and Aptos.
 
 ## P0 Step Sequence
+
+### Step 0 - Build the LLM Conversation Surface (#72)
+
+Replace the single prompt/result Copilot panel with a native desktop conversation model:
+
+- Add persistent conversations, messages, runs, model selections, and run events.
+- Add a model registry for local MLX models, ZeroK/LLM Gateway providers, AFMarket runner packs, and future adapters.
+- Store the conversation as a provider-neutral ledger.
+- Render provider-specific prompts from that ledger without mutating canonical history.
+- Track model changes as explicit conversation events.
+- Preserve context when switching models.
+- Add explicit summary artifacts when a new model has a smaller context window.
+- Show per-message model identity, local/gateway/AFMarket boundary, usage, and trust state.
+- Keep page actions, memory writes, wallet actions, downloads, and settlement behind the same approval gates regardless of model.
+
+Definition of done:
+
+- Users can continue the same conversation after switching models.
+- The UI shows which model produced each assistant response.
+- Context compression is visible and linked to source messages.
+- Tests cover model-switch events, prompt rendering, context continuity, and smaller-context fallback.
 
 ### Step 1 - Build a `WKWebView` Automation Bridge (#50)
 
@@ -212,6 +245,44 @@ Extend history beyond URL/title:
 - Add controls to clear summaries and exclude pages/domains.
 
 Smart History must stay local by default. Remote services only receive selected, user-approved context.
+
+## BrIAn Personal Memory Track (#70)
+
+`../OpenMind/BrIAn` is the personal memory store and OpenMind control plane. The Swift app should interact with it through MCP/OMPS contracts, not by reading or mutating BrIAn storage directly.
+
+BrIAn/OpenMind surfaces to integrate:
+
+- Project overview and control-plane contract: `../OpenMind/BrIAn/README.md`.
+- Swift MCP client: `../OpenMind/BrIAn/Packages/OpenMindMCPClient`.
+- Swift MCP server and OMPS core: `../OpenMind/BrIAn/Packages/OpenMindMCPServer`.
+- High-level OMPS client calls: `../OpenMind/BrIAn/Packages/OpenMindMCPClient/Sources/OpenMindMCPClient/OMPSClient.swift`.
+- Server resource and tool dispatch: `../OpenMind/BrIAn/Packages/OpenMindMCPServer/Sources/OpenMindMCPServer/OMPSMCPServerCore.swift`.
+- Control-plane UX and posture notes: `../OpenMind/BrIAn/BrIAn/CONTROL_PLANE.md`.
+
+Swift implementation requirements:
+
+- Extend runtime configuration with a BrIAn/OpenMind MCP endpoint, transport type, client identity, and availability state.
+- Support stdio and HTTP MCP transports first; leave in-process embedding as an optional local/development mode.
+- Add typed Swift request/response models around the OMPS operations dBrowser uses instead of leaking raw JSON into Copilot UI state.
+- Negotiate capabilities before use through MCP initialization and `mind://capabilities`/tool listing.
+- Build Copilot access intents from user prompt, active tab URL, page snapshot metadata, requested purpose, sensitivity ceiling, and allowed output mode.
+- Evaluate access through OpenMind before recall or writeback with `gateway.evaluate_access_intent`; request step-up grants when required.
+- Retrieve personal context only through governed calls such as `mind.retrieve_evidence_bundle`, scoped `mind.search_memories`, `mind://memories`, and knowledge context-pack resources.
+- Include only approved context in model prompts, and surface redacted or blocked-memory notices in Copilot activity.
+- Add explicit user-approved memory writeback for `mind.add_memory`, `event.append`, `proposal.create`, and recommendation outcome tools.
+- Attach provenance to writeback: run ID, tab ID, page snapshot commitment when available, idempotency key, source metadata, and base revision when supplied.
+- Reflect BrIAn posture, continuity, peer grant, authorization, and step-up state in Copilot run activity and approval history.
+- Keep local/offline/mock memory modes explicitly labeled; never represent mock recall, mock consent, or fixture memory as governed production memory.
+
+Definition of done:
+
+- dBrowser can connect to a configured BrIAn/OpenMind MCP endpoint and show negotiated capability state.
+- Copilot can request policy-gated personal memory context and continue safely when memory is unavailable, denied, or step-up-gated.
+- Copilot activity shows allowed, redacted, blocked, and unavailable memory states without exposing hidden content.
+- Memory writeback is never automatic; it requires explicit user approval and records provenance.
+- Step-up requests can be surfaced and resolved from the dBrowser flow.
+- Unit tests cover OMPS client models against BrIAn fixture payloads.
+- Service tests mock MCP transports for success, denial, step-up-required, blocked-memory, stale revision, and unavailable-server cases.
 
 ## AFMarket Integration Track (#69)
 
