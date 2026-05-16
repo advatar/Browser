@@ -19,6 +19,14 @@
 
 ## Active Task
 
+## iOS Runtime Bridges
+
+- [x] Add a Swift runtime bridge contract for decentralized protocols, Copilot, wallet, and downloads.
+- [x] Wire browser navigation and runtime status to the bridge.
+- [x] Add focused bridge unit tests.
+- [x] Run local Swift/Xcode validation.
+- [x] Commit only files touched for this bridge work.
+
 ## iOS Xcode Integration
 
 - [x] Inspect the new `swift/dBrowser` Xcode project structure.

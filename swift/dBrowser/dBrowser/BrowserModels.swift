@@ -128,10 +128,10 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         switch self {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
-        case .decentralizedProtocols: "Desktop runtime required"
-        case .copilot: "Desktop runtime required"
-        case .wallet: "Desktop runtime required"
-        case .downloads: "Planned iOS implementation"
+        case .decentralizedProtocols: "Gateway bridge"
+        case .copilot: "Local command bridge"
+        case .wallet: "Local policy bridge"
+        case .downloads: "Native URLSession"
         }
     }
 
@@ -147,12 +147,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     }
 
     var isAvailableOnMobile: Bool {
-        switch self {
-        case .webBrowsing, .tabs:
-            true
-        case .decentralizedProtocols, .copilot, .wallet, .downloads:
-            false
-        }
+        true
     }
 }
 
@@ -183,7 +178,7 @@ enum BrowserURLResolver {
             case "ipfs", "ipns", "ens":
                 return .unsupported(
                     raw: input,
-                    message: "The desktop runtime resolves \(scheme):// addresses through the embedded protocol stack. The iOS shell is ready for that bridge, but it does not start the Rust node yet."
+                    message: "The iOS runtime bridge could not resolve this \(scheme):// address."
                 )
             default:
                 return .unsupported(
@@ -191,6 +186,13 @@ enum BrowserURLResolver {
                     message: "The iOS shell blocks unsupported URL schemes until a native handler is registered."
                 )
             }
+        }
+
+        if looksLikeDecentralizedName(input) {
+            return .unsupported(
+                raw: input,
+                message: "The iOS runtime bridge could not resolve this decentralized name."
+            )
         }
 
         if looksLikeHost(input), let url = URL(string: "https://\(input)") {
@@ -204,6 +206,13 @@ enum BrowserURLResolver {
         guard !input.contains(" ") else { return false }
         guard input.contains(".") || input.caseInsensitiveCompare("localhost") == .orderedSame else { return false }
         return true
+    }
+
+    private static func looksLikeDecentralizedName(_ input: String) -> Bool {
+        let lowercased = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowercased.contains(" ") else { return false }
+        let name = lowercased.split(separator: "/").first.map(String.init) ?? lowercased
+        return [".eth", ".crypto", ".blockchain"].contains { name.hasSuffix($0) }
     }
 
     private static func searchURL(for query: String) -> URL {

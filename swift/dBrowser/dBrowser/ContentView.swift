@@ -29,6 +29,9 @@ struct ContentView: View {
         BrowserRootLayout(browser: browser) {
             browserWorkspace
         }
+        .task {
+            await browser.refreshRuntimeBridgeStatus()
+        }
     }
 
     private var browserWorkspace: some View {
@@ -168,12 +171,19 @@ struct ContentView: View {
                 .lineLimit(1)
             Spacer()
             Text("\(browser.tabs.count) tab\(browser.tabs.count == 1 ? "" : "s")")
-            Text("\(browser.unavailableFeatureCount) desktop bridges pending")
+            Text(runtimeBridgeStatusText)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+    }
+
+    private var runtimeBridgeStatusText: String {
+        if browser.unavailableFeatureCount == 0 {
+            return "runtime bridges ready"
+        }
+        return "\(browser.unavailableFeatureCount) bridge\(browser.unavailableFeatureCount == 1 ? "" : "s") offline"
     }
 }
 
@@ -220,7 +230,7 @@ private struct BrowserHomeView: View {
                     }
                 }
 
-                RuntimeFeatureGrid(features: browser.runtimeFeatures)
+                RuntimeFeatureGrid(features: browser.runtimeFeatureStates)
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
@@ -244,21 +254,24 @@ private struct QuickActionButton: View {
 }
 
 private struct RuntimeFeatureGrid: View {
-    let features: [MobileRuntimeFeature]
+    let features: [RuntimeFeatureState]
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-            ForEach(features) { feature in
+            ForEach(features) { state in
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: feature.systemImage)
+                    Image(systemName: state.feature.systemImage)
                         .frame(width: 24)
-                        .foregroundStyle(feature.isAvailableOnMobile ? Color.accentColor : Color.secondary)
+                        .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(feature.title)
+                        Text(state.feature.title)
                             .font(.headline)
-                        Text(feature.status)
+                        Text(state.status)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        Text(state.mode.title)
+                            .font(.caption)
+                            .foregroundStyle(state.isAvailable ? Color.accentColor : Color.secondary)
                     }
                     Spacer()
                 }
@@ -276,7 +289,7 @@ private struct RuntimeNoticeView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Desktop runtime bridge required", systemImage: "server.rack")
+            Label("Runtime bridge", systemImage: "server.rack")
                 .font(.title2.bold())
             Text(urlString)
                 .font(.callout.monospaced())

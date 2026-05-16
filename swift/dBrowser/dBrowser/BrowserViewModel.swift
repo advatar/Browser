@@ -13,11 +13,18 @@ final class BrowserViewModel: ObservableObject {
         BrowserBookmark(title: "DuckDuckGo", urlString: "https://duckduckgo.com")
     ]
     @Published var webCommand: BrowserWebCommandRequest?
+    @Published var runtimeFeatureStates: [RuntimeFeatureState]
 
-    let runtimeFeatures = MobileRuntimeFeature.allCases
+    let runtimeBridge: MobileRuntimeBridge
 
-    init(initialURL: String = "about:home") {
+    convenience init(initialURL: String = "about:home") {
+        self.init(initialURL: initialURL, runtimeBridge: MobileRuntimeBridge())
+    }
+
+    init(initialURL: String, runtimeBridge: MobileRuntimeBridge) {
         let tab = BrowserTab(urlString: initialURL)
+        self.runtimeBridge = runtimeBridge
+        self.runtimeFeatureStates = runtimeBridge.featureStates
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
@@ -41,7 +48,7 @@ final class BrowserViewModel: ObservableObject {
     }
 
     var unavailableFeatureCount: Int {
-        runtimeFeatures.filter { !$0.isAvailableOnMobile }.count
+        runtimeFeatureStates.filter { !$0.isAvailable }.count
     }
 
     func activateTab(_ id: UUID) {
@@ -95,14 +102,12 @@ final class BrowserViewModel: ObservableObject {
             addressText = url.absoluteString
             recordHistory(title: title, urlString: url.absoluteString)
         case .unsupported(let raw, let message):
-            tabs[index].title = "Mobile runtime"
-            tabs[index].urlString = raw
-            tabs[index].mobileNotice = message
-            tabs[index].isLoading = false
-            tabs[index].canGoBack = false
-            tabs[index].canGoForward = false
-            addressText = raw
+            resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id)
         }
+    }
+
+    func refreshRuntimeBridgeStatus() async {
+        runtimeFeatureStates = await runtimeBridge.refreshStatus()
     }
 
     func openBookmark(_ bookmark: BrowserBookmark) {
@@ -155,6 +160,52 @@ final class BrowserViewModel: ObservableObject {
     private func issueCommand(_ command: BrowserWebCommand) {
         guard let tab = activeTab else { return }
         webCommand = BrowserWebCommandRequest(tabID: tab.id, command: command)
+    }
+
+    private func resolveThroughRuntimeBridge(raw: String, fallbackMessage: String, tabID: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        tabs[index].title = "Runtime bridge"
+        tabs[index].urlString = raw
+        tabs[index].mobileNotice = "Resolving through the iOS runtime bridge."
+        tabs[index].isLoading = true
+        tabs[index].canGoBack = false
+        tabs[index].canGoForward = false
+        addressText = raw
+
+        Task { @MainActor in
+            let resolution = await runtimeBridge.resolve(raw)
+            applyRuntimeResolution(resolution, tabID: tabID, fallbackMessage: fallbackMessage)
+        }
+    }
+
+    private func applyRuntimeResolution(
+        _ resolution: RuntimeBridgeResolution,
+        tabID: UUID,
+        fallbackMessage: String
+    ) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        guard let resolvedURLString = resolution.resolvedURLString, let url = URL(string: resolvedURLString) else {
+            tabs[index].title = "Mobile runtime"
+            tabs[index].urlString = resolution.originalInput
+            tabs[index].mobileNotice = resolution.message ?? fallbackMessage
+            tabs[index].isLoading = false
+            tabs[index].canGoBack = false
+            tabs[index].canGoForward = false
+            if tabID == activeTabID {
+                addressText = resolution.originalInput
+            }
+            return
+        }
+
+        let title = titleForURL(url)
+        tabs[index].title = title
+        tabs[index].urlString = resolvedURLString
+        tabs[index].mobileNotice = nil
+        tabs[index].isLoading = true
+        if tabID == activeTabID {
+            addressText = resolvedURLString
+        }
+        recordHistory(title: title, urlString: resolvedURLString)
     }
 
     private func recordHistory(title: String, urlString: String) {
