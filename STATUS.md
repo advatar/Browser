@@ -19,6 +19,19 @@
 
 ## Active Task
 
+## Swift Wallet And Blockchain Explorer Parity
+
+- [x] Triage missing Swift blockchain explorer and wallet parity from #102.
+- [x] Create tracker issue for Swift wallet/explorer parity (#102).
+- [ ] Add Swift wallet/explorer models for networks, accounts, balances, transfer previews, receipts, and explorer targets.
+- [ ] Seed explorer and wallet network coverage for Bitcoin, Ethereum/EVM/L2s, Solana, Cosmos/Tendermint, Substrate/Polkadot, Avalanche, TRON, XRP Ledger, Sui, and Aptos.
+- [ ] Extend the runtime bridge with portfolio state, network switching, preview, approval-gated signing receipts, and broadcast-unavailable labeling.
+- [ ] Add a Swift runtime wallet/explorer panel with chain trust labels and explorer links.
+- [ ] Add focused Swift unit tests for wallet/explorer behavior and trust labeling.
+- [ ] Verify Swift tests and macOS build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issue #102.
+
 ## Swift Recents Navigation Bug
 
 - [x] Triage recents/history navigation report from #101.
