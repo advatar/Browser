@@ -36,19 +36,22 @@ struct RuntimeBridgeConfiguration: Equatable {
     var remoteRuntimeBaseURL: URL?
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
+    var llmRouter: LLMRouterEndpointConfiguration
 
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
-        openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled
+        openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
+        llmRouter: LLMRouterEndpointConfiguration = .local
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
+        self.llmRouter = llmRouter
     }
 }
 
@@ -75,6 +78,7 @@ struct CopilotRunRequest: Equatable {
     var preferredAFMPackID: String?
     var preferredModelID: String?
     var conversationID: UUID?
+    var runID: UUID?
     var renderedConversationContext: LLMRenderedConversationContext?
     var memoryRecall: OpenMindMemoryRecallResult?
 
@@ -85,6 +89,7 @@ struct CopilotRunRequest: Equatable {
         preferredAFMPackID: String? = nil,
         preferredModelID: String? = nil,
         conversationID: UUID? = nil,
+        runID: UUID? = nil,
         renderedConversationContext: LLMRenderedConversationContext? = nil,
         memoryRecall: OpenMindMemoryRecallResult? = nil
     ) {
@@ -94,6 +99,7 @@ struct CopilotRunRequest: Equatable {
         self.preferredAFMPackID = preferredAFMPackID
         self.preferredModelID = preferredModelID
         self.conversationID = conversationID
+        self.runID = runID
         self.renderedConversationContext = renderedConversationContext
         self.memoryRecall = memoryRecall
     }
@@ -108,6 +114,8 @@ struct CopilotRunResult: Equatable, Identifiable {
     let mode: RuntimeBridgeMode
     let afmInstall: AFMNodeInstallResult?
     let afmNodeTask: AFMNodeTaskResult?
+    let llmRouterResponse: LLMRouterCompletionResponse?
+    let usageProviderKey: String?
 
     init(
         id: UUID = UUID(),
@@ -117,7 +125,9 @@ struct CopilotRunResult: Equatable, Identifiable {
         ranAt: Date = Date(),
         mode: RuntimeBridgeMode,
         afmInstall: AFMNodeInstallResult? = nil,
-        afmNodeTask: AFMNodeTaskResult? = nil
+        afmNodeTask: AFMNodeTaskResult? = nil,
+        llmRouterResponse: LLMRouterCompletionResponse? = nil,
+        usageProviderKey: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -127,6 +137,8 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.mode = mode
         self.afmInstall = afmInstall
         self.afmNodeTask = afmNodeTask
+        self.llmRouterResponse = llmRouterResponse
+        self.usageProviderKey = usageProviderKey
     }
 }
 
@@ -222,7 +234,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
     private let configuration: RuntimeBridgeConfiguration
     private let afmServicesClient: AFMServicesClient
+    private let llmRouterServiceClient: LLMRouterServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
+    @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -230,16 +244,32 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.init(configuration: RuntimeBridgeConfiguration())
     }
 
-    init(configuration: RuntimeBridgeConfiguration, afmServicesClient: AFMServicesClient? = nil) {
+    init(
+        configuration: RuntimeBridgeConfiguration,
+        afmServicesClient: AFMServicesClient? = nil,
+        llmRouterServiceClient: LLMRouterServiceClient? = nil
+    ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
-        self.featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: .unknown)
+        self.llmRouterServiceClient = llmRouterServiceClient ?? LLMRouterServiceClient(configuration: configuration.llmRouter)
+        self.featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            afmSnapshot: .unknown,
+            llmRouterSnapshot: .unknown
+        )
         self.walletInfo = .disconnected
     }
 
     func refreshStatus() async -> [RuntimeFeatureState] {
-        afmServiceSnapshot = await afmServicesClient.snapshot()
-        featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: afmServiceSnapshot)
+        async let afmSnapshot = afmServicesClient.snapshot()
+        async let llmRouterSnapshot = llmRouterServiceClient.snapshot()
+        afmServiceSnapshot = await afmSnapshot
+        llmRouterServiceSnapshot = await llmRouterSnapshot
+        featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot
+        )
         return featureStates
     }
 
@@ -314,11 +344,67 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             recall.memories.isEmpty ? " No governed memory context was approved." : " OpenMind approved \(recall.memories.count) governed memory item\(recall.memories.count == 1 ? "" : "s")."
         } ?? ""
         let snapshotCommitment = OpenMindMemoryClient.snapshotCommitment(for: request.pageSnapshot)
+        var llmRouterFailureMessage: String?
+
+        if request.preferredModelID == LLMModelRegistry.llmRouterAppleFoundationID {
+            do {
+                let routerSnapshot = await llmRouterServiceClient.snapshot()
+                llmRouterServiceSnapshot = routerSnapshot
+                featureStates = Self.makeFeatureStates(
+                    configuration: configuration,
+                    afmSnapshot: afmServiceSnapshot,
+                    llmRouterSnapshot: routerSnapshot
+                )
+                guard routerSnapshot.isModelAvailable(provider: .appleFoundation) else {
+                    throw LLMRouterServiceClientError.invalidResponse
+                }
+
+                let completionRequest = llmRouterServiceClient.completionRequest(
+                    prompt: task,
+                    conversationID: request.conversationID,
+                    runID: request.runID,
+                    preferredModelID: request.preferredModelID,
+                    pageURLString: target,
+                    renderedContext: request.renderedConversationContext,
+                    memoryRecall: request.memoryRecall
+                )
+                let response = try await llmRouterServiceClient.complete(completionRequest)
+                var suggestions = [
+                    "LLM router completed with \(response.provider.rawValue) for \(page).",
+                    "Router policy stayed local-first with no-egress enabled.",
+                    request.renderedConversationContext == nil ? "Router received the current prompt without rendered conversation context." : "Router received rendered conversation context with \(request.renderedConversationContext?.estimatedPromptTokens ?? 0) estimated prompt tokens.",
+                    memoryIDs.isEmpty ? "No governed memory IDs were sent to the router." : "Router received approved memory IDs: \(memoryIDs.joined(separator: ", "))."
+                ]
+                if let usage = response.usage {
+                    suggestions.append("Router usage: \(usage.promptTokens ?? 0) prompt, \(usage.completionTokens ?? 0) completion, \(usage.totalTokens ?? 0) total tokens.")
+                }
+                if response.toolCalls.isEmpty {
+                    suggestions.append("Router proposed no tool calls.")
+                } else {
+                    suggestions.append("Router proposed \(response.toolCalls.count) tool call\(response.toolCalls.count == 1 ? "" : "s") for approval review.")
+                    suggestions.append(contentsOf: response.toolCalls.map { "Proposed tool \($0.name) remains approval-gated." })
+                }
+                return CopilotRunResult(
+                    title: "LLM Router Copilot",
+                    summary: response.text,
+                    suggestions: suggestions,
+                    mode: .service,
+                    llmRouterResponse: response,
+                    usageProviderKey: "llm_router"
+                )
+            } catch {
+                llmRouterFailureMessage = "LLM router unavailable for selected model: \(error.localizedDescription)."
+            }
+        }
 
         do {
             let snapshot = await afmServicesClient.snapshot()
             afmServiceSnapshot = snapshot
-            featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: snapshot)
+            featureStates = Self.makeFeatureStates(
+                configuration: configuration,
+                afmSnapshot: snapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot
+            )
 
             let route = try await afmServicesClient.route(
                 skill: "summarize",
@@ -361,6 +447,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 request.preferredAFMPackID.map { "Copilot requested runner pack \($0)." } ?? "Router chose the runner pack.",
                 "Pipelines accepted job \(job.id) with status \(job.status)."
             ]
+            if let llmRouterFailureMessage {
+                suggestions.insert(llmRouterFailureMessage, at: 0)
+            }
             if let routeRequest = route.request {
                 suggestions.append("Route \(route.contract) used chain \(routeRequest.chainRef), reward \(routeRequest.reward) \(routeRequest.rewardToken), SLA \(routeRequest.sla.maxLatencyMS.map { "\($0) ms" } ?? "default").")
             }
@@ -414,18 +503,23 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 afmNodeTask: nodeTaskResult
             )
         } catch {
-            featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: afmServiceSnapshot)
+            featureStates = Self.makeFeatureStates(
+                configuration: configuration,
+                afmSnapshot: afmServiceSnapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot
+            )
         }
 
         return CopilotRunResult(
             title: "Local Copilot bridge",
             summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(conversationContext)\(memoryContext)",
             suggestions: [
+                llmRouterFailureMessage,
                 request.renderedConversationContext == nil ? "Attach page text from WKWebView before model execution." : "Use the rendered conversation ledger as local model context.",
                 request.memoryRecall?.decision.status == .allowed ? "Use only the approved OpenMind memory context." : "Continue without personal memory unless OpenMind grants access.",
                 "Send the prepared run to the desktop or cloud runtime when configured.",
                 "Keep wallet and download actions behind explicit approval."
-            ],
+            ].compactMap { $0 },
             mode: .local
         )
     }
@@ -515,9 +609,23 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
     private static func makeFeatureStates(
         configuration: RuntimeBridgeConfiguration,
-        afmSnapshot: AFMServiceSnapshot
+        afmSnapshot: AFMServiceSnapshot,
+        llmRouterSnapshot: LLMRouterServiceSnapshot
     ) -> [RuntimeFeatureState] {
-        [
+        let copilotStatus: String
+        let copilotMode: RuntimeBridgeMode
+        if llmRouterSnapshot.isModelAvailable(provider: .appleFoundation) {
+            copilotStatus = "LLM router + local-first provider"
+            copilotMode = .service
+        } else if afmSnapshot.coreCopilotServicesAvailable {
+            copilotStatus = "AFM router + pipelines"
+            copilotMode = .service
+        } else {
+            copilotStatus = "Local fallback bridge"
+            copilotMode = .local
+        }
+
+        return [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
             RuntimeFeatureState(feature: .tabs, mode: .native, isAvailable: true, status: "Swift state"),
             RuntimeFeatureState(
@@ -540,9 +648,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ),
             RuntimeFeatureState(
                 feature: .copilot,
-                mode: afmSnapshot.coreCopilotServicesAvailable ? .service : .local,
+                mode: copilotMode,
                 isAvailable: true,
-                status: afmSnapshot.coreCopilotServicesAvailable ? "AFM router + pipelines" : "Local fallback bridge"
+                status: copilotStatus
             ),
             RuntimeFeatureState(feature: .wallet, mode: .local, isAvailable: true, status: "Local policy bridge"),
             RuntimeFeatureState(feature: .downloads, mode: .native, isAvailable: true, status: "URLSession bridge")

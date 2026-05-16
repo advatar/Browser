@@ -18,6 +18,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
     @Published var afmServiceSnapshot: AFMServiceSnapshot
+    @Published var llmRouterServiceSnapshot: LLMRouterServiceSnapshot
     @Published var selectedAFMPackID: String?
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
     @Published var openMindContinuityState: OpenMindContinuityState
@@ -53,7 +54,10 @@ final class BrowserViewModel: ObservableObject {
     ) {
         let tab = BrowserTab(urlString: initialURL)
         let smartHistoryPayload = smartHistoryStore.load()
-        let initialLLMModelOptions = LLMModelRegistry.models(afmSnapshot: runtimeBridge.afmServiceSnapshot)
+        let initialLLMModelOptions = LLMModelRegistry.models(
+            afmSnapshot: runtimeBridge.afmServiceSnapshot,
+            llmRouterSnapshot: runtimeBridge.llmRouterServiceSnapshot
+        )
         let restoredLLMState = Self.restoredLLMState(
             from: llmConversationStore.load(),
             models: initialLLMModelOptions
@@ -66,6 +70,7 @@ final class BrowserViewModel: ObservableObject {
         self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
+        self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
@@ -114,8 +119,15 @@ final class BrowserViewModel: ObservableObject {
 
     var activeLLMModel: LLMModelProfile {
         llmModelOptions.first { $0.id == selectedLLMModelID }
-            ?? LLMModelRegistry.model(withID: selectedLLMModelID, afmSnapshot: afmServiceSnapshot)
-            ?? LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)[0]
+            ?? LLMModelRegistry.model(
+                withID: selectedLLMModelID,
+                afmSnapshot: afmServiceSnapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot
+            )
+            ?? LLMModelRegistry.models(
+                afmSnapshot: afmServiceSnapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot
+            )[0]
     }
 
     func activateTab(_ id: UUID) {
@@ -217,7 +229,11 @@ final class BrowserViewModel: ObservableObject {
     func refreshRuntimeBridgeStatus() async {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
-        llmModelOptions = LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)
+        llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
+        llmModelOptions = LLMModelRegistry.models(
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot
+        )
         normalizeSelectedLLMModelIfNeeded()
         async let openMindState = openMindMemoryClient.refreshRuntimeState()
         async let reviewTasks = openMindMemoryClient.refreshReviewTasks()
@@ -530,6 +546,7 @@ final class BrowserViewModel: ObservableObject {
                     preferredAFMPackID: preferredPackID,
                     preferredModelID: model.id,
                     conversationID: conversationID,
+                    runID: runID,
                     renderedConversationContext: renderedWithMemory,
                     memoryRecall: memoryRecall
                 )
@@ -540,13 +557,14 @@ final class BrowserViewModel: ObservableObject {
                 return
             }
 
-            let provider = result.mode == .service ? "afm" : "local"
+            let provider = result.usageProviderKey ?? (result.mode == .service ? "afm" : "local")
             let finalUsage = CopilotCreditUsage.estimate(
                 prompt: renderedWithMemory?.prompt ?? prompt,
                 snapshot: snapshot,
                 provider: provider
             )
             appendAFMarketEvents(runID: runID, result: result)
+            appendLLMRouterEvents(runID: runID, result: result)
             if recordsAssistantMessage, result.mode != model.runtimeMode {
                 appendProviderFallback(runID: runID, requestedModel: model, actualMode: result.mode)
             }
@@ -1107,6 +1125,22 @@ final class BrowserViewModel: ObservableObject {
             kind: .afMarketVerificationRecorded,
             message: "\(verificationReport.state.title): \(verificationReport.summary)"
         )
+    }
+
+    private func appendLLMRouterEvents(runID: UUID, result: CopilotRunResult) {
+        guard let response = result.llmRouterResponse else { return }
+        appendCopilotEvent(
+            runID: runID,
+            kind: .modelCompleted,
+            message: "LLM router completed \(response.modelID) through \(response.provider.rawValue)."
+        )
+        for toolCall in response.toolCalls {
+            appendCopilotEvent(
+                runID: runID,
+                kind: .actionRequested,
+                message: "LLM router proposed tool \(toolCall.name); approval is required before execution."
+            )
+        }
     }
 
     private func isCopilotRunActive(_ id: UUID) -> Bool {

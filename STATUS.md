@@ -23,13 +23,13 @@
 
 - [x] Triage remaining provider/tool-call gap from #72.
 - [x] Create tracker issue for Swift LLM router service adapter (#89).
-- [ ] Add Swift LLM router endpoint configuration, snapshot, model, completion, usage, and tool-call models.
-- [ ] Add a Swift LLM router service client for health, model discovery, and completion calls.
-- [ ] Surface the router-backed provider in the Swift model registry/runtime status.
-- [ ] Route selected Swift LLM conversation runs through the LLM router before AFMarket/local fallback.
-- [ ] Record router completion and proposed tool-call state in Copilot activity.
-- [ ] Add focused Swift unit tests for discovery, completion payloads, runtime routing, model selection, and activity events.
-- [ ] Verify local Swift tests and build.
+- [x] Add Swift LLM router endpoint configuration, snapshot, model, completion, usage, and tool-call models.
+- [x] Add a Swift LLM router service client for health, model discovery, and completion calls.
+- [x] Surface the router-backed provider in the Swift model registry/runtime status.
+- [x] Route selected Swift LLM conversation runs through the LLM router before AFMarket/local fallback.
+- [x] Record router completion and proposed tool-call state in Copilot activity.
+- [x] Add focused Swift unit tests for discovery, completion payloads, runtime routing, model selection, and activity events.
+- [x] Verify local Swift tests and build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close completed GitHub issues.
 

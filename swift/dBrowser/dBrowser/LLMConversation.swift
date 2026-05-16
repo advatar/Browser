@@ -2,12 +2,14 @@ import Foundation
 
 enum LLMModelProviderKind: String, Codable, Equatable, CaseIterable {
     case localMLX
+    case llmRouter
     case afMarket
     case llmGateway
 
     var title: String {
         switch self {
         case .localMLX: "Local MLX"
+        case .llmRouter: "LLM Router"
         case .afMarket: "AFMarket"
         case .llmGateway: "LLM Gateway"
         }
@@ -104,11 +106,15 @@ struct LLMModelProfile: Equatable, Identifiable {
 
 enum LLMModelRegistry {
     nonisolated static let localGemmaID = "local.gemma4-e2b-mlx"
+    nonisolated static let llmRouterAppleFoundationID = "services.llm-router.apple-foundation"
     nonisolated static let afMarketRouterID = "afmarket.router"
     nonisolated static let llmGatewayID = "llm.gateway"
     nonisolated static let defaultModelID = localGemmaID
 
-    static func models(afmSnapshot: AFMServiceSnapshot = .unknown) -> [LLMModelProfile] {
+    static func models(
+        afmSnapshot: AFMServiceSnapshot = .unknown,
+        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown
+    ) -> [LLMModelProfile] {
         let localProfile = BundledLLMSelection.recommended.profile
         let localAvailability: LLMModelAvailability = localProfile.loaderSupport.isRunnableWithCurrentSwiftLoader
             ? .available
@@ -116,6 +122,10 @@ enum LLMModelRegistry {
         let afmAvailability: LLMModelAvailability = afmSnapshot.coreCopilotServicesAvailable
             ? .available
             : .unavailable(afmSnapshot.serviceStatusText)
+        let routerModel = llmRouterSnapshot.model(provider: .appleFoundation)
+        let routerAvailability: LLMModelAvailability = llmRouterSnapshot.isModelAvailable(provider: .appleFoundation)
+            ? .available
+            : .unavailable(llmRouterSnapshot.serviceStatusText)
 
         return [
             LLMModelProfile(
@@ -129,6 +139,18 @@ enum LLMModelRegistry {
                 runtimeMode: .local,
                 availability: localAvailability,
                 detail: localProfile.readinessSummary
+            ),
+            LLMModelProfile(
+                id: llmRouterAppleFoundationID,
+                displayName: routerModel?.displayName ?? LLMRouterProvider.appleFoundation.displayName,
+                providerKind: .llmRouter,
+                trustBoundary: .serviceBacked,
+                contextWindowTokens: routerModel?.contextWindowTokens ?? 16_384,
+                supportsTools: routerModel?.supportsTools ?? true,
+                supportsMemoryCitations: true,
+                runtimeMode: .service,
+                availability: routerAvailability,
+                detail: routerModel?.detail ?? "Routes Swift conversation context through ./services/llm-router with local-first, no-egress policy."
             ),
             LLMModelProfile(
                 id: afMarketRouterID,
@@ -159,9 +181,10 @@ enum LLMModelRegistry {
 
     static func model(
         withID id: String,
-        afmSnapshot: AFMServiceSnapshot = .unknown
+        afmSnapshot: AFMServiceSnapshot = .unknown,
+        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown
     ) -> LLMModelProfile? {
-        models(afmSnapshot: afmSnapshot).first { $0.id == id }
+        models(afmSnapshot: afmSnapshot, llmRouterSnapshot: llmRouterSnapshot).first { $0.id == id }
     }
 }
 

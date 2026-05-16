@@ -332,6 +332,199 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func llmRouterServiceClientLoadsSnapshotAndCompletes() async throws {
+        let capturedRequests = JSONRequestCapture()
+        let harness = Self.makeLLMRouterSession(key: "llmrouterclient") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: [
+                    "ok": true,
+                    "local_available": true,
+                    "message": "router ready"
+                ])
+            }
+
+            if path == "/models" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "apple.foundation",
+                            "provider": "apple_foundation",
+                            "display_name": "Apple Foundation via LLM Router",
+                            "context_window_tokens": 16_384,
+                            "supports_tools": true,
+                            "available": true,
+                            "detail": "Local-first Foundation model route"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/complete" {
+                return Self.jsonResponse(for: request, body: [
+                    "text": "Router answer with preserved context.",
+                    "provider": "apple_foundation",
+                    "model_id": "apple.foundation",
+                    "usage": [
+                        "prompt_tokens": 21,
+                        "completion_tokens": 7,
+                        "total_tokens": 28
+                    ],
+                    "tool_calls": [
+                        [
+                            "id": "tool-1",
+                            "name": "browser.query",
+                            "arguments": ["selector": "main"],
+                            "approval_required": true
+                        ]
+                    ],
+                    "route": "local-first"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = LLMRouterServiceClient(configuration: harness.configuration, session: harness.session)
+        let conversationID = UUID()
+        let runID = UUID()
+
+        let snapshot = await client.snapshot()
+        let response = try await client.complete(
+            LLMRouterCompletionRequest(
+                prompt: "Conversation messages:\nUSER: Hello",
+                modelID: LLMRouterProvider.appleFoundation.modelID,
+                policy: LLMRouterRoutingPolicy(preferLocal: true, noEgress: true, forceProvider: .appleFoundation),
+                options: LLMRouterCompletionOptions(temperature: 0.6, maxTokens: 256, systemPrompt: "Unit test"),
+                context: LLMRouterCompletionContext(
+                    conversationID: conversationID,
+                    runID: runID,
+                    pageURLString: "https://example.com",
+                    snapshotCommitment: "fnv1a64:abc",
+                    memoryContextIDs: ["mem-1"],
+                    estimatedPromptTokens: 21,
+                    includedMessageIDs: [UUID()],
+                    compressedMessageIDs: []
+                )
+            )
+        )
+        let completionBody = capturedRequests.body(for: "/v1/complete")
+        let policyBody = completionBody?["policy"] as? [String: Any]
+        let contextBody = completionBody?["context"] as? [String: Any]
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.isModelAvailable(provider: .appleFoundation))
+        #expect(snapshot.models.first?.contextWindowTokens == 16_384)
+        #expect(response.text == "Router answer with preserved context.")
+        #expect(response.usage?.totalTokens == 28)
+        #expect(response.toolCalls.first?.name == "browser.query")
+        #expect(completionBody?["model_id"] as? String == "apple.foundation")
+        #expect(policyBody?["no_egress"] as? Bool == true)
+        #expect(policyBody?["force_provider"] as? String == "apple_foundation")
+        #expect(contextBody?["conversation_id"] as? String == conversationID.uuidString)
+        #expect(contextBody?["run_id"] as? String == runID.uuidString)
+        #expect((contextBody?["memory_context_ids"] as? [String]) == ["mem-1"])
+    }
+
+    @MainActor
+    @Test func swiftLLMConversationUsesLLMRouterSelectedModel() async {
+        let capturedRequests = JSONRequestCapture()
+        let routerHarness = Self.makeLLMRouterSession(key: "llmroutervm") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: [
+                    "ok": true,
+                    "local_available": true,
+                    "message": "router ready"
+                ])
+            }
+
+            if path == "/models" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "apple.foundation",
+                            "provider": "apple_foundation",
+                            "display_name": "Apple Foundation via LLM Router",
+                            "context_window_tokens": 16_384,
+                            "supports_tools": true,
+                            "available": true
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/complete" {
+                return Self.jsonResponse(for: request, body: [
+                    "text": "Router answer for the Swift conversation.",
+                    "provider": "apple_foundation",
+                    "model_id": "apple.foundation",
+                    "usage": [
+                        "prompt_tokens": 32,
+                        "completion_tokens": 9,
+                        "total_tokens": 41
+                    ],
+                    "tool_calls": [
+                        [
+                            "id": "tool-vm",
+                            "name": "browser.query",
+                            "arguments": ["selector": "article"],
+                            "approval_required": true
+                        ]
+                    ],
+                    "route": "local-first"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let offlineAFM = Self.makeAFMServiceSession(key: "llmrouterafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: offlineAFM.configuration,
+                llmRouter: routerHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineAFM.configuration,
+                session: offlineAFM.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(
+                configuration: routerHarness.configuration,
+                session: routerHarness.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        model.navigate("https://example.com")
+        await model.refreshRuntimeBridgeStatus()
+
+        model.selectLLMModel(LLMModelRegistry.llmRouterAppleFoundationID)
+        guard let runID = model.sendLLMMessage("Use the router and keep context.") else {
+            Issue.record("Expected LLM router conversation run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+        let completionBody = capturedRequests.body(for: "/v1/complete")
+        let contextBody = completionBody?["context"] as? [String: Any]
+        let eventKinds = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
+
+        #expect(completed)
+        #expect(model.selectedLLMModelID == LLMModelRegistry.llmRouterAppleFoundationID)
+        #expect(model.llmConversation.messages.contains { $0.role == .assistant && $0.modelID == LLMModelRegistry.llmRouterAppleFoundationID })
+        #expect(model.llmConversation.latestAssistantMessage?.text.contains("Router answer for the Swift conversation.") == true)
+        #expect((completionBody?["prompt"] as? String)?.contains("Conversation messages") == true)
+        #expect((completionBody?["prompt"] as? String)?.contains("Use the router and keep context.") == true)
+        #expect(contextBody?["conversation_id"] as? String == model.llmConversation.id.uuidString)
+        #expect(contextBody?["run_id"] as? String == runID.uuidString)
+        #expect(eventKinds.contains(.modelCompleted))
+        #expect(eventKinds.contains(.actionRequested))
+    }
+
+    @MainActor
     @Test func llmChatModelSwitchPreservesContextAndRecordsFallback() async {
         let offlineServices = Self.makeAFMServiceSession(key: "llmfallback") { request in
             Self.jsonResponse(for: request, status: 503, body: ["ok": false])
@@ -639,6 +832,7 @@ struct dBrowserTests {
         #expect(model.selectedAFMPackID == "afm://demo-writer")
     }
 
+    @MainActor
     @Test func afmServicesClientLoadsV1RegistryExpertsAndBundles() async {
         let serviceHarness = Self.makeAFMServiceSession(key: "v1registry") { request in
             let path = request.url?.path ?? ""
@@ -719,6 +913,7 @@ struct dBrowserTests {
         #expect(bundlePack?.bundleURL == "https://example.com/demo-writer.tar")
     }
 
+    @MainActor
     @Test func afmServicesClientLoadsMarketplaceRunnerPacks() async {
         let serviceHarness = Self.makeAFMServiceSession(key: "marketpacks", includesMarketplace: true) { request in
             let path = request.url?.path ?? ""
@@ -3069,6 +3264,22 @@ struct dBrowserTests {
         configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
         let endpoint = OpenMindMemoryEndpointConfiguration(
             httpBaseURL: URL(string: "http://\(key)-memory.test:4840")!
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
+    private static func makeLLMRouterSession(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: LLMRouterEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = LLMRouterEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-llm-router.test:4850")!,
+            provider: .appleFoundation,
+            preferLocal: true,
+            noEgress: true
         )
         return (endpoint, URLSession(configuration: configuration))
     }
