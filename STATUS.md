@@ -19,6 +19,20 @@
 
 ## Active Task
 
+## Swift LLM Router Service Adapter Slice
+
+- [x] Triage remaining provider/tool-call gap from #72.
+- [x] Create tracker issue for Swift LLM router service adapter (#89).
+- [ ] Add Swift LLM router endpoint configuration, snapshot, model, completion, usage, and tool-call models.
+- [ ] Add a Swift LLM router service client for health, model discovery, and completion calls.
+- [ ] Surface the router-backed provider in the Swift model registry/runtime status.
+- [ ] Route selected Swift LLM conversation runs through the LLM router before AFMarket/local fallback.
+- [ ] Record router completion and proposed tool-call state in Copilot activity.
+- [ ] Add focused Swift unit tests for discovery, completion payloads, runtime routing, model selection, and activity events.
+- [ ] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift OpenMind Correction And Review Slice
 
 - [x] Triage remaining OpenMind/BrIAn correction and review gap from #70.
