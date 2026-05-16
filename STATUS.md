@@ -29,8 +29,8 @@
 - [x] Surface marketplace pack counts and policy/royalty metadata in runtime status.
 - [x] Add focused Swift unit tests for marketplace decoding, pack merging, and Copilot surfacing.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 Validation notes:
 
