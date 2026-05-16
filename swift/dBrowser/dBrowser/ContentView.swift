@@ -1099,9 +1099,17 @@ private struct AFMServicesPanelView: View {
             Text("Registry v1: \(snapshot.registryExperts.count) expert\(snapshot.registryExperts.count == 1 ? "" : "s"), \(snapshot.registryBundles.count) bundle\(snapshot.registryBundles.count == 1 ? "" : "s").")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let marketplaceAvailable = snapshot.marketplaceAvailable {
+                Label(
+                    "Marketplace \(marketplaceAvailable ? "online" : "offline") with \(snapshot.marketplacePacks.count) runner pack\(snapshot.marketplacePacks.count == 1 ? "" : "s")",
+                    systemImage: marketplaceAvailable ? "shippingbox.circle" : "shippingbox"
+                )
+                .font(.caption)
+                .foregroundStyle(marketplaceAvailable ? Color.green : Color.secondary)
+            }
 
             if snapshot.availablePacks.isEmpty {
-                Text("No runner packs reported by router or registry.")
+                Text("No runner packs reported by router, registry, or marketplace.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -1113,6 +1121,12 @@ private struct AFMServicesPanelView: View {
                             Text([pack.id, pack.version, pack.modelID, pack.status].compactMap { $0 }.joined(separator: " / "))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            let marketplaceDetails = marketplacePackDetails(for: pack)
+                            if !marketplaceDetails.isEmpty {
+                                Text(marketplaceDetails.joined(separator: " / "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         if let maintainer = pack.maintainer {
@@ -1130,6 +1144,23 @@ private struct AFMServicesPanelView: View {
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityIdentifier("runtime-afm-services")
+    }
+
+    private func marketplacePackDetails(for pack: AFMPackSummary) -> [String] {
+        var details: [String] = []
+        if let allowedDomains = pack.allowedDomains, !allowedDomains.isEmpty {
+            details.append("Domains \(allowedDomains.joined(separator: ", "))")
+        }
+        if let maxContext = pack.maxContext {
+            details.append("Context \(maxContext)")
+        }
+        if let creatorRoyaltyBPS = pack.creatorRoyaltyBPS {
+            details.append("Creator \(creatorRoyaltyBPS) bps")
+        }
+        if let dataRoyaltyBPS = pack.dataRoyaltyBPS {
+            details.append("Data \(dataRoyaltyBPS) bps")
+        }
+        return details
     }
 }
 

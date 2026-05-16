@@ -5,13 +5,15 @@ struct AFMServiceEndpointConfiguration: Equatable {
     var registryBaseURL: URL
     var pipelinesBaseURL: URL
     var nodeBaseURL: URL
+    var marketplaceBaseURL: URL?
     var routeDefaults: AFMRouteDefaults = .afMarketV1
 
     nonisolated static let local = AFMServiceEndpointConfiguration(
         routerBaseURL: URL(string: "http://127.0.0.1:4810")!,
         registryBaseURL: URL(string: "http://127.0.0.1:4820")!,
         pipelinesBaseURL: URL(string: "http://127.0.0.1:4830")!,
-        nodeBaseURL: URL(string: "http://127.0.0.1:4840")!
+        nodeBaseURL: URL(string: "http://127.0.0.1:4840")!,
+        marketplaceBaseURL: nil
     )
 }
 
@@ -20,8 +22,10 @@ struct AFMServiceSnapshot: Equatable {
     var registryAvailable: Bool
     var pipelinesAvailable: Bool
     var nodeAvailable: Bool
+    var marketplaceAvailable: Bool?
     var routerPacks: [AFMPackSummary]
     var registryPacks: [AFMPackSummary]
+    var marketplacePacks: [AFMRunnerPack]
     var registryExperts: [AFMExpertRecord]
     var registryBundles: [AFMBundleRecord]
 
@@ -30,8 +34,10 @@ struct AFMServiceSnapshot: Equatable {
         registryAvailable: true,
         pipelinesAvailable: true,
         nodeAvailable: true,
+        marketplaceAvailable: nil,
         routerPacks: [],
         registryPacks: [],
+        marketplacePacks: [],
         registryExperts: [],
         registryBundles: []
     )
@@ -45,18 +51,21 @@ struct AFMServiceSnapshot: Equatable {
     }
 
     var serviceStatusText: String {
-        let states = [
+        var states = [
             "router \(routerAvailable ? "online" : "offline")",
             "registry \(registryAvailable ? "online" : "offline")",
             "pipelines \(pipelinesAvailable ? "online" : "offline")",
             "node \(nodeAvailable ? "online" : "offline")"
         ]
+        if let marketplaceAvailable {
+            states.append("marketplace \(marketplaceAvailable ? "online" : "offline")")
+        }
         return states.joined(separator: ", ")
     }
 
     var availablePacks: [AFMPackSummary] {
         var packsByID: [String: AFMPackSummary] = [:]
-        for pack in routerPacks + registryPacks + registryBundles.map(\.packSummary) {
+        for pack in routerPacks + registryPacks + registryBundles.map(\.packSummary) + marketplacePacks.map(\.packSummary) {
             packsByID[pack.id] = packsByID[pack.id]?.merged(with: pack) ?? pack
         }
         return packsByID.values.sorted { $0.displayName < $1.displayName }
@@ -74,6 +83,13 @@ struct AFMPackSummary: Codable, Equatable, Identifiable {
     var bundleURL: String?
     var runnerRoot: String?
     var modelID: String?
+    var allowedDomains: [String]? = nil
+    var maxContext: Int? = nil
+    var creatorRoyaltyBPS: Int? = nil
+    var dataRoyaltyBPS: Int? = nil
+    var signature: String? = nil
+    var ownerID: String? = nil
+    var createdAtMillis: Int? = nil
 
     var displayName: String {
         name ?? id
@@ -90,8 +106,160 @@ struct AFMPackSummary: Codable, Equatable, Identifiable {
             status: status ?? other.status,
             bundleURL: bundleURL ?? other.bundleURL,
             runnerRoot: runnerRoot ?? other.runnerRoot,
-            modelID: modelID ?? other.modelID
+            modelID: modelID ?? other.modelID,
+            allowedDomains: allowedDomains ?? other.allowedDomains,
+            maxContext: maxContext ?? other.maxContext,
+            creatorRoyaltyBPS: creatorRoyaltyBPS ?? other.creatorRoyaltyBPS,
+            dataRoyaltyBPS: dataRoyaltyBPS ?? other.dataRoyaltyBPS,
+            signature: signature ?? other.signature,
+            ownerID: ownerID ?? other.ownerID,
+            createdAtMillis: createdAtMillis ?? other.createdAtMillis
         )
+    }
+}
+
+struct AFMRunnerPackAFM: Decodable, Equatable {
+    var modelID: String
+
+    private enum CodingKeys: String, CodingKey {
+        case modelID = "model_id"
+    }
+}
+
+struct AFMRunnerPackPromptParams: Decodable, Equatable {
+    var temperature: Double
+    var topP: Double
+    var maxTokens: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case temperature
+        case topP = "top_p"
+        case maxTokens = "max_tokens"
+    }
+}
+
+struct AFMRunnerPackPrompting: Decodable, Equatable {
+    var system: String
+    var template: String
+    var params: AFMRunnerPackPromptParams
+}
+
+struct AFMRunnerPackPolicy: Decodable, Equatable {
+    var allowedDomains: [String]
+    var maxContext: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case allowedDomains = "allowed_domains"
+        case maxContext = "max_context"
+    }
+}
+
+struct AFMRunnerPackRoyalties: Decodable, Equatable {
+    var creatorBPS: Int
+    var dataBPS: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case creatorBPS = "creator_bps"
+        case dataBPS = "data_bps"
+    }
+}
+
+struct AFMRunnerPackHashes: Decodable, Equatable {
+    private struct DynamicCodingKey: CodingKey {
+        var stringValue: String
+        var intValue: Int?
+
+        init?(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            self.stringValue = "\(intValue)"
+            self.intValue = intValue
+        }
+    }
+
+    var values: [String: String]
+
+    var preferredChecksum: String? {
+        values["bundle"] ?? values["manifest"] ?? values["runner_root"] ?? values.values.sorted().first
+    }
+
+    init(values: [String: String] = [:]) {
+        self.values = values
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        var values: [String: String] = [:]
+        for key in container.allKeys {
+            if let value = try? container.decode(String.self, forKey: key) {
+                values[key.stringValue] = value
+            } else if let value = try? container.decode(Int.self, forKey: key) {
+                values[key.stringValue] = "\(value)"
+            } else if let value = try? container.decode(Double.self, forKey: key) {
+                values[key.stringValue] = "\(value)"
+            } else if let value = try? container.decode(Bool.self, forKey: key) {
+                values[key.stringValue] = value ? "true" : "false"
+            }
+        }
+        self.values = values
+    }
+}
+
+struct AFMRunnerPack: Decodable, Equatable, Identifiable {
+    var runnerID: String
+    var afm: AFMRunnerPackAFM
+    var prompting: AFMRunnerPackPrompting
+    var policy: AFMRunnerPackPolicy
+    var royalties: AFMRunnerPackRoyalties
+    var attestation: [String]?
+    var capabilityVector: [Double]?
+    var hashes: AFMRunnerPackHashes?
+    var bundleURL: String?
+    var signature: String?
+    var runnerRoot: String?
+    var ownerID: String?
+    var createdAt: Int?
+
+    var id: String { runnerID }
+
+    var packSummary: AFMPackSummary {
+        AFMPackSummary(
+            id: runnerID,
+            name: runnerID,
+            maintainer: ownerID,
+            version: nil,
+            checksum: hashes?.preferredChecksum,
+            skills: policy.allowedDomains,
+            status: "marketplace",
+            bundleURL: bundleURL,
+            runnerRoot: runnerRoot,
+            modelID: afm.modelID,
+            allowedDomains: policy.allowedDomains,
+            maxContext: policy.maxContext,
+            creatorRoyaltyBPS: royalties.creatorBPS,
+            dataRoyaltyBPS: royalties.dataBPS,
+            signature: signature,
+            ownerID: ownerID,
+            createdAtMillis: createdAt
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case runnerID = "runner_id"
+        case afm
+        case prompting
+        case policy
+        case royalties
+        case attestation
+        case capabilityVector = "capability_vector"
+        case hashes
+        case bundleURL = "bundle_url"
+        case signature
+        case runnerRoot = "runner_root"
+        case ownerID = "owner_id"
+        case createdAt = "created_at"
     }
 }
 
@@ -485,6 +653,38 @@ final class AFMServicesClient {
         let data: [AFMPackSummary]
     }
 
+    private struct MarketplacePacksResponse: Decodable {
+        let packs: [AFMRunnerPack]
+
+        private enum CodingKeys: String, CodingKey {
+            case packs
+            case data
+            case bundles
+        }
+
+        init(from decoder: Decoder) throws {
+            if var container = try? decoder.unkeyedContainer() {
+                var packs: [AFMRunnerPack] = []
+                while !container.isAtEnd {
+                    packs.append(try container.decode(AFMRunnerPack.self))
+                }
+                self.packs = packs
+                return
+            }
+
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            if let packs = try container.decodeIfPresent([AFMRunnerPack].self, forKey: .packs) {
+                self.packs = packs
+            } else if let packs = try container.decodeIfPresent([AFMRunnerPack].self, forKey: .data) {
+                self.packs = packs
+            } else if let packs = try container.decodeIfPresent([AFMRunnerPack].self, forKey: .bundles) {
+                self.packs = packs
+            } else {
+                self.packs = []
+            }
+        }
+    }
+
     private struct ExpertsResponse: Decodable {
         let experts: [AFMExpertRecord]
     }
@@ -631,14 +831,17 @@ final class AFMServicesClient {
         let registryPacks = registryAvailable ? ((try? await packs(baseURL: configuration.registryBaseURL)) ?? []) : []
         let registryExperts = registryAvailable ? ((try? await experts(baseURL: configuration.registryBaseURL)) ?? []) : []
         let registryBundles = registryAvailable ? ((try? await bundles(baseURL: configuration.registryBaseURL)) ?? []) : []
+        let marketplaceResult = await marketplaceSnapshot()
 
         return AFMServiceSnapshot(
             routerAvailable: routerAvailable,
             registryAvailable: registryAvailable,
             pipelinesAvailable: pipelinesAvailable,
             nodeAvailable: nodeAvailable,
+            marketplaceAvailable: marketplaceResult.available,
             routerPacks: routerPacks,
             registryPacks: registryPacks,
+            marketplacePacks: marketplaceResult.packs,
             registryExperts: registryExperts,
             registryBundles: registryBundles
         )
@@ -821,6 +1024,22 @@ final class AFMServicesClient {
     private func bundles(baseURL: URL) async throws -> [AFMBundleRecord] {
         let response: BundlesResponse = try await send(method: "GET", baseURL: baseURL, path: "/v1/bundles")
         return response.bundles
+    }
+
+    private func marketplaceSnapshot() async -> (available: Bool?, packs: [AFMRunnerPack]) {
+        guard let marketplaceBaseURL = configuration.marketplaceBaseURL else {
+            return (nil, [])
+        }
+        do {
+            let response: MarketplacePacksResponse = try await send(
+                method: "GET",
+                baseURL: marketplaceBaseURL,
+                path: "/api/packs"
+            )
+            return (true, response.packs)
+        } catch {
+            return (false, [])
+        }
     }
 
     private static func routeMetadata(

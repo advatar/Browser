@@ -719,6 +719,91 @@ struct dBrowserTests {
         #expect(bundlePack?.bundleURL == "https://example.com/demo-writer.tar")
     }
 
+    @Test func afmServicesClientLoadsMarketplaceRunnerPacks() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "marketpacks", includesMarketplace: true) { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: ["experts": []])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: ["bundles": []])
+            }
+
+            if path == "/api/packs" {
+                return Self.jsonResponse(for: request, body: [
+                    [
+                        "runner_id": "eu-law@v1",
+                        "afm": [
+                            "model_id": "apple.afm.medium:2025.10"
+                        ],
+                        "prompting": [
+                            "system": "You are a concise EU law specialist.",
+                            "template": "{{input}}",
+                            "params": [
+                                "temperature": 0.2,
+                                "top_p": 0.9,
+                                "max_tokens": 750
+                            ]
+                        ],
+                        "policy": [
+                            "allowed_domains": ["law:eu"],
+                            "max_context": 160000
+                        ],
+                        "royalties": [
+                            "creator_bps": 700,
+                            "data_bps": 200
+                        ],
+                        "attestation": ["secure-enclave"],
+                        "capability_vector": [0.12, 0.01, 0.75],
+                        "hashes": [
+                            "manifest": "sha256:manifest",
+                            "bundle": "sha256:bundle"
+                        ],
+                        "bundle_url": "https://market.example/eu-law.tar",
+                        "signature": "0xsig",
+                        "runner_root": "0xdf6a4e",
+                        "owner_id": "creator-1",
+                        "created_at": 1762127512523
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = AFMServicesClient(
+            configuration: serviceHarness.configuration,
+            session: serviceHarness.session
+        )
+
+        let snapshot = await client.snapshot()
+        let pack = snapshot.availablePacks.first { $0.id == "eu-law@v1" }
+
+        #expect(snapshot.marketplaceAvailable == true)
+        #expect(snapshot.marketplacePacks.first?.runnerID == "eu-law@v1")
+        #expect(snapshot.marketplacePacks.first?.prompting.params.temperature == 0.2)
+        #expect(snapshot.marketplacePacks.first?.hashes?.preferredChecksum == "sha256:bundle")
+        #expect(pack?.modelID == "apple.afm.medium:2025.10")
+        #expect(pack?.bundleURL == "https://market.example/eu-law.tar")
+        #expect(pack?.runnerRoot == "0xdf6a4e")
+        #expect(pack?.allowedDomains == ["law:eu"])
+        #expect(pack?.maxContext == 160000)
+        #expect(pack?.creatorRoyaltyBPS == 700)
+        #expect(pack?.dataRoyaltyBPS == 200)
+        #expect(pack?.signature == "0xsig")
+        #expect(pack?.ownerID == "creator-1")
+        #expect(pack?.createdAtMillis == 1762127512523)
+    }
+
     @Test func afmServicesClientRoutesThroughV1ContractAndFallsBackToLocal() async {
         let capturedV1Requests = JSONRequestCapture()
         let v1Harness = Self.makeAFMServiceSession(key: "v1route") { request in
@@ -1045,6 +1130,108 @@ struct dBrowserTests {
         #expect(result.suggestions.contains { $0.contains("Route afmarket-v1 used chain base-sepolia") })
         #expect(result.suggestions.contains { $0.contains("1 bundle") && $0.contains("1 expert") })
         #expect(result.suggestions.contains { $0.contains("Node agent unavailable") })
+    }
+
+    @MainActor
+    @Test func runtimeBridgeSurfacesAFMarketMarketplacePacks() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "runtimemarket", includesMarketplace: true) { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": port != 4840])
+            }
+
+            if path == "/packs" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: ["experts": []])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: ["bundles": []])
+            }
+
+            if path == "/api/packs" {
+                return Self.jsonResponse(for: request, body: [
+                    [
+                        "runner_id": "eu-law@v1",
+                        "afm": ["model_id": "apple.afm.medium:2025.10"],
+                        "prompting": [
+                            "system": "You are a concise EU law specialist.",
+                            "template": "{{input}}",
+                            "params": [
+                                "temperature": 0.2,
+                                "top_p": 0.9,
+                                "max_tokens": 750
+                            ]
+                        ],
+                        "policy": [
+                            "allowed_domains": ["law:eu"],
+                            "max_context": 160000
+                        ],
+                        "royalties": [
+                            "creator_bps": 700,
+                            "data_bps": 200
+                        ],
+                        "hashes": ["bundle": "sha256:bundle"],
+                        "bundle_url": "https://market.example/eu-law.tar",
+                        "runner_root": "0xdf6a4e",
+                        "owner_id": "creator-1",
+                        "created_at": 1762127512523
+                    ]
+                ])
+            }
+
+            if path == "/v1/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "primary": [
+                        "node_id": "exp-001",
+                        "lease_id": "lease-market",
+                        "verifier": "attestation-ref",
+                        "payout_address": "0x000000000000000000000000000000000000dead"
+                    ],
+                    "backups": [],
+                    "lease_ttl_ms": 15000,
+                    "explain": []
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-market",
+                    "status": "queued"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(
+                prompt: "Summarize with marketplace pack",
+                pageURLString: "https://example.com",
+                preferredAFMPackID: "eu-law@v1"
+            )
+        )
+        let marketplacePack = bridge.afmServiceSnapshot.availablePacks.first { $0.id == "eu-law@v1" }
+
+        #expect(result.mode == .service)
+        #expect(result.suggestions.contains { $0.contains("Marketplace has 1 runner pack") })
+        #expect(result.suggestions.contains { $0.contains("Copilot requested runner pack eu-law@v1") })
+        #expect(marketplacePack?.modelID == "apple.afm.medium:2025.10")
+        #expect(marketplacePack?.creatorRoyaltyBPS == 700)
+        #expect(marketplacePack?.bundleURL == "https://market.example/eu-law.tar")
     }
 
     @MainActor
@@ -2308,6 +2495,7 @@ struct dBrowserTests {
 
     private static func makeAFMServiceSession(
         key: String,
+        includesMarketplace: Bool = false,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> (configuration: AFMServiceEndpointConfiguration, session: URLSession) {
         AFMServiceMockURLProtocol.register(key: key, handler: handler)
@@ -2317,7 +2505,8 @@ struct dBrowserTests {
             routerBaseURL: URL(string: "http://\(key)-router.test:4810")!,
             registryBaseURL: URL(string: "http://\(key)-registry.test:4820")!,
             pipelinesBaseURL: URL(string: "http://\(key)-pipelines.test:4830")!,
-            nodeBaseURL: URL(string: "http://\(key)-node.test:4840")!
+            nodeBaseURL: URL(string: "http://\(key)-node.test:4840")!,
+            marketplaceBaseURL: includesMarketplace ? URL(string: "http://\(key)-marketplace.test:4850")! : nil
         )
         return (endpoints, URLSession(configuration: configuration))
     }

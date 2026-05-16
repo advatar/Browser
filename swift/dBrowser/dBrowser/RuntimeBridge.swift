@@ -352,9 +352,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 }
                 summary += "."
             }
+            let marketplaceSummary = snapshot.marketplaceAvailable == nil
+                ? ""
+                : " Marketplace has \(snapshot.marketplacePacks.count) runner pack\(snapshot.marketplacePacks.count == 1 ? "" : "s")."
             var suggestions = [
                 route.primary.map { "AFMarket v1 primary lease \($0.leaseID) on \($0.nodeID)." } ?? "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
-                "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s"), \(snapshot.registryBundles.count) bundle\(snapshot.registryBundles.count == 1 ? "" : "s"), and \(snapshot.registryExperts.count) expert\(snapshot.registryExperts.count == 1 ? "" : "s") available to the Swift shell.",
+                "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s"), \(snapshot.registryBundles.count) bundle\(snapshot.registryBundles.count == 1 ? "" : "s"), and \(snapshot.registryExperts.count) expert\(snapshot.registryExperts.count == 1 ? "" : "s") available to the Swift shell.\(marketplaceSummary)",
                 request.preferredAFMPackID.map { "Copilot requested runner pack \($0)." } ?? "Router chose the runner pack.",
                 "Pipelines accepted job \(job.id) with status \(job.status)."
             ]

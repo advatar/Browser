@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift AFMarket Marketplace Runner Pack Slice
+
+- [x] Triage remaining AFMarket marketplace pack gap from #69.
+- [x] Create tracker issue for marketplace runner-pack ingestion (#85).
+- [x] Add optional Swift AFMarket marketplace endpoint configuration.
+- [x] Add typed Swift marketplace runner-pack, policy, prompting, royalty, and hash models.
+- [x] Merge marketplace packs into Swift AFM service snapshots and runner-pack selection.
+- [x] Surface marketplace pack counts and policy/royalty metadata in runtime status.
+- [x] Add focused Swift unit tests for marketplace decoding, pack merging, and Copilot surfacing.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-afmarket-marketplace-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-afmarket-marketplace-tests -only-testing:dBrowserTests` passed.
+
 ## Swift AFMarket V1 Registry And Route Slice
 
 - [x] Triage remaining AFMarket v1 compatibility gaps from #69.
