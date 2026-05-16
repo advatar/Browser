@@ -30,8 +30,8 @@
 - [x] Bind Ethereum/EVM snapshots into the shared chain trust registry/runtime status.
 - [x] Add focused Swift unit tests for routing, proof validation, fallback, registry updates, and runtime refresh.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Local Chain Trust Bitcoin Service Slice
 
