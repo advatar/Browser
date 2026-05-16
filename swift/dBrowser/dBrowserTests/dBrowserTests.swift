@@ -2486,6 +2486,165 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("TRON proof checked") == true)
     }
 
+    @Test func xrplRoutingStaleAndFallbackAreExplicit() {
+        #expect(XRPLNetwork.known(from: "xrpl") == .mainnet)
+        #expect(XRPLNetwork.known(from: "xrp-testnet") == .testnet)
+        #expect(XRPLNetwork.mainnet.supportedProofTypes.contains("unl-quorum"))
+
+        let fallback = XRPLLightClientServiceSnapshot.fallback(
+            network: .mainnet,
+            lastError: "disabled"
+        )
+        let stale = XRPLLightClientServiceSnapshot(
+            serviceAvailable: true,
+            network: .mainnet,
+            syncState: .stale,
+            source: "fixture",
+            latestValidatedLedger: Self.xrplProofBundle(network: .mainnet).ledger,
+            stale: true
+        )
+
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("API/RPC fallback remains labeled"))
+        #expect(stale.chainTrustStatus.state == .stale)
+        #expect(stale.statusSummary.contains("stale"))
+    }
+
+    @Test func xrplProofVerifiesUNLQuorumAndLedgerRoots() {
+        let accountBundle = Self.xrplProofBundle(network: .mainnet, kind: .account)
+        let trustLineBundle = Self.xrplProofBundle(network: .mainnet, kind: .trustLine)
+        let paymentBundle = Self.xrplProofBundle(network: .mainnet, kind: .payment)
+        let accountResult = accountBundle.verify()
+        let trustLineResult = trustLineBundle.verify()
+        let paymentResult = paymentBundle.verify()
+        var weakBundle = accountBundle
+        weakBundle.validationProof.votes = Array(accountBundle.validationProof.votes.prefix(3))
+        let weakResult = weakBundle.verify()
+        var apiOnlyBundle = accountBundle
+        apiOnlyBundle.ledger.validated = false
+        let apiOnlyResult = apiOnlyBundle.verify()
+
+        #expect(accountBundle.unlSet.validatesHash)
+        #expect(accountBundle.unlSet.configuredWeight == 5)
+        #expect(accountBundle.unlSet.effectiveWeight == 4)
+        #expect(accountBundle.unlSet.requiredQuorumWeight == 4)
+        #expect(accountResult.verified)
+        #expect(accountResult.state == .proofChecked)
+        #expect(trustLineResult.verified)
+        #expect(trustLineResult.kind == .trustLine)
+        #expect(paymentResult.verified)
+        #expect(paymentResult.kind == .payment)
+        #expect(weakResult.verified == false)
+        #expect(weakResult.summary.contains("UNL quorum"))
+        #expect(apiOnlyResult.verified == false)
+        #expect(apiOnlyResult.summary.contains("API/RPC data must remain fallback-labeled"))
+    }
+
+    @MainActor
+    @Test func xrplLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let xrplHarness = Self.makeXRPLLightClientSession(key: "xrplregistry", network: .mainnet) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/xrpl/status" {
+                return Self.jsonResponse(for: request, body: Self.xrplServiceStatus(network: .mainnet))
+            }
+            if request.url?.path == "/v1/xrpl/verify-proof" {
+                return Self.jsonResponse(for: request, body: Self.xrplProofResultBody(
+                    verified: true,
+                    state: "proof_checked",
+                    network: .mainnet
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = XRPLLightClientServiceClient(
+            configuration: xrplHarness.configuration,
+            session: xrplHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyProofViaService(Self.xrplProofBundle(network: .mainnet))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordXRPLLightClientSnapshot(snapshot)
+        let xrpl = registry.status(forChainRef: "xrp-ledger")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .proofChecked)
+        #expect(snapshot.latestValidatedLedger?.ledgerIndex == 90_000_000)
+        #expect(status.state == .proofChecked)
+        #expect(status.trustSource == .localProof)
+        #expect(xrpl?.family == .xrpLedger)
+        #expect(xrpl?.evidence.first?.source == .localProof)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .proofChecked)
+        #expect(capturedRequests.body(for: "/v1/xrpl/verify-proof")?["validation_proof"] != nil)
+    }
+
+    @MainActor
+    @Test func xrplLightClientFallsBackWhenServiceDisabled() async {
+        let client = XRPLLightClientServiceClient(configuration: .disabled)
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordXRPLLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesXRPLLightClientState() async {
+        let xrplHarness = Self.makeXRPLLightClientSession(key: "xrplruntime", network: .mainnet) { request in
+            if request.url?.path == "/v1/xrpl/status" {
+                return Self.jsonResponse(for: request, body: Self.xrplServiceStatus(
+                    network: .mainnet,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "xrplruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                xrplLightClient: xrplHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(configuration: .disabled),
+            substrateLightClientServiceClient: SubstrateLightClientServiceClient(configuration: .disabled),
+            avalancheLightClientServiceClient: AvalancheLightClientServiceClient(configuration: .disabled),
+            tronLightClientServiceClient: TronLightClientServiceClient(configuration: .disabled),
+            xrplLightClientServiceClient: XRPLLightClientServiceClient(
+                configuration: xrplHarness.configuration,
+                session: xrplHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let xrpl = bridge.chainTrustSnapshot.status(forChainRef: "xrp-ledger")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(xrpl?.state == .proofChecked)
+        #expect(xrpl?.trustSource == .localProof)
+        #expect(xrpl?.evidence.first?.summary.contains("production XRPL verifier integration is not claimed") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("XRP Ledger proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4744,6 +4903,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeXRPLLightClientSession(
+        key: String,
+        network: XRPLNetwork = .mainnet,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: XRPLLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = XRPLLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-xrpl.test:4870")!,
+            network: network
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -4915,6 +5089,28 @@ struct dBrowserTests {
             "witness_set": tronWitnessSetBody(bundle.witnessSet),
             "peer_count": 2,
             "proof_source": "fixture-witness-token-proof",
+            "stale": stale,
+            "limitations": network.limitations
+        ]
+    }
+
+    private static func xrplServiceStatus(
+        network: XRPLNetwork,
+        syncState: String = "proof_checked",
+        stale: Bool = false
+    ) -> [String: Any] {
+        let bundle = xrplProofBundle(network: network)
+        return [
+            "ok": true,
+            "service_available": true,
+            "network": network.chainRef,
+            "chain_ref": network.chainRef,
+            "sync_state": syncState,
+            "source": "xrpl-light-client",
+            "latest_validated_ledger": xrplLedgerBody(bundle.ledger),
+            "unl_set": xrplUNLSetBody(bundle.unlSet),
+            "peer_count": 2,
+            "proof_source": "fixture-unl-account-payment-proof",
             "stale": stale,
             "limitations": network.limitations
         ]
@@ -5223,6 +5419,133 @@ struct dBrowserTests {
         )
     }
 
+    private static func xrplProofBundle(
+        network: XRPLNetwork,
+        kind: XRPLLocalProofKind = .account
+    ) -> XRPLProofVerificationBundle {
+        let validators = [
+            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatora", domain: "validator-a.example"),
+            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatorb", domain: "validator-b.example"),
+            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatorc", domain: "validator-c.example"),
+            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatord", domain: "validator-d.example"),
+            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatore", domain: "validator-e.example", disabled: true)
+        ]
+        let unlSet = XRPLUNLSet(
+            network: network,
+            listID: "fixture-default-unl",
+            validators: validators,
+            negativeUNL: [validators[4].validatorPublicKey],
+            source: "fixture"
+        )
+        let subject = "raccountfixture"
+        let counterparty = "rcounterpartyfixture"
+        let currency = "USD"
+        let transactionHash = XRPLHash.sha256Hex("xrpl-payment-fixture")
+        let accountValueHash = XRPLHash.sha256Hex("xrpl-account-balance:100")
+        let trustLineValueHash = XRPLHash.sha256Hex("xrpl-trustline-usd:25")
+        let paymentValueHash = XRPLHash.sha256Hex("xrpl-payment:tesSUCCESS")
+        let accountLeaf = XRPLLocalProof.fixtureLeafHash(kind: .account, subject: subject, valueHash: accountValueHash)
+        let trustLineLeaf = XRPLLocalProof.fixtureLeafHash(
+            kind: .trustLine,
+            subject: subject,
+            counterparty: counterparty,
+            currency: currency,
+            valueHash: trustLineValueHash
+        )
+        let accountRoot = XRPLLocalProof.computeRoot(
+            leafHash: accountLeaf,
+            witnesses: [XRPLProofWitness(hash: trustLineLeaf, position: .right)]
+        )!
+        let paymentLeaf = XRPLLocalProof.fixtureLeafHash(
+            kind: .payment,
+            subject: subject,
+            counterparty: counterparty,
+            currency: currency,
+            transactionHash: transactionHash,
+            valueHash: paymentValueHash
+        )
+        let ledger = XRPLValidatedLedgerSnapshot(
+            network: network,
+            ledgerIndex: 90_000_000,
+            ledgerHash: XRPLHash.sha256Hex("\(network.chainRef)|90000000|validated-ledger"),
+            parentHash: XRPLHash.sha256Hex("\(network.chainRef)|89999999|validated-ledger"),
+            accountStateRoot: accountRoot,
+            transactionMetadataRoot: paymentLeaf,
+            closeTime: 1_716_000_000,
+            validated: true,
+            source: "fixture"
+        )
+        let validationProof = XRPLLedgerValidationProof(
+            listID: unlSet.listID,
+            ledgerHash: ledger.ledgerHash,
+            ledgerIndex: ledger.ledgerIndex,
+            votes: [
+                XRPLValidationVote(validatorPublicKey: validators[0].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                XRPLValidationVote(validatorPublicKey: validators[1].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                XRPLValidationVote(validatorPublicKey: validators[2].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                XRPLValidationVote(validatorPublicKey: validators[3].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                XRPLValidationVote(validatorPublicKey: validators[4].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex, signed: false)
+            ],
+            source: "fixture"
+        )
+        let proof: XRPLLocalProof
+        switch kind {
+        case .account:
+            proof = XRPLLocalProof(
+                proofID: "xrpl-fixture-account",
+                kind: .account,
+                network: network,
+                subject: subject,
+                expectedValueHash: accountValueHash,
+                ledgerHash: ledger.ledgerHash,
+                ledgerIndex: ledger.ledgerIndex,
+                expectedRoot: ledger.accountStateRoot,
+                leafHash: accountLeaf,
+                witnesses: [XRPLProofWitness(hash: trustLineLeaf, position: .right)],
+                source: "fixture"
+            )
+        case .trustLine:
+            proof = XRPLLocalProof(
+                proofID: "xrpl-fixture-trust-line",
+                kind: .trustLine,
+                network: network,
+                subject: subject,
+                counterparty: counterparty,
+                currency: currency,
+                expectedValueHash: trustLineValueHash,
+                ledgerHash: ledger.ledgerHash,
+                ledgerIndex: ledger.ledgerIndex,
+                expectedRoot: ledger.accountStateRoot,
+                leafHash: trustLineLeaf,
+                witnesses: [XRPLProofWitness(hash: accountLeaf, position: .left)],
+                source: "fixture"
+            )
+        case .payment:
+            proof = XRPLLocalProof(
+                proofID: "xrpl-fixture-payment",
+                kind: .payment,
+                network: network,
+                subject: subject,
+                counterparty: counterparty,
+                currency: currency,
+                transactionHash: transactionHash,
+                expectedValueHash: paymentValueHash,
+                ledgerHash: ledger.ledgerHash,
+                ledgerIndex: ledger.ledgerIndex,
+                expectedRoot: ledger.transactionMetadataRoot,
+                leafHash: paymentLeaf,
+                witnesses: [],
+                source: "fixture"
+            )
+        }
+        return XRPLProofVerificationBundle(
+            ledger: ledger,
+            unlSet: unlSet,
+            validationProof: validationProof,
+            proof: proof
+        )
+    }
+
     private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
         [
             "chain": header.chain.chainID,
@@ -5361,6 +5684,42 @@ struct dBrowserTests {
         ]
     }
 
+    private static func xrplLedgerBody(_ ledger: XRPLValidatedLedgerSnapshot) -> [String: Any] {
+        [
+            "network": ledger.network.chainRef,
+            "chain_ref": ledger.network.chainRef,
+            "ledger_index": ledger.ledgerIndex,
+            "ledger_hash": ledger.ledgerHash,
+            "parent_hash": ledger.parentHash,
+            "account_state_root": ledger.accountStateRoot,
+            "transaction_metadata_root": ledger.transactionMetadataRoot,
+            "close_time": ledger.closeTime,
+            "validated": ledger.validated,
+            "source": ledger.source ?? "fixture"
+        ]
+    }
+
+    private static func xrplUNLSetBody(_ unlSet: XRPLUNLSet) -> [String: Any] {
+        [
+            "network": unlSet.network.chainRef,
+            "chain_ref": unlSet.network.chainRef,
+            "list_id": unlSet.listID,
+            "validators": unlSet.validators.map { validator in
+                [
+                    "validator_public_key": validator.validatorPublicKey,
+                    "weight": validator.weight,
+                    "domain": validator.domain ?? "",
+                    "disabled": validator.disabled
+                ] as [String: Any]
+            },
+            "negative_unl": unlSet.negativeUNL,
+            "quorum_numerator": unlSet.quorumNumerator,
+            "quorum_denominator": unlSet.quorumDenominator,
+            "hash": unlSet.hash,
+            "source": unlSet.source ?? "fixture"
+        ]
+    }
+
     private static func evmProofResultBody(
         verified: Bool,
         state: String,
@@ -5468,6 +5827,24 @@ struct dBrowserTests {
             "proof_id": bundle.proof?.proofID ?? "tron-fixture-token",
             "kind": bundle.proof?.kind.rawValue ?? "token",
             "summary": "TRON token proof checked against solid block."
+        ]
+    }
+
+    private static func xrplProofResultBody(
+        verified: Bool,
+        state: String,
+        network: XRPLNetwork
+    ) -> [String: Any] {
+        let bundle = xrplProofBundle(network: network)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": network.chainRef,
+            "ledger_index": bundle.ledger.ledgerIndex,
+            "ledger_hash": bundle.ledger.ledgerHash,
+            "proof_id": bundle.proof?.proofID ?? "xrpl-fixture-account",
+            "kind": bundle.proof?.kind.rawValue ?? "account",
+            "summary": "XRPL account proof checked against validated ledger."
         ]
     }
 

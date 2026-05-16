@@ -23,15 +23,15 @@
 
 - [x] Triage XRP Ledger validated/fallback trust-state gap from #66.
 - [x] Create tracker issue for Swift XRP Ledger chain trust foundation (#99).
-- [ ] Add Swift XRPL network metadata, endpoint config, validated ledger, UNL/trust-anchor, validation vote, account/trust-line/payment proof, verification result, and service snapshot models.
-- [ ] Add fixture-backed UNL quorum validation with configured/effective UNL assumptions.
-- [ ] Add stale validated-ledger detection and unsupported production verifier labeling.
-- [ ] Add local account, trust-line, and payment metadata proof verification bound to validated ledger roots.
-- [ ] Add weak quorum, stale, failed, and API/RPC fallback labeling.
-- [ ] Add XRPL service client contract and fixture-backed `services/chain-trust` endpoints.
-- [ ] Bind XRPL snapshots into the shared chain trust registry/runtime status.
-- [ ] Add focused Swift unit tests for routing, status modeling, stale detection, proof verification, fallback, service contract, registry updates, and runtime refresh.
-- [ ] Verify local service checks plus Swift tests/build.
+- [x] Add Swift XRPL network metadata, endpoint config, validated ledger, UNL/trust-anchor, validation vote, account/trust-line/payment proof, verification result, and service snapshot models.
+- [x] Add fixture-backed UNL quorum validation with configured/effective UNL assumptions.
+- [x] Add stale validated-ledger detection and unsupported production verifier labeling.
+- [x] Add local account, trust-line, and payment metadata proof verification bound to validated ledger roots.
+- [x] Add weak quorum, stale, failed, and API/RPC fallback labeling.
+- [x] Add XRPL service client contract and fixture-backed `services/chain-trust` endpoints.
+- [x] Bind XRPL snapshots into the shared chain trust registry/runtime status.
+- [x] Add focused Swift unit tests for routing, status modeling, stale detection, proof verification, fallback, service contract, registry updates, and runtime refresh.
+- [x] Verify local service checks plus Swift tests/build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close completed GitHub issues.
 

@@ -316,6 +316,126 @@ const tronFixtureProof = {
   source: mode
 };
 
+const xrplNetworks = {
+  'xrp-ledger': {
+    network: 'xrp-ledger',
+    chain_ref: 'xrp-ledger',
+    network_id: 'mainnet',
+    display_name: 'XRP Ledger',
+    sync_state: 'proof_checked',
+    limitations: ['Fixture-backed UNL quorum checks do not yet replace a production XRPL validator or rippled verification path.']
+  },
+  'xrp-testnet': {
+    network: 'xrp-testnet',
+    chain_ref: 'xrp-testnet',
+    network_id: 'testnet',
+    display_name: 'XRP Ledger Testnet',
+    sync_state: 'api_fallback',
+    limitations: ['XRPL test networks are modeled for explicit fallback and fixture checks only.']
+  },
+  'xrp-devnet': {
+    network: 'xrp-devnet',
+    chain_ref: 'xrp-devnet',
+    network_id: 'devnet',
+    display_name: 'XRP Ledger Devnet',
+    sync_state: 'api_fallback',
+    limitations: ['XRPL test networks are modeled for explicit fallback and fixture checks only.']
+  }
+};
+const xrplValidatorA = 'n9xrplvalidatora';
+const xrplValidatorB = 'n9xrplvalidatorb';
+const xrplValidatorC = 'n9xrplvalidatorc';
+const xrplValidatorD = 'n9xrplvalidatord';
+const xrplValidatorE = 'n9xrplvalidatore';
+const xrplFixtureValidators = [
+  { validator_public_key: xrplValidatorA, weight: 1, domain: 'validator-a.example', disabled: false },
+  { validator_public_key: xrplValidatorB, weight: 1, domain: 'validator-b.example', disabled: false },
+  { validator_public_key: xrplValidatorC, weight: 1, domain: 'validator-c.example', disabled: false },
+  { validator_public_key: xrplValidatorD, weight: 1, domain: 'validator-d.example', disabled: false },
+  { validator_public_key: xrplValidatorE, weight: 1, domain: 'validator-e.example', disabled: true }
+];
+const xrplFixtureNegativeUNL = [xrplValidatorE];
+const xrplFixtureUNLHash = xrplUNLSetHash(xrplFixtureValidators, xrplFixtureNegativeUNL);
+const xrplFixtureSubject = 'raccountfixture';
+const xrplFixtureCounterparty = 'rcounterpartyfixture';
+const xrplFixtureCurrency = 'USD';
+const xrplFixtureTransactionHash = sha256HexFromString('xrpl-payment-fixture');
+const xrplFixtureAccountValueHash = sha256HexFromString('xrpl-account-balance:100');
+const xrplFixtureTrustLineValueHash = sha256HexFromString('xrpl-trustline-usd:25');
+const xrplFixturePaymentValueHash = sha256HexFromString('xrpl-payment:tesSUCCESS');
+const xrplFixtureAccountLeaf = xrplFixtureLeafHash('account', xrplFixtureSubject, '', '', '', xrplFixtureAccountValueHash);
+const xrplFixtureTrustLineLeaf = xrplFixtureLeafHash(
+  'trust_line',
+  xrplFixtureSubject,
+  xrplFixtureCounterparty,
+  xrplFixtureCurrency,
+  '',
+  xrplFixtureTrustLineValueHash
+);
+const xrplFixtureAccountStateRoot = computeXRPLLocalMerkleRoot(
+  xrplFixtureAccountLeaf,
+  [{ hash: xrplFixtureTrustLineLeaf, position: 'right' }]
+);
+const xrplFixturePaymentLeaf = xrplFixtureLeafHash(
+  'payment',
+  xrplFixtureSubject,
+  xrplFixtureCounterparty,
+  xrplFixtureCurrency,
+  xrplFixtureTransactionHash,
+  xrplFixturePaymentValueHash
+);
+const xrplFixtureLedgerHash = sha256HexFromString('xrp-ledger|90000000|validated-ledger');
+const xrplFixtureLedger = {
+  network: 'xrp-ledger',
+  chain_ref: 'xrp-ledger',
+  ledger_index: 90000000,
+  ledger_hash: xrplFixtureLedgerHash,
+  parent_hash: sha256HexFromString('xrp-ledger|89999999|validated-ledger'),
+  account_state_root: xrplFixtureAccountStateRoot,
+  transaction_metadata_root: xrplFixturePaymentLeaf,
+  close_time: 1716000000,
+  validated: true,
+  source: mode
+};
+const xrplFixtureUNLSet = {
+  network: 'xrp-ledger',
+  chain_ref: 'xrp-ledger',
+  list_id: 'fixture-default-unl',
+  validators: xrplFixtureValidators,
+  negative_unl: xrplFixtureNegativeUNL,
+  quorum_numerator: 4,
+  quorum_denominator: 5,
+  hash: xrplFixtureUNLHash,
+  source: mode
+};
+const xrplFixtureValidationProof = {
+  list_id: xrplFixtureUNLSet.list_id,
+  ledger_hash: xrplFixtureLedger.ledger_hash,
+  ledger_index: xrplFixtureLedger.ledger_index,
+  votes: [
+    { validator_public_key: xrplValidatorA, ledger_hash: xrplFixtureLedger.ledger_hash, ledger_index: xrplFixtureLedger.ledger_index, signed: true, signature: 'fixture-xrpl-a' },
+    { validator_public_key: xrplValidatorB, ledger_hash: xrplFixtureLedger.ledger_hash, ledger_index: xrplFixtureLedger.ledger_index, signed: true, signature: 'fixture-xrpl-b' },
+    { validator_public_key: xrplValidatorC, ledger_hash: xrplFixtureLedger.ledger_hash, ledger_index: xrplFixtureLedger.ledger_index, signed: true, signature: 'fixture-xrpl-c' },
+    { validator_public_key: xrplValidatorD, ledger_hash: xrplFixtureLedger.ledger_hash, ledger_index: xrplFixtureLedger.ledger_index, signed: true, signature: 'fixture-xrpl-d' },
+    { validator_public_key: xrplValidatorE, ledger_hash: xrplFixtureLedger.ledger_hash, ledger_index: xrplFixtureLedger.ledger_index, signed: false, signature: null }
+  ],
+  source: mode
+};
+const xrplFixtureProof = {
+  proof_id: 'xrpl-fixture-account',
+  kind: 'account',
+  network: 'xrp-ledger',
+  chain_ref: 'xrp-ledger',
+  subject: xrplFixtureSubject,
+  expected_value_hash: xrplFixtureAccountValueHash,
+  ledger_hash: xrplFixtureLedger.ledger_hash,
+  ledger_index: xrplFixtureLedger.ledger_index,
+  expected_root: xrplFixtureLedger.account_state_root,
+  leaf_hash: xrplFixtureAccountLeaf,
+  witnesses: [{ hash: xrplFixtureTrustLineLeaf, position: 'right' }],
+  source: mode
+};
+
 const solanaClusters = {
   'mainnet-beta': {
     cluster: 'mainnet-beta',
@@ -580,6 +700,7 @@ if (args.has('--snapshot')) {
     evm: evmStatusFor('ethereum-mainnet'),
     avalanche: avalancheStatusFor('avalanche-c'),
     tron: tronStatusFor('tron-mainnet'),
+    xrpl: xrplStatusFor('xrp-ledger'),
     solana: solanaStatusFor('mainnet-beta'),
     cosmos: cosmosStatusFor('cosmoshub-4'),
     substrate: substrateStatusFor('polkadot')
@@ -592,6 +713,7 @@ if (args.has('--lint')) {
   assertEvmFixture();
   assertAvalancheFixture();
   assertTronFixture();
+  assertXRPLFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -604,6 +726,7 @@ if (args.has('--self-test')) {
   assertEvmFixture();
   assertAvalancheFixture();
   assertTronFixture();
+  assertXRPLFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -654,6 +777,18 @@ if (args.has('--self-test')) {
 
   if (!tronResult.verified || tronResult.state !== 'proof_checked') {
     console.error('[chain-trust] TRON self-test failed:', tronResult.summary);
+    process.exit(1);
+  }
+
+  const xrplResult = verifyXRPLProof({
+    ledger: xrplFixtureLedger,
+    unl_set: xrplFixtureUNLSet,
+    validation_proof: xrplFixtureValidationProof,
+    proof: xrplFixtureProof
+  });
+
+  if (!xrplResult.verified || xrplResult.state !== 'proof_checked') {
+    console.error('[chain-trust] XRPL self-test failed:', xrplResult.summary);
     process.exit(1);
   }
 
@@ -725,6 +860,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (url.pathname === '/v1/tron/status' || url.pathname === '/tron/status')) {
     return sendJson(res, 200, tronStatusFor(url.searchParams.get('network')));
+  }
+
+  if (req.method === 'GET' && (url.pathname === '/v1/xrpl/status' || url.pathname === '/xrpl/status')) {
+    return sendJson(res, 200, xrplStatusFor(url.searchParams.get('network')));
   }
 
   if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
@@ -801,6 +940,24 @@ const server = http.createServer(async (req, res) => {
         chain_ref: null,
         block_number: null,
         block_id: null,
+        proof_id: null,
+        kind: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/xrpl/verify-proof' || url.pathname === '/xrpl/verify-proof')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifyXRPLProof(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        ledger_index: null,
+        ledger_hash: null,
         proof_id: null,
         kind: null,
         summary: String(err.message ?? err)
@@ -962,6 +1119,37 @@ function tronStatusFor(requestedNetwork) {
     witness_set: witnessSet,
     peer_count: 0,
     proof_source: 'fixture-witness-token-proof',
+    stale,
+    limitations: network.limitations,
+    mode
+  };
+}
+
+function xrplStatusFor(requestedNetwork) {
+  const network = resolveXRPLNetwork(requestedNetwork);
+  const latestValidatedLedger = {
+    ...xrplFixtureLedger,
+    network: network.network,
+    chain_ref: network.chain_ref,
+    validated: network.sync_state !== 'api_fallback'
+  };
+  const unlSet = {
+    ...xrplFixtureUNLSet,
+    network: network.network,
+    chain_ref: network.chain_ref
+  };
+  const stale = network.sync_state === 'stale';
+  return {
+    ok: true,
+    service_available: network.sync_state !== 'api_fallback',
+    network: network.network,
+    chain_ref: network.chain_ref,
+    sync_state: network.sync_state,
+    source: mode,
+    latest_validated_ledger: latestValidatedLedger,
+    unl_set: unlSet,
+    peer_count: 0,
+    proof_source: 'fixture-unl-account-payment-proof',
     stale,
     limitations: network.limitations,
     mode
@@ -1265,6 +1453,85 @@ function verifyTronProof(payload) {
     summary: proof
       ? `TRON ${proof.kind} proof checked against solid block ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'}.`
       : `TRON solid block ${Number.isFinite(blockNumber) ? blockNumber : 'unknown'} checked with fixture witness quorum.`
+  };
+}
+
+function verifyXRPLProof(payload) {
+  const ledger = requireObject(payload.ledger, 'ledger');
+  const unlSet = requireObject(payload.unl_set ?? payload.unlSet, 'unl_set');
+  const validationProof = requireObject(payload.validation_proof ?? payload.validationProof, 'validation_proof');
+  const proof = payload.proof;
+  const network = resolveXRPLNetwork(ledger.network ?? ledger.chain_ref ?? ledger.chainRef);
+  const unlNetwork = resolveXRPLNetwork(unlSet.network ?? unlSet.chain_ref ?? unlSet.chainRef ?? network.network);
+  const ledgerIndex = Number(ledger.ledger_index ?? ledger.ledgerIndex);
+  const ledgerHash = normalizeHex(requireString(ledger.ledger_hash ?? ledger.ledgerHash, 'ledger.ledger_hash'));
+  const unlHash = normalizeHex(requireString(unlSet.hash, 'unl_set.hash'));
+  const computedUNLHash = xrplUNLSetHash(
+    Array.isArray(unlSet.validators) ? unlSet.validators : [],
+    Array.isArray(unlSet.negative_unl ?? unlSet.negativeUNL) ? unlSet.negative_unl ?? unlSet.negativeUNL : []
+  );
+  const proofLedgerIndex = Number(validationProof.ledger_index ?? validationProof.ledgerIndex);
+  const proofLedgerHash = normalizeHex(requireString(validationProof.ledger_hash ?? validationProof.ledgerHash, 'validation_proof.ledger_hash'));
+  const listID = requireString(unlSet.list_id ?? unlSet.listID ?? 'default-unl', 'unl_set.list_id');
+  const proofListID = requireString(validationProof.list_id ?? validationProof.listID ?? listID, 'validation_proof.list_id');
+
+  if (network.chain_ref !== unlNetwork.chain_ref) {
+    return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL ledger network does not match the UNL trust-anchor set.');
+  }
+  if (ledger.validated === false) {
+    return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL ledger is not marked validated; API/RPC data must remain fallback-labeled.');
+  }
+  if (proofListID !== listID || proofLedgerIndex !== ledgerIndex || proofLedgerHash !== ledgerHash) {
+    return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL validation proof targets a different ledger or UNL list.');
+  }
+  if (unlHash !== computedUNLHash) {
+    return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL UNL trust-anchor hash is invalid.');
+  }
+  if (!hasXRPLQuorum(unlSet, xrplSignedValidators(validationProof, ledgerHash, ledgerIndex))) {
+    return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL validation proof did not reach the configured UNL quorum.');
+  }
+
+  if (proof) {
+    const kind = requireString(proof.kind, 'proof.kind');
+    if (!['account', 'trust_line', 'payment'].includes(kind)) {
+      throw Object.assign(new Error(`unsupported XRPL proof kind: ${kind}`), { statusCode: 400 });
+    }
+    const proofNetwork = resolveXRPLNetwork(proof.network ?? proof.chain_ref ?? proof.chainRef ?? network.network);
+    const proofLedgerHash = normalizeHex(requireString(proof.ledger_hash ?? proof.ledgerHash, 'proof.ledger_hash'));
+    const proofLedgerIndex = Number(proof.ledger_index ?? proof.ledgerIndex);
+    if (proofNetwork.chain_ref !== network.chain_ref || proofLedgerHash !== ledgerHash || proofLedgerIndex !== ledgerIndex) {
+      return xrplFailure(network, ledgerIndex, ledgerHash, proof, 'XRPL proof references a different network or ledger.');
+    }
+    const ledgerRoot = normalizeHex(requireString(
+      kind === 'payment'
+        ? ledger.transaction_metadata_root ?? ledger.transactionMetadataRoot
+        : ledger.account_state_root ?? ledger.accountStateRoot,
+      `${kind} root`
+    ));
+    const expectedRoot = normalizeHex(requireString(proof.expected_root ?? proof.expectedRoot, 'proof.expected_root'));
+    if (expectedRoot !== ledgerRoot) {
+      return xrplFailure(network, ledgerIndex, ledgerHash, proof, `XRPL ${kind} proof expected root does not match the validated ledger root.`);
+    }
+    const computedRoot = computeXRPLLocalMerkleRoot(
+      requireString(proof.leaf_hash ?? proof.leafHash, 'proof.leaf_hash'),
+      Array.isArray(proof.witnesses) ? proof.witnesses : []
+    );
+    if (computedRoot !== expectedRoot) {
+      return xrplFailure(network, ledgerIndex, ledgerHash, proof, `XRPL ${kind} proof did not resolve to the expected root.`);
+    }
+  }
+
+  return {
+    verified: true,
+    state: 'proof_checked',
+    chain_ref: network.chain_ref,
+    ledger_index: Number.isFinite(ledgerIndex) ? ledgerIndex : null,
+    ledger_hash: ledgerHash,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
+    summary: proof
+      ? `XRPL ${proof.kind} proof checked against validated ledger ${Number.isFinite(ledgerIndex) ? ledgerIndex : 'unknown'}.`
+      : `XRPL validated ledger ${Number.isFinite(ledgerIndex) ? ledgerIndex : 'unknown'} checked with fixture UNL quorum.`
   };
 }
 
@@ -1588,6 +1855,22 @@ function assertTronFixture() {
   }
 }
 
+function assertXRPLFixture() {
+  const computedUNLHash = xrplUNLSetHash(xrplFixtureValidators, xrplFixtureNegativeUNL);
+  if (computedUNLHash !== xrplFixtureUNLHash) {
+    throw new Error(`XRPL UNL fixture mismatch: ${computedUNLHash}`);
+  }
+  const result = verifyXRPLProof({
+    ledger: xrplFixtureLedger,
+    unl_set: xrplFixtureUNLSet,
+    validation_proof: xrplFixtureValidationProof,
+    proof: xrplFixtureProof
+  });
+  if (!result.verified) {
+    throw new Error(`XRPL proof fixture mismatch: ${result.summary}`);
+  }
+}
+
 function assertSolanaFixture() {
   const computedRoot = computeSolanaLocalMerkleRoot(solanaFixtureProof.leaf_hash, solanaFixtureProof.witnesses);
   if (computedRoot !== solanaFixtureSlotRoot.account_root) {
@@ -1670,6 +1953,19 @@ function tronFailure(network, blockNumber, blockID, proof, summary) {
     chain_ref: network.chain_ref,
     block_number: Number.isFinite(blockNumber) ? blockNumber : null,
     block_id: blockID,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
+    summary
+  };
+}
+
+function xrplFailure(network, ledgerIndex, ledgerHash, proof, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: network.chain_ref,
+    ledger_index: Number.isFinite(ledgerIndex) ? ledgerIndex : null,
+    ledger_hash: ledgerHash,
     proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
     kind: proof ? String(proof.kind ?? '') : null,
     summary
@@ -1767,6 +2063,24 @@ function resolveTronNetwork(requestedNetwork) {
     return tronNetworks['tron-mainnet'];
   }
   return tronNetworks['tron-mainnet'];
+}
+
+function resolveXRPLNetwork(requestedNetwork) {
+  if (!requestedNetwork) {
+    return xrplNetworks['xrp-ledger'];
+  }
+  const normalized = String(requestedNetwork)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (xrplNetworks[normalized]) {
+    return xrplNetworks[normalized];
+  }
+  if (normalized === 'xrpl' || normalized === 'xrp' || normalized === 'mainnet' || normalized === 'xrpl-mainnet') {
+    return xrplNetworks['xrp-ledger'];
+  }
+  return xrplNetworks['xrp-ledger'];
 }
 
 function resolveSolanaCluster(requestedCluster) {
@@ -1906,6 +2220,83 @@ function tronFixtureLeafHash(kind, subject, tokenID, valueHash) {
   ].join('|'));
 }
 
+function xrplUNLSetHash(validators, negativeUNL = []) {
+  const validatorPayload = validators
+    .map(validator => {
+      const key = normalizeID(requireString(validator.validator_public_key ?? validator.validatorPublicKey, 'validator.validator_public_key'));
+      const state = validator.disabled === true ? 'disabled' : 'active';
+      return `${key}:${Number(validator.weight ?? 1)}:${state}`;
+    })
+    .sort()
+    .join('|');
+  const negativePayload = negativeUNL
+    .map(validator => normalizeID(requireString(validator, 'negative_unl validator')))
+    .sort()
+    .join('|');
+  return sha256HexFromString(`${validatorPayload}#negative:${negativePayload}`);
+}
+
+function xrplSignedValidators(validationProof, ledgerHash, ledgerIndex) {
+  return new Set((Array.isArray(validationProof.votes) ? validationProof.votes : [])
+    .filter(vote => {
+      if (vote.signed === false) {
+        return false;
+      }
+      const voteLedgerHash = normalizeHex(requireString(vote.ledger_hash ?? vote.ledgerHash, 'vote.ledger_hash'));
+      const voteLedgerIndex = Number(vote.ledger_index ?? vote.ledgerIndex);
+      return voteLedgerHash === ledgerHash && voteLedgerIndex === ledgerIndex;
+    })
+    .map(vote => normalizeID(requireString(vote.validator_public_key ?? vote.validatorPublicKey, 'vote.validator_public_key'))));
+}
+
+function hasXRPLQuorum(unlSet, validatorPublicKeys) {
+  const validators = Array.isArray(unlSet.validators) ? unlSet.validators : [];
+  const negativeUNL = new Set((Array.isArray(unlSet.negative_unl ?? unlSet.negativeUNL) ? unlSet.negative_unl ?? unlSet.negativeUNL : [])
+    .map(validator => normalizeID(requireString(validator, 'negative_unl validator'))));
+  const numerator = Number(unlSet.quorum_numerator ?? unlSet.quorumNumerator ?? 4);
+  const denominator = Number(unlSet.quorum_denominator ?? unlSet.quorumDenominator ?? 5);
+  let configuredWeight = 0;
+  let effectiveWeight = 0;
+  let signedWeight = 0;
+
+  for (const validator of validators) {
+    const weight = Number(validator.weight ?? 1);
+    if (!Number.isFinite(weight) || weight < 0) {
+      continue;
+    }
+    configuredWeight += weight;
+    const key = normalizeID(requireString(validator.validator_public_key ?? validator.validatorPublicKey, 'validator.validator_public_key'));
+    const effective = validator.disabled !== true && !negativeUNL.has(key);
+    if (effective) {
+      effectiveWeight += weight;
+      if (validatorPublicKeys.has(key)) {
+        signedWeight += weight;
+      }
+    }
+  }
+
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0 || effectiveWeight <= 0) {
+    return false;
+  }
+
+  const required = Math.max(
+    Math.ceil((effectiveWeight * numerator) / denominator),
+    Math.ceil((configuredWeight * 3) / 5)
+  );
+  return signedWeight >= required;
+}
+
+function xrplFixtureLeafHash(kind, subject, counterparty, currency, transactionHash, valueHash) {
+  return sha256HexFromString([
+    kind,
+    String(subject).toLowerCase(),
+    String(counterparty ?? '').toLowerCase(),
+    String(currency ?? '').toLowerCase(),
+    transactionHash ? normalizeHex(transactionHash) : '',
+    normalizeHex(valueHash)
+  ].join('|'));
+}
+
 function solanaFixtureLeafHash(kind, subject, value) {
   return sha256HexFromString([
     kind,
@@ -1951,6 +2342,21 @@ function computeTronLocalMerkleRoot(leafHash, witnesses) {
     const position = requireString(witness.position, 'witness.position');
     if (position !== 'left' && position !== 'right') {
       throw Object.assign(new Error(`unsupported TRON witness position: ${position}`), { statusCode: 400 });
+    }
+    node = position === 'left'
+      ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
+      : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
+  }
+  return node.toString('hex');
+}
+
+function computeXRPLLocalMerkleRoot(leafHash, witnesses) {
+  let node = Buffer.from(normalizeHex(leafHash), 'hex');
+  for (const witness of witnesses) {
+    const siblingHash = Buffer.from(normalizeHex(requireString(witness.hash, 'witness.hash')), 'hex');
+    const position = requireString(witness.position, 'witness.position');
+    if (position !== 'left' && position !== 'right') {
+      throw Object.assign(new Error(`unsupported XRPL witness position: ${position}`), { statusCode: 400 });
     }
     node = position === 'left'
       ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
