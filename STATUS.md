@@ -28,8 +28,8 @@
 - [x] Expose Bitcoin transaction inclusion verification endpoints that check header hash and Merkle evidence locally.
 - [x] Add root workspace script coverage for the chain-trust service.
 - [x] Verify service lint/self-test plus Swift tests/build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift Bitcoin Light Client Foundation Slice
 
