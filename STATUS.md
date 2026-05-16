@@ -43,9 +43,9 @@
 
 ## Push All Dangling Work
 
-- [ ] Commit semantic groups for all current changes.
-- [ ] Commit any remaining miscellaneous changes in a final cleanup commit.
-- [ ] Push all resulting commits.
+- [x] Commit semantic groups for all current changes.
+- [x] Commit any remaining miscellaneous changes in a final cleanup commit.
+- [x] Push all resulting commits.
 
 ## Runtime Button Details
 
