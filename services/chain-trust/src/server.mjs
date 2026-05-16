@@ -436,6 +436,208 @@ const xrplFixtureProof = {
   source: mode
 };
 
+const moveChains = {
+  'sui-mainnet': {
+    chain: 'sui-mainnet',
+    chain_ref: 'sui-mainnet',
+    chain_id: 'sui-mainnet',
+    kind: 'sui',
+    display_name: 'Sui',
+    sync_state: 'proof_checked',
+    limitations: ['Fixture-backed Sui checkpoint quorum checks do not yet replace a production Sui light client.']
+  },
+  'sui-testnet': {
+    chain: 'sui-testnet',
+    chain_ref: 'sui-testnet',
+    chain_id: 'sui-testnet',
+    kind: 'sui',
+    display_name: 'Sui Testnet',
+    sync_state: 'api_fallback',
+    limitations: ['Sui non-mainnet routes are modeled for explicit fallback and fixture checks only.']
+  },
+  'sui-devnet': {
+    chain: 'sui-devnet',
+    chain_ref: 'sui-devnet',
+    chain_id: 'sui-devnet',
+    kind: 'sui',
+    display_name: 'Sui Devnet',
+    sync_state: 'api_fallback',
+    limitations: ['Sui non-mainnet routes are modeled for explicit fallback and fixture checks only.']
+  },
+  'aptos-mainnet': {
+    chain: 'aptos-mainnet',
+    chain_ref: 'aptos-mainnet',
+    chain_id: 'aptos-mainnet',
+    kind: 'aptos',
+    display_name: 'Aptos',
+    sync_state: 'proof_checked',
+    limitations: ['Fixture-backed Aptos ledger-info quorum checks do not yet replace a production Aptos light client.']
+  },
+  'aptos-testnet': {
+    chain: 'aptos-testnet',
+    chain_ref: 'aptos-testnet',
+    chain_id: 'aptos-testnet',
+    kind: 'aptos',
+    display_name: 'Aptos Testnet',
+    sync_state: 'api_fallback',
+    limitations: ['Aptos non-mainnet routes are modeled for explicit fallback and fixture checks only.']
+  },
+  'aptos-devnet': {
+    chain: 'aptos-devnet',
+    chain_ref: 'aptos-devnet',
+    chain_id: 'aptos-devnet',
+    kind: 'aptos',
+    display_name: 'Aptos Devnet',
+    sync_state: 'api_fallback',
+    limitations: ['Aptos non-mainnet routes are modeled for explicit fallback and fixture checks only.']
+  }
+};
+const suiValidatorA = 'sui-validator-a';
+const suiValidatorB = 'sui-validator-b';
+const suiValidatorC = 'sui-validator-c';
+const suiFixtureValidators = [
+  { validator_id: suiValidatorA, weight: 40, name: 'sui-a' },
+  { validator_id: suiValidatorB, weight: 35, name: 'sui-b' },
+  { validator_id: suiValidatorC, weight: 25, name: 'sui-c' }
+];
+const suiFixtureValidatorSetHash = moveValidatorSetHash(suiFixtureValidators);
+const suiFixtureObjectID = `0x${'a1'.repeat(32)}`;
+const suiFixtureTransactionDigest = sha256HexFromString('sui-transaction-effects-fixture');
+const suiFixtureObjectValueHash = sha256HexFromString('sui-object-owner:fixture');
+const suiFixtureEffectsValueHash = sha256HexFromString('sui-effects:success');
+const suiFixtureObjectLeaf = moveFixtureLeafHash('sui_object', 'sui-object-fixture', suiFixtureObjectID, '', '', suiFixtureObjectValueHash);
+const suiFixtureEffectsLeaf = moveFixtureLeafHash('sui_transaction_effects', 'sui-effects-fixture', '', '', suiFixtureTransactionDigest, suiFixtureEffectsValueHash);
+const suiFixtureStateRoot = computeMoveLocalMerkleRoot(
+  suiFixtureObjectLeaf,
+  [{ hash: suiFixtureEffectsLeaf, position: 'right' }]
+);
+const suiFixtureCheckpointDigest = sha256HexFromString('sui-mainnet|1000000|checkpoint');
+const suiFixtureCheckpoint = {
+  chain: 'sui-mainnet',
+  chain_ref: 'sui-mainnet',
+  chain_id: 'sui-mainnet',
+  sequence_number: 1000000,
+  epoch: 42,
+  digest: suiFixtureCheckpointDigest,
+  previous_digest: sha256HexFromString('sui-mainnet|999999|checkpoint'),
+  state_root: suiFixtureStateRoot,
+  transaction_effects_root: suiFixtureEffectsLeaf,
+  timestamp: 1717000000,
+  finalized: true,
+  source: mode
+};
+const suiFixtureValidatorSet = {
+  chain: 'sui-mainnet',
+  chain_ref: 'sui-mainnet',
+  epoch: suiFixtureCheckpoint.epoch,
+  validators: suiFixtureValidators,
+  quorum_numerator: 2,
+  quorum_denominator: 3,
+  hash: suiFixtureValidatorSetHash,
+  source: mode
+};
+const suiFixtureFinalityProof = {
+  epoch: suiFixtureCheckpoint.epoch,
+  target_digest: suiFixtureCheckpoint.digest,
+  target_sequence_number: suiFixtureCheckpoint.sequence_number,
+  signatures: [
+    { validator_id: suiValidatorA, checkpoint_digest: suiFixtureCheckpoint.digest, sequence_number: suiFixtureCheckpoint.sequence_number, signed: true, signature: 'fixture-sui-a' },
+    { validator_id: suiValidatorB, checkpoint_digest: suiFixtureCheckpoint.digest, sequence_number: suiFixtureCheckpoint.sequence_number, signed: true, signature: 'fixture-sui-b' },
+    { validator_id: suiValidatorC, checkpoint_digest: suiFixtureCheckpoint.digest, sequence_number: suiFixtureCheckpoint.sequence_number, signed: false, signature: null }
+  ],
+  source: mode
+};
+const suiFixtureProof = {
+  proof_id: 'sui-fixture-object',
+  kind: 'sui_object',
+  chain: 'sui-mainnet',
+  chain_ref: 'sui-mainnet',
+  subject: 'sui-object-fixture',
+  object_id: suiFixtureObjectID,
+  expected_value_hash: suiFixtureObjectValueHash,
+  checkpoint_digest: suiFixtureCheckpoint.digest,
+  sequence_number: suiFixtureCheckpoint.sequence_number,
+  expected_root: suiFixtureCheckpoint.state_root,
+  leaf_hash: suiFixtureObjectLeaf,
+  witnesses: [{ hash: suiFixtureEffectsLeaf, position: 'right' }],
+  source: mode
+};
+const aptosValidatorA = 'aptos-validator-a';
+const aptosValidatorB = 'aptos-validator-b';
+const aptosValidatorC = 'aptos-validator-c';
+const aptosFixtureValidators = [
+  { validator_id: aptosValidatorA, weight: 45, name: 'aptos-a' },
+  { validator_id: aptosValidatorB, weight: 35, name: 'aptos-b' },
+  { validator_id: aptosValidatorC, weight: 20, name: 'aptos-c' }
+];
+const aptosFixtureValidatorSetHash = moveValidatorSetHash(aptosFixtureValidators);
+const aptosFixtureAccountAddress = `0x${'b2'.repeat(32)}`;
+const aptosFixtureTransactionDigest = sha256HexFromString('aptos-transaction-fixture');
+const aptosFixtureAccountValueHash = sha256HexFromString('aptos-account-balance:100');
+const aptosFixtureTransactionValueHash = sha256HexFromString('aptos-transaction:success');
+const aptosFixtureAccountLeaf = moveFixtureLeafHash('aptos_account', 'aptos-account-fixture', '', aptosFixtureAccountAddress, '', aptosFixtureAccountValueHash);
+const aptosFixtureTransactionLeaf = moveFixtureLeafHash('aptos_transaction', 'aptos-transaction-fixture', '', '', aptosFixtureTransactionDigest, aptosFixtureTransactionValueHash);
+const aptosFixtureStateRoot = computeMoveLocalMerkleRoot(
+  aptosFixtureAccountLeaf,
+  [{ hash: aptosFixtureTransactionLeaf, position: 'right' }]
+);
+const aptosFixtureLedgerInfoHash = sha256HexFromString('aptos-mainnet|250000000|ledger-info');
+const aptosFixtureCheckpoint = {
+  chain: 'aptos-mainnet',
+  chain_ref: 'aptos-mainnet',
+  chain_id: 'aptos-mainnet',
+  sequence_number: 250000000,
+  ledger_version: 250000000,
+  epoch: 900,
+  digest: aptosFixtureLedgerInfoHash,
+  ledger_info_hash: aptosFixtureLedgerInfoHash,
+  previous_digest: sha256HexFromString('aptos-mainnet|249999999|ledger-info'),
+  state_root: aptosFixtureStateRoot,
+  transaction_effects_root: aptosFixtureTransactionLeaf,
+  transaction_accumulator_root: aptosFixtureTransactionLeaf,
+  timestamp: 1718000000,
+  finalized: true,
+  source: mode
+};
+const aptosFixtureValidatorSet = {
+  chain: 'aptos-mainnet',
+  chain_ref: 'aptos-mainnet',
+  epoch: aptosFixtureCheckpoint.epoch,
+  validators: aptosFixtureValidators,
+  quorum_numerator: 2,
+  quorum_denominator: 3,
+  hash: aptosFixtureValidatorSetHash,
+  source: mode
+};
+const aptosFixtureFinalityProof = {
+  epoch: aptosFixtureCheckpoint.epoch,
+  target_digest: aptosFixtureCheckpoint.digest,
+  target_sequence_number: aptosFixtureCheckpoint.sequence_number,
+  signatures: [
+    { validator_id: aptosValidatorA, ledger_info_hash: aptosFixtureCheckpoint.digest, sequence_number: aptosFixtureCheckpoint.sequence_number, signed: true, signature: 'fixture-aptos-a' },
+    { validator_id: aptosValidatorB, ledger_info_hash: aptosFixtureCheckpoint.digest, sequence_number: aptosFixtureCheckpoint.sequence_number, signed: true, signature: 'fixture-aptos-b' },
+    { validator_id: aptosValidatorC, ledger_info_hash: aptosFixtureCheckpoint.digest, sequence_number: aptosFixtureCheckpoint.sequence_number, signed: false, signature: null }
+  ],
+  source: mode
+};
+const aptosFixtureProof = {
+  proof_id: 'aptos-fixture-account',
+  kind: 'aptos_account',
+  chain: 'aptos-mainnet',
+  chain_ref: 'aptos-mainnet',
+  subject: 'aptos-account-fixture',
+  account_address: aptosFixtureAccountAddress,
+  expected_value_hash: aptosFixtureAccountValueHash,
+  checkpoint_digest: aptosFixtureCheckpoint.digest,
+  ledger_info_hash: aptosFixtureCheckpoint.digest,
+  sequence_number: aptosFixtureCheckpoint.sequence_number,
+  ledger_version: aptosFixtureCheckpoint.sequence_number,
+  expected_root: aptosFixtureCheckpoint.state_root,
+  leaf_hash: aptosFixtureAccountLeaf,
+  witnesses: [{ hash: aptosFixtureTransactionLeaf, position: 'right' }],
+  source: mode
+};
+
 const solanaClusters = {
   'mainnet-beta': {
     cluster: 'mainnet-beta',
@@ -701,6 +903,10 @@ if (args.has('--snapshot')) {
     avalanche: avalancheStatusFor('avalanche-c'),
     tron: tronStatusFor('tron-mainnet'),
     xrpl: xrplStatusFor('xrp-ledger'),
+    move: {
+      sui: moveStatusFor('sui-mainnet'),
+      aptos: moveStatusFor('aptos-mainnet')
+    },
     solana: solanaStatusFor('mainnet-beta'),
     cosmos: cosmosStatusFor('cosmoshub-4'),
     substrate: substrateStatusFor('polkadot')
@@ -714,6 +920,7 @@ if (args.has('--lint')) {
   assertAvalancheFixture();
   assertTronFixture();
   assertXRPLFixture();
+  assertMoveFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -727,6 +934,7 @@ if (args.has('--self-test')) {
   assertAvalancheFixture();
   assertTronFixture();
   assertXRPLFixture();
+  assertMoveFixture();
   assertSolanaFixture();
   assertCosmosFixture();
   assertSubstrateFixture();
@@ -789,6 +997,30 @@ if (args.has('--self-test')) {
 
   if (!xrplResult.verified || xrplResult.state !== 'proof_checked') {
     console.error('[chain-trust] XRPL self-test failed:', xrplResult.summary);
+    process.exit(1);
+  }
+
+  const suiMoveResult = verifyMoveProof({
+    checkpoint: suiFixtureCheckpoint,
+    validator_set: suiFixtureValidatorSet,
+    finality_proof: suiFixtureFinalityProof,
+    proof: suiFixtureProof
+  });
+
+  if (!suiMoveResult.verified || suiMoveResult.state !== 'proof_checked') {
+    console.error('[chain-trust] Sui Move self-test failed:', suiMoveResult.summary);
+    process.exit(1);
+  }
+
+  const aptosMoveResult = verifyMoveProof({
+    checkpoint: aptosFixtureCheckpoint,
+    validator_set: aptosFixtureValidatorSet,
+    finality_proof: aptosFixtureFinalityProof,
+    proof: aptosFixtureProof
+  });
+
+  if (!aptosMoveResult.verified || aptosMoveResult.state !== 'proof_checked') {
+    console.error('[chain-trust] Aptos Move self-test failed:', aptosMoveResult.summary);
     process.exit(1);
   }
 
@@ -864,6 +1096,10 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (url.pathname === '/v1/xrpl/status' || url.pathname === '/xrpl/status')) {
     return sendJson(res, 200, xrplStatusFor(url.searchParams.get('network')));
+  }
+
+  if (req.method === 'GET' && (url.pathname === '/v1/move/status' || url.pathname === '/move/status')) {
+    return sendJson(res, 200, moveStatusFor(url.searchParams.get('chain')));
   }
 
   if (req.method === 'GET' && (url.pathname === '/v1/solana/status' || url.pathname === '/solana/status')) {
@@ -958,6 +1194,24 @@ const server = http.createServer(async (req, res) => {
         chain_ref: null,
         ledger_index: null,
         ledger_hash: null,
+        proof_id: null,
+        kind: null,
+        summary: String(err.message ?? err)
+      });
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/v1/move/verify-proof' || url.pathname === '/move/verify-proof')) {
+    try {
+      const payload = await readJson(req);
+      return sendJson(res, 200, verifyMoveProof(payload));
+    } catch (err) {
+      return sendJson(res, err.statusCode ?? 400, {
+        verified: false,
+        state: 'failed',
+        chain_ref: null,
+        sequence_number: null,
+        checkpoint_digest: null,
         proof_id: null,
         kind: null,
         summary: String(err.message ?? err)
@@ -1152,6 +1406,50 @@ function xrplStatusFor(requestedNetwork) {
     proof_source: 'fixture-unl-account-payment-proof',
     stale,
     limitations: network.limitations,
+    mode
+  };
+}
+
+function moveStatusFor(requestedChain) {
+  const chain = resolveMoveChain(requestedChain);
+  const fixture = chain.kind === 'sui'
+    ? {
+        checkpoint: suiFixtureCheckpoint,
+        validatorSet: suiFixtureValidatorSet,
+        proofSource: 'fixture-sui-checkpoint-object-proof'
+      }
+    : {
+        checkpoint: aptosFixtureCheckpoint,
+        validatorSet: aptosFixtureValidatorSet,
+        proofSource: 'fixture-aptos-ledger-account-proof'
+      };
+  const latestCheckpoint = {
+    ...fixture.checkpoint,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id,
+    finalized: chain.sync_state !== 'api_fallback'
+  };
+  const validatorSet = {
+    ...fixture.validatorSet,
+    chain: chain.chain,
+    chain_ref: chain.chain_ref
+  };
+  const stale = chain.sync_state === 'stale';
+  return {
+    ok: true,
+    service_available: chain.sync_state !== 'api_fallback',
+    chain: chain.chain,
+    chain_ref: chain.chain_ref,
+    chain_id: chain.chain_id,
+    sync_state: chain.sync_state,
+    source: mode,
+    latest_checkpoint: latestCheckpoint,
+    validator_set: validatorSet,
+    peer_count: 0,
+    proof_source: fixture.proofSource,
+    stale,
+    limitations: chain.limitations,
     mode
   };
 }
@@ -1535,6 +1833,85 @@ function verifyXRPLProof(payload) {
   };
 }
 
+function verifyMoveProof(payload) {
+  const checkpoint = requireObject(payload.checkpoint, 'checkpoint');
+  const validatorSet = requireObject(payload.validator_set ?? payload.validatorSet, 'validator_set');
+  const finalityProof = requireObject(payload.finality_proof ?? payload.finalityProof, 'finality_proof');
+  const proof = payload.proof;
+  const chain = resolveMoveChain(checkpoint.chain ?? checkpoint.chain_ref ?? checkpoint.chainRef ?? checkpoint.chain_id ?? checkpoint.chainID);
+  const validatorChain = resolveMoveChain(validatorSet.chain ?? validatorSet.chain_ref ?? validatorSet.chainRef ?? chain.chain);
+  const sequenceNumber = Number(checkpoint.sequence_number ?? checkpoint.sequenceNumber ?? checkpoint.ledger_version ?? checkpoint.ledgerVersion ?? checkpoint.version);
+  const digest = normalizeHex(requireString(checkpoint.digest ?? checkpoint.ledger_info_hash ?? checkpoint.ledgerInfoHash, 'checkpoint.digest'));
+  const validatorSetHash = normalizeHex(requireString(validatorSet.hash, 'validator_set.hash'));
+  const computedValidatorSetHash = moveValidatorSetHash(Array.isArray(validatorSet.validators) ? validatorSet.validators : []);
+  const finalityEpoch = Number(finalityProof.epoch);
+  const finalitySequenceNumber = Number(finalityProof.target_sequence_number ?? finalityProof.targetSequenceNumber);
+  const finalityDigest = normalizeHex(requireString(finalityProof.target_digest ?? finalityProof.targetDigest, 'finality_proof.target_digest'));
+
+  if (chain.chain_ref !== validatorChain.chain_ref) {
+    return moveFailure(chain, sequenceNumber, digest, proof, 'Move checkpoint chain does not match validator set.');
+  }
+  if (checkpoint.finalized === false) {
+    return moveFailure(chain, sequenceNumber, digest, proof, 'Move checkpoint or ledger info is not marked finalized; API/RPC data must remain fallback-labeled.');
+  }
+  if (finalityEpoch !== Number(validatorSet.epoch) || finalitySequenceNumber !== sequenceNumber || finalityDigest !== digest) {
+    return moveFailure(chain, sequenceNumber, digest, proof, 'Move finality proof targets a different checkpoint, ledger version, or epoch.');
+  }
+  if (validatorSetHash !== computedValidatorSetHash) {
+    return moveFailure(chain, sequenceNumber, digest, proof, 'Move validator set hash is invalid.');
+  }
+  if (!hasMoveQuorum(validatorSet, moveSignedValidators(finalityProof, digest, sequenceNumber))) {
+    return moveFailure(chain, sequenceNumber, digest, proof, 'Move finality proof did not reach the validator quorum.');
+  }
+
+  if (proof) {
+    const kind = requireString(proof.kind, 'proof.kind');
+    if (!['sui_object', 'sui_transaction_effects', 'aptos_account', 'aptos_transaction'].includes(kind)) {
+      throw Object.assign(new Error(`unsupported Move proof kind: ${kind}`), { statusCode: 400 });
+    }
+    const proofChain = resolveMoveChain(proof.chain ?? proof.chain_ref ?? proof.chainRef ?? chain.chain);
+    const proofDigest = normalizeHex(requireString(proof.checkpoint_digest ?? proof.checkpointDigest ?? proof.ledger_info_hash ?? proof.ledgerInfoHash, 'proof.checkpoint_digest'));
+    const proofSequenceNumber = Number(proof.sequence_number ?? proof.sequenceNumber ?? proof.ledger_version ?? proof.ledgerVersion);
+    if (proofChain.chain_ref !== chain.chain_ref || proofDigest !== digest || proofSequenceNumber !== sequenceNumber) {
+      return moveFailure(chain, sequenceNumber, digest, proof, 'Move proof references a different chain checkpoint or ledger info.');
+    }
+    const kindFamily = kind.startsWith('sui_') ? 'sui' : 'aptos';
+    if (kindFamily !== chain.kind) {
+      return moveFailure(chain, sequenceNumber, digest, proof, 'Move proof kind does not match the selected chain family.');
+    }
+    const checkpointRoot = normalizeHex(requireString(
+      kind === 'sui_object' || kind === 'aptos_account'
+        ? checkpoint.state_root ?? checkpoint.stateRoot
+        : checkpoint.transaction_effects_root ?? checkpoint.transactionEffectsRoot ?? checkpoint.transaction_accumulator_root ?? checkpoint.transactionAccumulatorRoot,
+      `${kind} root`
+    ));
+    const expectedRoot = normalizeHex(requireString(proof.expected_root ?? proof.expectedRoot, 'proof.expected_root'));
+    if (expectedRoot !== checkpointRoot) {
+      return moveFailure(chain, sequenceNumber, digest, proof, `Move ${kind} proof expected root does not match checkpoint roots.`);
+    }
+    const computedRoot = computeMoveLocalMerkleRoot(
+      requireString(proof.leaf_hash ?? proof.leafHash, 'proof.leaf_hash'),
+      Array.isArray(proof.witnesses) ? proof.witnesses : []
+    );
+    if (computedRoot !== expectedRoot) {
+      return moveFailure(chain, sequenceNumber, digest, proof, `Move ${kind} proof did not resolve to the expected root.`);
+    }
+  }
+
+  return {
+    verified: true,
+    state: 'proof_checked',
+    chain_ref: chain.chain_ref,
+    sequence_number: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
+    checkpoint_digest: digest,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
+    summary: proof
+      ? `${chain.display_name} ${proof.kind} proof checked against checkpoint ${Number.isFinite(sequenceNumber) ? sequenceNumber : 'unknown'}.`
+      : `${chain.display_name} checkpoint ${Number.isFinite(sequenceNumber) ? sequenceNumber : 'unknown'} checked with fixture validator quorum.`
+  };
+}
+
 function verifySolanaProof(payload) {
   const snapshot = requireObject(payload.snapshot, 'snapshot');
   const proof = requireObject(payload.proof, 'proof');
@@ -1871,6 +2248,36 @@ function assertXRPLFixture() {
   }
 }
 
+function assertMoveFixture() {
+  const computedSuiValidatorSetHash = moveValidatorSetHash(suiFixtureValidators);
+  if (computedSuiValidatorSetHash !== suiFixtureValidatorSetHash) {
+    throw new Error(`Sui validator fixture mismatch: ${computedSuiValidatorSetHash}`);
+  }
+  const suiResult = verifyMoveProof({
+    checkpoint: suiFixtureCheckpoint,
+    validator_set: suiFixtureValidatorSet,
+    finality_proof: suiFixtureFinalityProof,
+    proof: suiFixtureProof
+  });
+  if (!suiResult.verified) {
+    throw new Error(`Sui Move proof fixture mismatch: ${suiResult.summary}`);
+  }
+
+  const computedAptosValidatorSetHash = moveValidatorSetHash(aptosFixtureValidators);
+  if (computedAptosValidatorSetHash !== aptosFixtureValidatorSetHash) {
+    throw new Error(`Aptos validator fixture mismatch: ${computedAptosValidatorSetHash}`);
+  }
+  const aptosResult = verifyMoveProof({
+    checkpoint: aptosFixtureCheckpoint,
+    validator_set: aptosFixtureValidatorSet,
+    finality_proof: aptosFixtureFinalityProof,
+    proof: aptosFixtureProof
+  });
+  if (!aptosResult.verified) {
+    throw new Error(`Aptos Move proof fixture mismatch: ${aptosResult.summary}`);
+  }
+}
+
 function assertSolanaFixture() {
   const computedRoot = computeSolanaLocalMerkleRoot(solanaFixtureProof.leaf_hash, solanaFixtureProof.witnesses);
   if (computedRoot !== solanaFixtureSlotRoot.account_root) {
@@ -1966,6 +2373,19 @@ function xrplFailure(network, ledgerIndex, ledgerHash, proof, summary) {
     chain_ref: network.chain_ref,
     ledger_index: Number.isFinite(ledgerIndex) ? ledgerIndex : null,
     ledger_hash: ledgerHash,
+    proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
+    kind: proof ? String(proof.kind ?? '') : null,
+    summary
+  };
+}
+
+function moveFailure(chain, sequenceNumber, digest, proof, summary) {
+  return {
+    verified: false,
+    state: 'failed',
+    chain_ref: chain.chain_ref,
+    sequence_number: Number.isFinite(sequenceNumber) ? sequenceNumber : null,
+    checkpoint_digest: digest,
     proof_id: proof ? String(proof.proof_id ?? proof.proofID ?? '') : null,
     kind: proof ? String(proof.kind ?? '') : null,
     summary
@@ -2081,6 +2501,27 @@ function resolveXRPLNetwork(requestedNetwork) {
     return xrplNetworks['xrp-ledger'];
   }
   return xrplNetworks['xrp-ledger'];
+}
+
+function resolveMoveChain(requestedChain) {
+  if (!requestedChain) {
+    return moveChains['sui-mainnet'];
+  }
+  const normalized = String(requestedChain)
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .replace(/\s+/g, '-');
+  if (moveChains[normalized]) {
+    return moveChains[normalized];
+  }
+  if (normalized === 'sui' || normalized === 'mainnet-sui') {
+    return moveChains['sui-mainnet'];
+  }
+  if (normalized === 'aptos' || normalized === 'mainnet-aptos') {
+    return moveChains['aptos-mainnet'];
+  }
+  return moveChains['sui-mainnet'];
 }
 
 function resolveSolanaCluster(requestedCluster) {
@@ -2297,6 +2738,71 @@ function xrplFixtureLeafHash(kind, subject, counterparty, currency, transactionH
   ].join('|'));
 }
 
+function moveValidatorSetHash(validators) {
+  const payload = validators
+    .map(validator => {
+      const key = normalizeID(requireString(validator.validator_id ?? validator.validatorID, 'validator.validator_id'));
+      const state = validator.disabled === true ? 'disabled' : 'active';
+      return `${key}:${Number(validator.weight ?? 1)}:${state}`;
+    })
+    .sort()
+    .join('|');
+  return sha256HexFromString(payload);
+}
+
+function moveSignedValidators(finalityProof, targetDigest, targetSequenceNumber) {
+  return new Set((Array.isArray(finalityProof.signatures) ? finalityProof.signatures : [])
+    .filter(signature => {
+      if (signature.signed === false) {
+        return false;
+      }
+      const signatureDigest = normalizeHex(requireString(
+        signature.checkpoint_digest ?? signature.checkpointDigest ?? signature.ledger_info_hash ?? signature.ledgerInfoHash ?? signature.target_digest ?? signature.targetDigest,
+        'signature.checkpoint_digest'
+      ));
+      const signatureSequenceNumber = Number(signature.sequence_number ?? signature.sequenceNumber ?? signature.ledger_version ?? signature.ledgerVersion);
+      return signatureDigest === targetDigest && signatureSequenceNumber === targetSequenceNumber;
+    })
+    .map(signature => normalizeID(requireString(signature.validator_id ?? signature.validatorID, 'signature.validator_id'))));
+}
+
+function hasMoveQuorum(validatorSet, validatorIDs) {
+  const validators = Array.isArray(validatorSet.validators) ? validatorSet.validators : [];
+  const numerator = Number(validatorSet.quorum_numerator ?? validatorSet.quorumNumerator ?? 2);
+  const denominator = Number(validatorSet.quorum_denominator ?? validatorSet.quorumDenominator ?? 3);
+  let effectiveWeight = 0;
+  let signedWeight = 0;
+
+  for (const validator of validators) {
+    const weight = Number(validator.weight ?? 1);
+    if (!Number.isFinite(weight) || weight < 0 || validator.disabled === true) {
+      continue;
+    }
+    effectiveWeight += weight;
+    const key = normalizeID(requireString(validator.validator_id ?? validator.validatorID, 'validator.validator_id'));
+    if (validatorIDs.has(key)) {
+      signedWeight += weight;
+    }
+  }
+
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0 || effectiveWeight <= 0) {
+    return false;
+  }
+
+  return signedWeight >= Math.ceil((effectiveWeight * numerator) / denominator);
+}
+
+function moveFixtureLeafHash(kind, subject, objectID, accountAddress, transactionDigest, valueHash) {
+  return sha256HexFromString([
+    kind,
+    String(subject).toLowerCase(),
+    String(objectID ?? '').toLowerCase(),
+    String(accountAddress ?? '').toLowerCase(),
+    transactionDigest ? normalizeHex(transactionDigest) : '',
+    normalizeHex(valueHash)
+  ].join('|'));
+}
+
 function solanaFixtureLeafHash(kind, subject, value) {
   return sha256HexFromString([
     kind,
@@ -2357,6 +2863,21 @@ function computeXRPLLocalMerkleRoot(leafHash, witnesses) {
     const position = requireString(witness.position, 'witness.position');
     if (position !== 'left' && position !== 'right') {
       throw Object.assign(new Error(`unsupported XRPL witness position: ${position}`), { statusCode: 400 });
+    }
+    node = position === 'left'
+      ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()
+      : crypto.createHash('sha256').update(Buffer.concat([node, siblingHash])).digest();
+  }
+  return node.toString('hex');
+}
+
+function computeMoveLocalMerkleRoot(leafHash, witnesses) {
+  let node = Buffer.from(normalizeHex(leafHash), 'hex');
+  for (const witness of witnesses) {
+    const siblingHash = Buffer.from(normalizeHex(requireString(witness.hash, 'witness.hash')), 'hex');
+    const position = requireString(witness.position, 'witness.position');
+    if (position !== 'left' && position !== 'right') {
+      throw Object.assign(new Error(`unsupported Move witness position: ${position}`), { statusCode: 400 });
     }
     node = position === 'left'
       ? crypto.createHash('sha256').update(Buffer.concat([siblingHash, node])).digest()

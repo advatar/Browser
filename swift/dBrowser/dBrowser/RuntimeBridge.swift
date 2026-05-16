@@ -45,6 +45,8 @@ struct RuntimeBridgeConfiguration: Equatable {
     var avalancheLightClient: AvalancheLightClientEndpointConfiguration
     var tronLightClient: TronLightClientEndpointConfiguration
     var xrplLightClient: XRPLLightClientEndpointConfiguration
+    var suiMoveLightClient: MoveLightClientEndpointConfiguration
+    var aptosMoveLightClient: MoveLightClientEndpointConfiguration
     var chainTrustRegistry: ChainTrustRegistry
 
     nonisolated init(
@@ -62,6 +64,8 @@ struct RuntimeBridgeConfiguration: Equatable {
         avalancheLightClient: AvalancheLightClientEndpointConfiguration = .disabled,
         tronLightClient: TronLightClientEndpointConfiguration = .disabled,
         xrplLightClient: XRPLLightClientEndpointConfiguration = .disabled,
+        suiMoveLightClient: MoveLightClientEndpointConfiguration = .disabled(chain: .suiMainnet),
+        aptosMoveLightClient: MoveLightClientEndpointConfiguration = .disabled(chain: .aptosMainnet),
         chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
@@ -78,6 +82,8 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.avalancheLightClient = avalancheLightClient
         self.tronLightClient = tronLightClient
         self.xrplLightClient = xrplLightClient
+        self.suiMoveLightClient = suiMoveLightClient
+        self.aptosMoveLightClient = aptosMoveLightClient
         self.chainTrustRegistry = chainTrustRegistry
     }
 }
@@ -273,6 +279,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let avalancheLightClientServiceClient: AvalancheLightClientServiceClient
     private let tronLightClientServiceClient: TronLightClientServiceClient
     private let xrplLightClientServiceClient: XRPLLightClientServiceClient
+    private let suiMoveLightClientServiceClient: MoveLightClientServiceClient
+    private let aptosMoveLightClientServiceClient: MoveLightClientServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     @Published private(set) var bitcoinLightClientSnapshot: BitcoinLightClientServiceSnapshot = .fallback(
@@ -307,6 +315,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         network: .mainnet,
         lastError: "XRPL light-client service not checked yet."
     )
+    @Published private(set) var suiMoveLightClientSnapshot: MoveLightClientServiceSnapshot = .fallback(
+        chain: .suiMainnet,
+        lastError: "Sui Move light-client service not checked yet."
+    )
+    @Published private(set) var aptosMoveLightClientSnapshot: MoveLightClientServiceSnapshot = .fallback(
+        chain: .aptosMainnet,
+        lastError: "Aptos Move light-client service not checked yet."
+    )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
@@ -326,7 +342,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         substrateLightClientServiceClient: SubstrateLightClientServiceClient? = nil,
         avalancheLightClientServiceClient: AvalancheLightClientServiceClient? = nil,
         tronLightClientServiceClient: TronLightClientServiceClient? = nil,
-        xrplLightClientServiceClient: XRPLLightClientServiceClient? = nil
+        xrplLightClientServiceClient: XRPLLightClientServiceClient? = nil,
+        suiMoveLightClientServiceClient: MoveLightClientServiceClient? = nil,
+        aptosMoveLightClientServiceClient: MoveLightClientServiceClient? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
@@ -339,6 +357,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.avalancheLightClientServiceClient = avalancheLightClientServiceClient ?? AvalancheLightClientServiceClient(configuration: configuration.avalancheLightClient)
         self.tronLightClientServiceClient = tronLightClientServiceClient ?? TronLightClientServiceClient(configuration: configuration.tronLightClient)
         self.xrplLightClientServiceClient = xrplLightClientServiceClient ?? XRPLLightClientServiceClient(configuration: configuration.xrplLightClient)
+        self.suiMoveLightClientServiceClient = suiMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.suiMoveLightClient)
+        self.aptosMoveLightClientServiceClient = aptosMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.aptosMoveLightClient)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
@@ -372,6 +392,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             network: configuration.xrplLightClient.network,
             lastError: "XRPL light-client service not checked yet."
         )
+        self.suiMoveLightClientSnapshot = .fallback(
+            chain: configuration.suiMoveLightClient.chain,
+            lastError: "Sui Move light-client service not checked yet."
+        )
+        self.aptosMoveLightClientSnapshot = .fallback(
+            chain: configuration.aptosMoveLightClient.chain,
+            lastError: "Aptos Move light-client service not checked yet."
+        )
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: .unknown,
@@ -392,6 +420,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let avalancheSnapshot = avalancheLightClientServiceClient.snapshot()
         async let tronSnapshot = tronLightClientServiceClient.snapshot()
         async let xrplSnapshot = xrplLightClientServiceClient.snapshot()
+        async let suiMoveSnapshot = suiMoveLightClientServiceClient.snapshot()
+        async let aptosMoveSnapshot = aptosMoveLightClientServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
         bitcoinLightClientSnapshot = await bitcoinSnapshot
@@ -402,6 +432,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         avalancheLightClientSnapshot = await avalancheSnapshot
         tronLightClientSnapshot = await tronSnapshot
         xrplLightClientSnapshot = await xrplSnapshot
+        suiMoveLightClientSnapshot = await suiMoveSnapshot
+        aptosMoveLightClientSnapshot = await aptosMoveSnapshot
         _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
         _ = chainTrustSnapshot.recordEVMLightClientSnapshot(evmLightClientSnapshot)
         _ = chainTrustSnapshot.recordSolanaLightClientSnapshot(solanaLightClientSnapshot)
@@ -410,6 +442,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         _ = chainTrustSnapshot.recordAvalancheLightClientSnapshot(avalancheLightClientSnapshot)
         _ = chainTrustSnapshot.recordTronLightClientSnapshot(tronLightClientSnapshot)
         _ = chainTrustSnapshot.recordXRPLLightClientSnapshot(xrplLightClientSnapshot)
+        _ = chainTrustSnapshot.recordMoveLightClientSnapshot(suiMoveLightClientSnapshot)
+        _ = chainTrustSnapshot.recordMoveLightClientSnapshot(aptosMoveLightClientSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,

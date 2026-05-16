@@ -2645,6 +2645,202 @@ struct dBrowserTests {
         #expect(chainTrust?.status.contains("XRP Ledger proof checked") == true)
     }
 
+    @Test func moveRoutingStaleAndFallbackAreExplicit() {
+        #expect(MoveChain.known(from: "sui") == .suiMainnet)
+        #expect(MoveChain.known(from: "aptos") == .aptosMainnet)
+        #expect(MoveChain.suiMainnet.supportedProofTypes.contains("checkpoint-committee-quorum"))
+        #expect(MoveChain.aptosMainnet.supportedProofTypes.contains("ledger-info-validator-quorum"))
+
+        let fallback = MoveLightClientServiceSnapshot.fallback(
+            chain: .suiMainnet,
+            lastError: "disabled"
+        )
+        let stale = MoveLightClientServiceSnapshot(
+            serviceAvailable: true,
+            chain: .aptosMainnet,
+            syncState: .stale,
+            source: "fixture",
+            latestCheckpoint: Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosAccount).checkpoint,
+            stale: true
+        )
+
+        #expect(fallback.syncState == .unavailable)
+        #expect(fallback.chainTrustStatus.state == .rpcFallback)
+        #expect(fallback.statusSummary.contains("API/RPC fallback remains labeled"))
+        #expect(stale.chainTrustStatus.state == .stale)
+        #expect(stale.statusSummary.contains("stale"))
+    }
+
+    @Test func moveProofVerifiesSuiAndAptosQuorumAndRoots() {
+        let suiObjectBundle = Self.moveProofBundle(chain: .suiMainnet, kind: .suiObject)
+        let suiEffectsBundle = Self.moveProofBundle(chain: .suiMainnet, kind: .suiTransactionEffects)
+        let aptosAccountBundle = Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosAccount)
+        let aptosTransactionBundle = Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosTransaction)
+        let suiObjectResult = suiObjectBundle.verify()
+        let suiEffectsResult = suiEffectsBundle.verify()
+        let aptosAccountResult = aptosAccountBundle.verify()
+        let aptosTransactionResult = aptosTransactionBundle.verify()
+        var weakBundle = suiObjectBundle
+        weakBundle.finalityProof.signatures = Array(suiObjectBundle.finalityProof.signatures.prefix(1))
+        let weakResult = weakBundle.verify()
+        var apiOnlyBundle = aptosAccountBundle
+        apiOnlyBundle.checkpoint.finalized = false
+        let apiOnlyResult = apiOnlyBundle.verify()
+
+        #expect(suiObjectBundle.validatorSet.validatesHash)
+        #expect(suiObjectBundle.validatorSet.configuredWeight == 100)
+        #expect(suiObjectBundle.validatorSet.requiredQuorumWeight == 67)
+        #expect(suiObjectResult.verified)
+        #expect(suiObjectResult.state == .proofChecked)
+        #expect(suiEffectsResult.verified)
+        #expect(suiEffectsResult.kind == .suiTransactionEffects)
+        #expect(aptosAccountResult.verified)
+        #expect(aptosAccountResult.chainRef == "aptos-mainnet")
+        #expect(aptosTransactionResult.verified)
+        #expect(aptosTransactionResult.kind == .aptosTransaction)
+        #expect(weakResult.verified == false)
+        #expect(weakResult.summary.contains("validator quorum"))
+        #expect(apiOnlyResult.verified == false)
+        #expect(apiOnlyResult.summary.contains("API/RPC data must remain fallback-labeled"))
+    }
+
+    @MainActor
+    @Test func moveLightClientServiceSnapshotUpdatesChainTrustRegistry() async {
+        let capturedRequests = JSONRequestCapture()
+        let moveHarness = Self.makeMoveLightClientSession(key: "moveregistry", chain: .suiMainnet) { request in
+            capturedRequests.capture(request)
+            if request.url?.path == "/v1/move/status" {
+                return Self.jsonResponse(for: request, body: Self.moveServiceStatus(chain: .suiMainnet))
+            }
+            if request.url?.path == "/v1/move/verify-proof" {
+                return Self.jsonResponse(for: request, body: Self.moveProofResultBody(
+                    verified: true,
+                    state: "proof_checked",
+                    chain: .suiMainnet,
+                    kind: .suiObject
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = MoveLightClientServiceClient(
+            configuration: moveHarness.configuration,
+            session: moveHarness.session
+        )
+        let snapshot = await client.snapshot()
+        let proofResult = try! await client.verifyProofViaService(Self.moveProofBundle(chain: .suiMainnet, kind: .suiObject))
+        var registry = ChainTrustRegistry.defaultRegistry
+        let suiStatus = registry.recordMoveLightClientSnapshot(snapshot)
+        let aptosStatus = registry.recordMoveLightClientSnapshot(MoveLightClientServiceSnapshot(
+            serviceAvailable: true,
+            chain: .aptosMainnet,
+            syncState: .proofChecked,
+            source: "fixture",
+            latestCheckpoint: Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosAccount).checkpoint,
+            validatorSet: Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosAccount).validatorSet,
+            proofSource: "fixture-aptos-ledger-account-proof"
+        ))
+        let sui = registry.status(forChainRef: "sui-mainnet")
+        let aptos = registry.status(forChainRef: "aptos-mainnet")
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.syncState == .proofChecked)
+        #expect(snapshot.latestCheckpoint?.sequenceNumber == 1_000_000)
+        #expect(suiStatus.state == .proofChecked)
+        #expect(suiStatus.trustSource == .localProof)
+        #expect(sui?.family == .sui)
+        #expect(sui?.evidence.first?.source == .localProof)
+        #expect(aptosStatus.state == .proofChecked)
+        #expect(aptos?.family == .aptos)
+        #expect(proofResult.verified)
+        #expect(proofResult.state == .proofChecked)
+        #expect(capturedRequests.body(for: "/v1/move/verify-proof")?["finality_proof"] != nil)
+    }
+
+    @MainActor
+    @Test func moveLightClientFallsBackWhenServiceDisabled() async {
+        let client = MoveLightClientServiceClient(configuration: .disabled(chain: .aptosMainnet))
+        let snapshot = await client.snapshot()
+        var registry = ChainTrustRegistry.defaultRegistry
+        let status = registry.recordMoveLightClientSnapshot(snapshot)
+
+        #expect(snapshot.serviceAvailable == false)
+        #expect(snapshot.syncState == .unavailable)
+        #expect(status.state == .rpcFallback)
+        #expect(status.trustSource == .gatewayRPCFallback)
+        #expect(status.displaySummary.contains("Gateway/RPC fallback") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRefreshesMoveLightClientState() async {
+        let suiHarness = Self.makeMoveLightClientSession(key: "moveruntimesui", chain: .suiMainnet) { request in
+            if request.url?.path == "/v1/move/status" {
+                return Self.jsonResponse(for: request, body: Self.moveServiceStatus(
+                    chain: .suiMainnet,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let aptosHarness = Self.makeMoveLightClientSession(key: "moveruntimeaptos", chain: .aptosMainnet) { request in
+            if request.url?.path == "/v1/move/status" {
+                return Self.jsonResponse(for: request, body: Self.moveServiceStatus(
+                    chain: .aptosMainnet,
+                    syncState: "proof_checked"
+                ))
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let afmHarness = Self.makeAFMServiceSession(key: "moveruntimeafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: afmHarness.configuration,
+                llmRouter: .disabled,
+                suiMoveLightClient: suiHarness.configuration,
+                aptosMoveLightClient: aptosHarness.configuration
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: afmHarness.configuration,
+                session: afmHarness.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            bitcoinLightClientServiceClient: BitcoinLightClientServiceClient(configuration: .disabled),
+            evmLightClientServiceClient: EVMLightClientServiceClient(configuration: .disabled),
+            solanaLightClientServiceClient: SolanaLightClientServiceClient(configuration: .disabled),
+            cosmosLightClientServiceClient: CosmosLightClientServiceClient(configuration: .disabled),
+            substrateLightClientServiceClient: SubstrateLightClientServiceClient(configuration: .disabled),
+            avalancheLightClientServiceClient: AvalancheLightClientServiceClient(configuration: .disabled),
+            tronLightClientServiceClient: TronLightClientServiceClient(configuration: .disabled),
+            xrplLightClientServiceClient: XRPLLightClientServiceClient(configuration: .disabled),
+            suiMoveLightClientServiceClient: MoveLightClientServiceClient(
+                configuration: suiHarness.configuration,
+                session: suiHarness.session
+            ),
+            aptosMoveLightClientServiceClient: MoveLightClientServiceClient(
+                configuration: aptosHarness.configuration,
+                session: aptosHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let sui = bridge.chainTrustSnapshot.status(forChainRef: "sui-mainnet")
+        let aptos = bridge.chainTrustSnapshot.status(forChainRef: "aptos-mainnet")
+        let chainTrust = states.first { $0.feature == .chainTrust }
+
+        #expect(sui?.state == .proofChecked)
+        #expect(sui?.trustSource == .localProof)
+        #expect(sui?.evidence.first?.summary.contains("production Sui verifier integration is not claimed") == true)
+        #expect(aptos?.state == .proofChecked)
+        #expect(aptos?.trustSource == .localProof)
+        #expect(aptos?.evidence.first?.summary.contains("production Aptos verifier integration is not claimed") == true)
+        #expect(chainTrust?.mode == .service)
+        #expect(chainTrust?.status.contains("Sui proof checked") == true)
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -4918,6 +5114,21 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeMoveLightClientSession(
+        key: String,
+        chain: MoveChain = .suiMainnet,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: MoveLightClientEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = MoveLightClientEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-move.test:4870")!,
+            chain: chain
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func bitcoinGenesisServiceStatus() -> [String: Any] {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         return [
@@ -5113,6 +5324,30 @@ struct dBrowserTests {
             "proof_source": "fixture-unl-account-payment-proof",
             "stale": stale,
             "limitations": network.limitations
+        ]
+    }
+
+    private static func moveServiceStatus(
+        chain: MoveChain,
+        syncState: String = "proof_checked",
+        stale: Bool = false
+    ) -> [String: Any] {
+        let kind: MoveLocalProofKind = chain.kind == .sui ? .suiObject : .aptosAccount
+        let bundle = moveProofBundle(chain: chain, kind: kind)
+        return [
+            "ok": true,
+            "service_available": true,
+            "chain": chain.chainRef,
+            "chain_ref": chain.chainRef,
+            "chain_id": chain.chainID,
+            "sync_state": syncState,
+            "source": "move-light-client",
+            "latest_checkpoint": moveCheckpointBody(bundle.checkpoint),
+            "validator_set": moveValidatorSetBody(bundle.validatorSet),
+            "peer_count": 2,
+            "proof_source": chain.kind == .sui ? "fixture-sui-checkpoint-object-proof" : "fixture-aptos-ledger-account-proof",
+            "stale": stale,
+            "limitations": chain.limitations
         ]
     }
 
@@ -5546,6 +5781,231 @@ struct dBrowserTests {
         )
     }
 
+    private static func moveProofBundle(
+        chain: MoveChain,
+        kind: MoveLocalProofKind
+    ) -> MoveProofVerificationBundle {
+        if chain.kind == .sui {
+            let validators = [
+                MoveValidator(validatorID: "sui-validator-a", weight: 40, name: "sui-a"),
+                MoveValidator(validatorID: "sui-validator-b", weight: 35, name: "sui-b"),
+                MoveValidator(validatorID: "sui-validator-c", weight: 25, name: "sui-c")
+            ]
+            let validatorSet = MoveValidatorSet(
+                chain: chain,
+                epoch: 42,
+                validators: validators,
+                source: "fixture"
+            )
+            let objectID = "0x" + String(repeating: "a1", count: 32)
+            let transactionDigest = MoveHash.sha256Hex("sui-transaction-effects-fixture")
+            let objectValueHash = MoveHash.sha256Hex("sui-object-owner:fixture")
+            let effectsValueHash = MoveHash.sha256Hex("sui-effects:success")
+            let objectLeaf = MoveLocalProof.fixtureLeafHash(
+                kind: .suiObject,
+                subject: "sui-object-fixture",
+                objectID: objectID,
+                valueHash: objectValueHash
+            )
+            let effectsLeaf = MoveLocalProof.fixtureLeafHash(
+                kind: .suiTransactionEffects,
+                subject: "sui-effects-fixture",
+                transactionDigest: transactionDigest,
+                valueHash: effectsValueHash
+            )
+            let stateRoot = MoveLocalProof.computeRoot(
+                leafHash: objectLeaf,
+                witnesses: [MoveProofWitness(hash: effectsLeaf, position: .right)]
+            )!
+            let checkpoint = MoveCheckpointSnapshot(
+                chain: chain,
+                sequenceNumber: 1_000_000,
+                epoch: validatorSet.epoch,
+                digest: MoveHash.sha256Hex("\(chain.chainRef)|1000000|checkpoint"),
+                previousDigest: MoveHash.sha256Hex("\(chain.chainRef)|999999|checkpoint"),
+                stateRoot: stateRoot,
+                transactionEffectsRoot: effectsLeaf,
+                timestamp: 1_717_000_000,
+                finalized: true,
+                source: "fixture"
+            )
+            let finalityProof = MoveFinalityProof(
+                epoch: validatorSet.epoch,
+                targetDigest: checkpoint.digest,
+                targetSequenceNumber: checkpoint.sequenceNumber,
+                signatures: [
+                    MoveValidatorSignature(validatorID: validators[0].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                    MoveValidatorSignature(validatorID: validators[1].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                    MoveValidatorSignature(validatorID: validators[2].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber, signed: false)
+                ],
+                source: "fixture"
+            )
+            let proof: MoveLocalProof
+            switch kind {
+            case .suiObject:
+                proof = MoveLocalProof(
+                    proofID: "sui-fixture-object",
+                    kind: .suiObject,
+                    chain: chain,
+                    subject: "sui-object-fixture",
+                    objectID: objectID,
+                    expectedValueHash: objectValueHash,
+                    checkpointDigest: checkpoint.digest,
+                    sequenceNumber: checkpoint.sequenceNumber,
+                    expectedRoot: checkpoint.stateRoot,
+                    leafHash: objectLeaf,
+                    witnesses: [MoveProofWitness(hash: effectsLeaf, position: .right)],
+                    source: "fixture"
+                )
+            case .suiTransactionEffects:
+                proof = MoveLocalProof(
+                    proofID: "sui-fixture-effects",
+                    kind: .suiTransactionEffects,
+                    chain: chain,
+                    subject: "sui-effects-fixture",
+                    transactionDigest: transactionDigest,
+                    expectedValueHash: effectsValueHash,
+                    checkpointDigest: checkpoint.digest,
+                    sequenceNumber: checkpoint.sequenceNumber,
+                    expectedRoot: checkpoint.transactionEffectsRoot,
+                    leafHash: effectsLeaf,
+                    witnesses: [],
+                    source: "fixture"
+                )
+            case .aptosAccount, .aptosTransaction:
+                proof = MoveLocalProof(
+                    proofID: "sui-invalid-proof-kind",
+                    kind: .suiObject,
+                    chain: chain,
+                    subject: "sui-object-fixture",
+                    objectID: objectID,
+                    expectedValueHash: objectValueHash,
+                    checkpointDigest: checkpoint.digest,
+                    sequenceNumber: checkpoint.sequenceNumber,
+                    expectedRoot: checkpoint.stateRoot,
+                    leafHash: objectLeaf,
+                    witnesses: [MoveProofWitness(hash: effectsLeaf, position: .right)],
+                    source: "fixture"
+                )
+            }
+            return MoveProofVerificationBundle(
+                checkpoint: checkpoint,
+                validatorSet: validatorSet,
+                finalityProof: finalityProof,
+                proof: proof
+            )
+        }
+
+        let validators = [
+            MoveValidator(validatorID: "aptos-validator-a", weight: 45, name: "aptos-a"),
+            MoveValidator(validatorID: "aptos-validator-b", weight: 35, name: "aptos-b"),
+            MoveValidator(validatorID: "aptos-validator-c", weight: 20, name: "aptos-c")
+        ]
+        let validatorSet = MoveValidatorSet(
+            chain: chain,
+            epoch: 900,
+            validators: validators,
+            source: "fixture"
+        )
+        let accountAddress = "0x" + String(repeating: "b2", count: 32)
+        let transactionDigest = MoveHash.sha256Hex("aptos-transaction-fixture")
+        let accountValueHash = MoveHash.sha256Hex("aptos-account-balance:100")
+        let transactionValueHash = MoveHash.sha256Hex("aptos-transaction:success")
+        let accountLeaf = MoveLocalProof.fixtureLeafHash(
+            kind: .aptosAccount,
+            subject: "aptos-account-fixture",
+            accountAddress: accountAddress,
+            valueHash: accountValueHash
+        )
+        let transactionLeaf = MoveLocalProof.fixtureLeafHash(
+            kind: .aptosTransaction,
+            subject: "aptos-transaction-fixture",
+            transactionDigest: transactionDigest,
+            valueHash: transactionValueHash
+        )
+        let stateRoot = MoveLocalProof.computeRoot(
+            leafHash: accountLeaf,
+            witnesses: [MoveProofWitness(hash: transactionLeaf, position: .right)]
+        )!
+        let checkpoint = MoveCheckpointSnapshot(
+            chain: chain,
+            sequenceNumber: 250_000_000,
+            epoch: validatorSet.epoch,
+            digest: MoveHash.sha256Hex("\(chain.chainRef)|250000000|ledger-info"),
+            previousDigest: MoveHash.sha256Hex("\(chain.chainRef)|249999999|ledger-info"),
+            stateRoot: stateRoot,
+            transactionEffectsRoot: transactionLeaf,
+            timestamp: 1_718_000_000,
+            finalized: true,
+            source: "fixture"
+        )
+        let finalityProof = MoveFinalityProof(
+            epoch: validatorSet.epoch,
+            targetDigest: checkpoint.digest,
+            targetSequenceNumber: checkpoint.sequenceNumber,
+            signatures: [
+                MoveValidatorSignature(validatorID: validators[0].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                MoveValidatorSignature(validatorID: validators[1].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                MoveValidatorSignature(validatorID: validators[2].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber, signed: false)
+            ],
+            source: "fixture"
+        )
+        let proof: MoveLocalProof
+        switch kind {
+        case .aptosAccount:
+            proof = MoveLocalProof(
+                proofID: "aptos-fixture-account",
+                kind: .aptosAccount,
+                chain: chain,
+                subject: "aptos-account-fixture",
+                accountAddress: accountAddress,
+                expectedValueHash: accountValueHash,
+                checkpointDigest: checkpoint.digest,
+                sequenceNumber: checkpoint.sequenceNumber,
+                expectedRoot: checkpoint.stateRoot,
+                leafHash: accountLeaf,
+                witnesses: [MoveProofWitness(hash: transactionLeaf, position: .right)],
+                source: "fixture"
+            )
+        case .aptosTransaction:
+            proof = MoveLocalProof(
+                proofID: "aptos-fixture-transaction",
+                kind: .aptosTransaction,
+                chain: chain,
+                subject: "aptos-transaction-fixture",
+                transactionDigest: transactionDigest,
+                expectedValueHash: transactionValueHash,
+                checkpointDigest: checkpoint.digest,
+                sequenceNumber: checkpoint.sequenceNumber,
+                expectedRoot: checkpoint.transactionEffectsRoot,
+                leafHash: transactionLeaf,
+                witnesses: [],
+                source: "fixture"
+            )
+        case .suiObject, .suiTransactionEffects:
+            proof = MoveLocalProof(
+                proofID: "aptos-invalid-proof-kind",
+                kind: .aptosAccount,
+                chain: chain,
+                subject: "aptos-account-fixture",
+                accountAddress: accountAddress,
+                expectedValueHash: accountValueHash,
+                checkpointDigest: checkpoint.digest,
+                sequenceNumber: checkpoint.sequenceNumber,
+                expectedRoot: checkpoint.stateRoot,
+                leafHash: accountLeaf,
+                witnesses: [MoveProofWitness(hash: transactionLeaf, position: .right)],
+                source: "fixture"
+            )
+        }
+        return MoveProofVerificationBundle(
+            checkpoint: checkpoint,
+            validatorSet: validatorSet,
+            finalityProof: finalityProof,
+            proof: proof
+        )
+    }
+
     private static func cosmosHeaderBody(_ header: TendermintHeader) -> [String: Any] {
         [
             "chain": header.chain.chainID,
@@ -5720,6 +6180,46 @@ struct dBrowserTests {
         ]
     }
 
+    private static func moveCheckpointBody(_ checkpoint: MoveCheckpointSnapshot) -> [String: Any] {
+        [
+            "chain": checkpoint.chain.chainRef,
+            "chain_ref": checkpoint.chain.chainRef,
+            "chain_id": checkpoint.chain.chainID,
+            "sequence_number": checkpoint.sequenceNumber,
+            "ledger_version": checkpoint.sequenceNumber,
+            "epoch": checkpoint.epoch,
+            "digest": checkpoint.digest,
+            "ledger_info_hash": checkpoint.digest,
+            "previous_digest": checkpoint.previousDigest,
+            "state_root": checkpoint.stateRoot,
+            "transaction_effects_root": checkpoint.transactionEffectsRoot,
+            "transaction_accumulator_root": checkpoint.transactionEffectsRoot,
+            "timestamp": checkpoint.timestamp,
+            "finalized": checkpoint.finalized,
+            "source": checkpoint.source ?? "fixture"
+        ]
+    }
+
+    private static func moveValidatorSetBody(_ validatorSet: MoveValidatorSet) -> [String: Any] {
+        [
+            "chain": validatorSet.chain.chainRef,
+            "chain_ref": validatorSet.chain.chainRef,
+            "epoch": validatorSet.epoch,
+            "validators": validatorSet.validators.map { validator in
+                [
+                    "validator_id": validator.validatorID,
+                    "weight": validator.weight,
+                    "name": validator.name ?? "",
+                    "disabled": validator.disabled
+                ] as [String: Any]
+            },
+            "quorum_numerator": validatorSet.quorumNumerator,
+            "quorum_denominator": validatorSet.quorumDenominator,
+            "hash": validatorSet.hash,
+            "source": validatorSet.source ?? "fixture"
+        ]
+    }
+
     private static func evmProofResultBody(
         verified: Bool,
         state: String,
@@ -5845,6 +6345,25 @@ struct dBrowserTests {
             "proof_id": bundle.proof?.proofID ?? "xrpl-fixture-account",
             "kind": bundle.proof?.kind.rawValue ?? "account",
             "summary": "XRPL account proof checked against validated ledger."
+        ]
+    }
+
+    private static func moveProofResultBody(
+        verified: Bool,
+        state: String,
+        chain: MoveChain,
+        kind: MoveLocalProofKind
+    ) -> [String: Any] {
+        let bundle = moveProofBundle(chain: chain, kind: kind)
+        return [
+            "verified": verified,
+            "state": state,
+            "chain_ref": chain.chainRef,
+            "sequence_number": bundle.checkpoint.sequenceNumber,
+            "checkpoint_digest": bundle.checkpoint.digest,
+            "proof_id": bundle.proof?.proofID ?? "move-fixture-proof",
+            "kind": bundle.proof?.kind.rawValue ?? kind.rawValue,
+            "summary": "\(chain.displayName) \(kind.rawValue) proof checked against Move checkpoint."
         ]
     }
 
