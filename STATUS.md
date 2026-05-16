@@ -19,6 +19,12 @@
 
 ## Active Task
 
+## iOS SwiftUI Compatibility Fix
+
+- [x] Move address-field input modifiers behind platform-safe SwiftUI branches.
+- [x] Verify the Xcode build after the compatibility fix.
+- [x] Commit only files touched for this fix.
+
 ## iOS Runtime Bridges
 
 - [x] Add a Swift runtime bridge contract for decentralized protocols, Copilot, wallet, and downloads.

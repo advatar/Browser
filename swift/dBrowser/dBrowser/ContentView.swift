@@ -72,13 +72,8 @@ struct ContentView: View {
             .help("Reload")
 
             TextField("Search or enter address", text: $browser.addressText)
-                .textInputAutocapitalization(.never)
-#if os(iOS)
-                .keyboardType(.URL)
-                .autocorrectionDisabled()
-#endif
                 .focused($addressFieldFocused)
-                .textFieldStyle(.roundedBorder)
+                .browserAddressFieldStyle()
                 .onSubmit {
                     browser.navigateFromAddress()
                     addressFieldFocused = false
@@ -184,6 +179,22 @@ struct ContentView: View {
             return "runtime bridges ready"
         }
         return "\(browser.unavailableFeatureCount) bridge\(browser.unavailableFeatureCount == 1 ? "" : "s") offline"
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func browserAddressFieldStyle() -> some View {
+#if os(iOS)
+        self
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            .autocorrectionDisabled()
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+#else
+        self
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+#endif
     }
 }
 
