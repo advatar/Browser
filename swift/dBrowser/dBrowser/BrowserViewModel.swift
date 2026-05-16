@@ -1048,6 +1048,12 @@ final class BrowserViewModel: ObservableObject {
             kind: .afMarketSettlementRecorded,
             message: "Recorded \(nodeTask.settlement.status) settlement on \(nodeTask.settlement.chainRef ?? "local-devnet")."
         )
+        let verificationReport = nodeTask.verificationReport
+        appendCopilotEvent(
+            runID: runID,
+            kind: .afMarketVerificationRecorded,
+            message: "\(verificationReport.state.title): \(verificationReport.summary)"
+        )
     }
 
     private func isCopilotRunActive(_ id: UUID) -> Bool {

@@ -19,6 +19,25 @@
 
 ## Active Task
 
+## Swift AFMarket Proof And Settlement Verification Slice
+
+- [x] Triage remaining AFMarket proof/settlement verification gap from #69.
+- [x] Create tracker issue for proof and settlement verification reporting (#86).
+- [x] Add Swift AFMarket verification report and check models.
+- [x] Decode richer AFMarket proof, public input, escrow, transaction, and deadline metadata.
+- [x] Verify task, output commitment, proof public input, and nonce binding where present.
+- [x] Classify mock, locally consistent, pending, anchored, and failed verification states.
+- [x] Surface verification summaries and checks in Copilot activity/runtime suggestions.
+- [x] Add focused Swift unit tests for production-like and local/mock verification reports.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-afmarket-verification-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-afmarket-verification-tests -only-testing:dBrowserTests` passed.
+
 ## Swift AFMarket Marketplace Runner Pack Slice
 
 - [x] Triage remaining AFMarket marketplace pack gap from #69.

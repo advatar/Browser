@@ -387,10 +387,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     )
                     installResult = install
                     nodeTaskResult = nodeTask
-                    summary += " Node \(nodeTask.taskID) completed with \(nodeTask.attestation.mode) attestation, \(nodeTask.proof.status) proof, and \(nodeTask.settlement.status) settlement."
+                    let verificationReport = nodeTask.verificationReport
+                    summary += " Node \(nodeTask.taskID) completed with \(nodeTask.attestation.mode) attestation, \(nodeTask.proof.status) proof, and \(nodeTask.settlement.status) settlement. \(verificationReport.summary)"
                     suggestions.append("Node installed \(selectedPackID) with \(install.status) status (\(install.mode)).")
                     suggestions.append("Node dispatched \(nodeTask.taskID) with \(nodeTask.attestation.mode) attestation.")
                     suggestions.append("Proof \(nodeTask.proof.proofID ?? nodeTask.proof.id ?? "local") is \(nodeTask.proof.status); settlement is \(nodeTask.settlement.status) on \(nodeTask.settlement.chainRef ?? "local-devnet").")
+                    suggestions.append("Verification \(verificationReport.state.title): \(verificationReport.summary)")
+                    for check in verificationReport.checks where check.status != .passed {
+                        suggestions.append("Verification check \(check.id): \(check.message)")
+                    }
                 } catch {
                     suggestions.append("Node agent failed install/dispatch: \(error.localizedDescription).")
                 }

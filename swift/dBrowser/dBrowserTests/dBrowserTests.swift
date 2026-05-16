@@ -925,6 +925,74 @@ struct dBrowserTests {
         #expect(fallbackBody?["preferredPackID"] as? String == "afm://demo-writer")
     }
 
+    @Test func afmNodeVerificationReportRecognizesChainAnchoredEvidence() {
+        let taskID = "task-prod"
+        let outputCommitment = "0x\(String(repeating: "11", count: 32))"
+        let nonce = AFMNodeVerificationReport.bindingNonceHex(
+            taskID: taskID,
+            outputCommitment: outputCommitment
+        )
+        let nodeTask = AFMNodeTaskResult(
+            ok: true,
+            id: taskID,
+            taskID: taskID,
+            packID: "eu-law@v1",
+            installID: "install-prod",
+            status: "completed",
+            mode: "production",
+            result: AFMNodeTaskOutput(
+                summary: "production completed",
+                outputCommitment: outputCommitment,
+                completedAt: "2026-05-16T00:00:01Z"
+            ),
+            attestation: AFMAttestedRun(
+                mode: "secure-enclave",
+                taskID: taskID,
+                outputCommitment: outputCommitment,
+                nonce: nonce ?? "",
+                tokenCount: 42,
+                contextPassages: 2,
+                attestationToken: "cbor-base64"
+            ),
+            proof: AFMProofState(
+                proofID: "proof-prod",
+                status: "verified",
+                verifier: "0xverifier",
+                publicInputs: [
+                    "taskID": taskID,
+                    "outputCommitment": outputCommitment,
+                    "deadline": "1730203600"
+                ],
+                proofBytes: "0xproof",
+                publicInputsABI: "0xinputs",
+                deadline: 1730203600,
+                payoutAddress: "0x000000000000000000000000000000000000dead",
+                modelIDHash: "0xmodel"
+            ),
+            settlement: AFMSettlementState(
+                id: "settlement-prod",
+                status: "settled",
+                chainRef: "base-sepolia",
+                escrowID: "escrow-prod",
+                escrowContract: "0xescrow",
+                transactionHash: "0xtx",
+                blockNumber: 123,
+                deadline: 1730203600,
+                verifier: "0xverifier",
+                mode: "production",
+                settledAt: "2026-05-16T00:00:02Z"
+            )
+        )
+
+        let report = nodeTask.verificationReport
+
+        #expect(nonce != nil)
+        #expect(report.state == .chainAnchored)
+        #expect(report.checks.allSatisfy { $0.status == .passed })
+        #expect(report.summary.contains("chain-anchored"))
+        #expect(report.transactionHash == "0xtx")
+    }
+
     @MainActor
     @Test func runtimeBridgeForwardsSelectedAFMPackAndContextToServices() async {
         let capturedRequests = JSONRequestCapture()
@@ -1400,8 +1468,12 @@ struct dBrowserTests {
         #expect(result.afmNodeTask?.attestation.mode == "local-mock")
         #expect(result.afmNodeTask?.proof.status == "mock")
         #expect(result.afmNodeTask?.settlement.status == "mock")
+        #expect(result.afmNodeTask?.verificationReport.state == .mock)
         #expect(result.summary.contains("local-mock attestation"))
+        #expect(result.summary.contains("local/mock only"))
         #expect(result.suggestions.contains { $0.contains("Node installed afm://demo-writer") })
+        #expect(result.suggestions.contains { $0.contains("Verification Mock") })
+        #expect(result.suggestions.contains { $0.contains("Local mock attestation") })
         #expect(installBody?["checksum"] as? String == "0xabc")
         #expect(taskBody?["selectedPackID"] as? String == "afm://demo-writer")
         #expect(taskBody?["memoryContextIDs"] as? [String] == ["mem-node"])
@@ -1528,6 +1600,7 @@ struct dBrowserTests {
         #expect(events.contains(.afMarketDispatchCompleted))
         #expect(events.contains(.afMarketAttestationRecorded))
         #expect(events.contains(.afMarketSettlementRecorded))
+        #expect(events.contains(.afMarketVerificationRecorded))
     }
 
     @MainActor

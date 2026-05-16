@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct AFMServiceEndpointConfiguration: Equatable {
@@ -598,12 +599,125 @@ struct AFMAttestedRun: Codable, Equatable {
     var attestationToken: String?
 }
 
+private struct AFMLosslessStringValue: Decodable {
+    let value: String
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            self.value = value
+        } else if let value = try? container.decode(Int.self) {
+            self.value = "\(value)"
+        } else if let value = try? container.decode(Double.self) {
+            self.value = "\(value)"
+        } else if let value = try? container.decode(Bool.self) {
+            self.value = value ? "true" : "false"
+        } else {
+            self.value = ""
+        }
+    }
+}
+
 struct AFMProofState: Codable, Equatable {
     var id: String?
     var proofID: String?
     var status: String
     var verifier: String
     var publicInputs: [String: String]?
+    var proofBytes: String?
+    var publicInputsABI: String?
+    var deadline: Int?
+    var payoutAddress: String?
+    var modelIDHash: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case proofID
+        case status
+        case verifier
+        case publicInputs
+        case publicInputsSnake = "public_inputs"
+        case proofBytes = "zk_proof"
+        case publicInputsABI = "public_inputs_abi"
+        case deadline
+        case payoutAddress = "payout_address"
+        case modelIDHash = "model_id_hash"
+    }
+
+    init(
+        id: String? = nil,
+        proofID: String? = nil,
+        status: String,
+        verifier: String,
+        publicInputs: [String: String]? = nil,
+        proofBytes: String? = nil,
+        publicInputsABI: String? = nil,
+        deadline: Int? = nil,
+        payoutAddress: String? = nil,
+        modelIDHash: String? = nil
+    ) {
+        self.id = id
+        self.proofID = proofID
+        self.status = status
+        self.verifier = verifier
+        self.publicInputs = publicInputs
+        self.proofBytes = proofBytes
+        self.publicInputsABI = publicInputsABI
+        self.deadline = deadline
+        self.payoutAddress = payoutAddress
+        self.modelIDHash = modelIDHash
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+        self.proofID = try container.decodeIfPresent(String.self, forKey: .proofID)
+        self.status = try container.decodeIfPresent(String.self, forKey: .status) ?? "unknown"
+        self.verifier = try container.decodeIfPresent(String.self, forKey: .verifier) ?? "unknown"
+        if let publicInputs = try Self.decodeStringMap(container, forKey: .publicInputs) {
+            self.publicInputs = publicInputs
+        } else {
+            self.publicInputs = try Self.decodeStringMap(container, forKey: .publicInputsSnake)
+        }
+        self.proofBytes = try container.decodeIfPresent(String.self, forKey: .proofBytes)
+        if let publicInputsABI = try container.decodeIfPresent(String.self, forKey: .publicInputsABI) {
+            self.publicInputsABI = publicInputsABI
+        } else {
+            self.publicInputsABI = try? container.decodeIfPresent(String.self, forKey: .publicInputsSnake)
+        }
+        self.deadline = try container.decodeIfPresent(Int.self, forKey: .deadline)
+        self.payoutAddress = try container.decodeIfPresent(String.self, forKey: .payoutAddress)
+        self.modelIDHash = try container.decodeIfPresent(String.self, forKey: .modelIDHash)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(proofID, forKey: .proofID)
+        try container.encode(status, forKey: .status)
+        try container.encode(verifier, forKey: .verifier)
+        try container.encodeIfPresent(publicInputs, forKey: .publicInputs)
+        try container.encodeIfPresent(proofBytes, forKey: .proofBytes)
+        try container.encodeIfPresent(publicInputsABI, forKey: .publicInputsABI)
+        try container.encodeIfPresent(deadline, forKey: .deadline)
+        try container.encodeIfPresent(payoutAddress, forKey: .payoutAddress)
+        try container.encodeIfPresent(modelIDHash, forKey: .modelIDHash)
+    }
+
+    private static func decodeStringMap(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> [String: String]? {
+        guard container.contains(key) else { return nil }
+        guard let values = try? container.decode([String: AFMLosslessStringValue].self, forKey: key) else {
+            return nil
+        }
+        return values.reduce(into: [:]) { result, item in
+            if !item.value.value.isEmpty {
+                result[item.key] = item.value.value
+            }
+        }
+    }
 }
 
 struct AFMSettlementState: Codable, Equatable {
@@ -611,9 +725,111 @@ struct AFMSettlementState: Codable, Equatable {
     var status: String
     var chainRef: String?
     var escrowID: String?
+    var escrowContract: String?
+    var transactionHash: String?
+    var blockNumber: Int?
+    var deadline: Int?
     var verifier: String?
     var mode: String?
     var settledAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case chainRef
+        case chainRefSnake = "chain_ref"
+        case escrowID
+        case escrowIDSnake = "escrow_id"
+        case escrowContract
+        case escrowContractSnake = "escrow_contract"
+        case transactionHash
+        case transactionHashSnake = "transaction_hash"
+        case blockNumber
+        case blockNumberSnake = "block_number"
+        case deadline
+        case verifier
+        case mode
+        case settledAt
+        case settledAtSnake = "settled_at"
+    }
+
+    init(
+        id: String? = nil,
+        status: String,
+        chainRef: String? = nil,
+        escrowID: String? = nil,
+        escrowContract: String? = nil,
+        transactionHash: String? = nil,
+        blockNumber: Int? = nil,
+        deadline: Int? = nil,
+        verifier: String? = nil,
+        mode: String? = nil,
+        settledAt: String? = nil
+    ) {
+        self.id = id
+        self.status = status
+        self.chainRef = chainRef
+        self.escrowID = escrowID
+        self.escrowContract = escrowContract
+        self.transactionHash = transactionHash
+        self.blockNumber = blockNumber
+        self.deadline = deadline
+        self.verifier = verifier
+        self.mode = mode
+        self.settledAt = settledAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+        self.status = try container.decodeIfPresent(String.self, forKey: .status) ?? "unknown"
+        self.chainRef = try Self.decodeString(container, .chainRef, fallback: .chainRefSnake)
+        self.escrowID = try Self.decodeString(container, .escrowID, fallback: .escrowIDSnake)
+        self.escrowContract = try Self.decodeString(container, .escrowContract, fallback: .escrowContractSnake)
+        self.transactionHash = try Self.decodeString(container, .transactionHash, fallback: .transactionHashSnake)
+        self.blockNumber = try Self.decodeInt(container, .blockNumber, fallback: .blockNumberSnake)
+        self.deadline = try container.decodeIfPresent(Int.self, forKey: .deadline)
+        self.verifier = try container.decodeIfPresent(String.self, forKey: .verifier)
+        self.mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        self.settledAt = try Self.decodeString(container, .settledAt, fallback: .settledAtSnake)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(chainRef, forKey: .chainRef)
+        try container.encodeIfPresent(escrowID, forKey: .escrowID)
+        try container.encodeIfPresent(escrowContract, forKey: .escrowContract)
+        try container.encodeIfPresent(transactionHash, forKey: .transactionHash)
+        try container.encodeIfPresent(blockNumber, forKey: .blockNumber)
+        try container.encodeIfPresent(deadline, forKey: .deadline)
+        try container.encodeIfPresent(verifier, forKey: .verifier)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encodeIfPresent(settledAt, forKey: .settledAt)
+    }
+
+    private static func decodeString(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys,
+        fallback: CodingKeys
+    ) throws -> String? {
+        if let value = try container.decodeIfPresent(String.self, forKey: key) {
+            return value
+        }
+        return try container.decodeIfPresent(String.self, forKey: fallback)
+    }
+
+    private static func decodeInt(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys,
+        fallback: CodingKeys
+    ) throws -> Int? {
+        if let value = try container.decodeIfPresent(Int.self, forKey: key) {
+            return value
+        }
+        return try container.decodeIfPresent(Int.self, forKey: fallback)
+    }
 }
 
 struct AFMNodeTaskResult: Codable, Equatable, Identifiable {
@@ -628,6 +844,263 @@ struct AFMNodeTaskResult: Codable, Equatable, Identifiable {
     var attestation: AFMAttestedRun
     var proof: AFMProofState
     var settlement: AFMSettlementState
+
+    var verificationReport: AFMNodeVerificationReport {
+        AFMNodeVerificationReport(task: self)
+    }
+}
+
+enum AFMVerificationCheckStatus: String, Codable, Equatable {
+    case passed
+    case warning
+    case failed
+}
+
+struct AFMVerificationCheck: Codable, Equatable, Identifiable {
+    var id: String
+    var status: AFMVerificationCheckStatus
+    var message: String
+}
+
+enum AFMVerificationState: String, Codable, Equatable {
+    case failed
+    case mock
+    case locallyConsistent
+    case pendingChainEvidence
+    case chainAnchored
+
+    var title: String {
+        switch self {
+        case .failed: "Failed"
+        case .mock: "Mock"
+        case .locallyConsistent: "Locally consistent"
+        case .pendingChainEvidence: "Pending chain evidence"
+        case .chainAnchored: "Chain anchored"
+        }
+    }
+}
+
+struct AFMNodeVerificationReport: Codable, Equatable {
+    var taskID: String
+    var state: AFMVerificationState
+    var summary: String
+    var checks: [AFMVerificationCheck]
+    var chainRef: String?
+    var escrowID: String?
+    var escrowContract: String?
+    var transactionHash: String?
+    var proofID: String?
+
+    init(task: AFMNodeTaskResult) {
+        self.taskID = task.taskID
+        self.chainRef = task.settlement.chainRef
+        self.escrowID = task.settlement.escrowID
+        self.escrowContract = task.settlement.escrowContract
+        self.transactionHash = task.settlement.transactionHash
+        self.proofID = task.proof.proofID ?? task.proof.id
+
+        var checks: [AFMVerificationCheck] = []
+        checks.append(Self.taskBindingCheck(task))
+        checks.append(Self.outputBindingCheck(task))
+        checks.append(Self.nonceBindingCheck(task))
+        checks.append(Self.proofCheck(task))
+        checks.append(Self.settlementCheck(task))
+        self.checks = checks
+        self.state = Self.state(for: task, checks: checks)
+        self.summary = Self.summary(for: state, task: task)
+    }
+
+    nonisolated static func bindingNonceHex(taskID: String, outputCommitment: String) -> String? {
+        guard let commitmentData = hexData(from: outputCommitment) else { return nil }
+        var hasher = SHA256()
+        hasher.update(data: Data(taskID.utf8))
+        hasher.update(data: commitmentData)
+        return Data(hasher.finalize()).hexString
+    }
+
+    nonisolated private static func taskBindingCheck(_ task: AFMNodeTaskResult) -> AFMVerificationCheck {
+        guard task.attestation.taskID == task.taskID else {
+            return AFMVerificationCheck(
+                id: "task-binding",
+                status: .failed,
+                message: "Attestation task ID \(task.attestation.taskID) does not match node task \(task.taskID)."
+            )
+        }
+        if let publicTaskID = firstPublicInputValue(task.proof.publicInputs, keys: ["taskID", "task_id", "task"]) {
+            let publicTaskMatches = publicTaskID == task.taskID || normalizedHex(publicTaskID) == sha256Hex(task.taskID)
+            if !publicTaskMatches {
+                return AFMVerificationCheck(
+                    id: "task-binding",
+                    status: .failed,
+                    message: "Proof public task input does not match node task \(task.taskID)."
+                )
+            }
+        }
+        return AFMVerificationCheck(
+            id: "task-binding",
+            status: .passed,
+            message: "Task ID is bound across node result, attestation, and proof metadata."
+        )
+    }
+
+    nonisolated private static func outputBindingCheck(_ task: AFMNodeTaskResult) -> AFMVerificationCheck {
+        let output = task.result.outputCommitment
+        guard normalizedHex(task.attestation.outputCommitment) == normalizedHex(output) else {
+            return AFMVerificationCheck(
+                id: "output-binding",
+                status: .failed,
+                message: "Attestation output commitment does not match node result output."
+            )
+        }
+        if let publicOutput = firstPublicInputValue(task.proof.publicInputs, keys: ["outputCommitment", "output_commitment", "output"]) {
+            guard normalizedHex(publicOutput) == normalizedHex(output) else {
+                return AFMVerificationCheck(
+                    id: "output-binding",
+                    status: .failed,
+                    message: "Proof public output commitment does not match node result output."
+                )
+            }
+        }
+        return AFMVerificationCheck(
+            id: "output-binding",
+            status: .passed,
+            message: "Output commitment is consistent across node result, attestation, and proof metadata."
+        )
+    }
+
+    nonisolated private static func nonceBindingCheck(_ task: AFMNodeTaskResult) -> AFMVerificationCheck {
+        let isMock = task.mode.contains("mock") || task.attestation.mode.contains("mock")
+        guard let expectedNonce = bindingNonceHex(taskID: task.taskID, outputCommitment: task.result.outputCommitment) else {
+            return AFMVerificationCheck(
+                id: "nonce-binding",
+                status: isMock ? .warning : .failed,
+                message: isMock ? "Local mock attestation does not expose production nonce bytes." : "Cannot parse output commitment for production nonce binding."
+            )
+        }
+        let actualNonce = normalizedHex(task.attestation.nonce)
+        guard !actualNonce.isEmpty, actualNonce == expectedNonce || expectedNonce.hasPrefix(actualNonce) else {
+            return AFMVerificationCheck(
+                id: "nonce-binding",
+                status: isMock ? .warning : .failed,
+                message: isMock ? "Local mock nonce is not production-bound." : "Attestation nonce does not match SHA256(taskID || outputCommitment)."
+            )
+        }
+        return AFMVerificationCheck(
+            id: "nonce-binding",
+            status: .passed,
+            message: "Attestation nonce matches SHA256(taskID || outputCommitment)."
+        )
+    }
+
+    nonisolated private static func proofCheck(_ task: AFMNodeTaskResult) -> AFMVerificationCheck {
+        let status = task.proof.status.lowercased()
+        if status.contains("fail") || status.contains("invalid") || status.contains("reject") {
+            return AFMVerificationCheck(id: "proof", status: .failed, message: "Proof verifier reported \(task.proof.status).")
+        }
+        if status.contains("mock") || task.proof.verifier == "local-dev" {
+            return AFMVerificationCheck(id: "proof", status: .warning, message: "Proof is local/mock and not production verifier evidence.")
+        }
+        if task.proof.proofBytes != nil || task.proof.publicInputsABI != nil || task.proof.publicInputs != nil {
+            return AFMVerificationCheck(id: "proof", status: .passed, message: "Proof metadata is present for verifier \(task.proof.verifier).")
+        }
+        return AFMVerificationCheck(id: "proof", status: .warning, message: "Proof status \(task.proof.status) has no public input payload.")
+    }
+
+    nonisolated private static func settlementCheck(_ task: AFMNodeTaskResult) -> AFMVerificationCheck {
+        let status = task.settlement.status.lowercased()
+        let chainRef = task.settlement.chainRef ?? "unknown"
+        if status.contains("fail") || status.contains("invalid") || status.contains("reject") {
+            return AFMVerificationCheck(id: "settlement", status: .failed, message: "Settlement reported \(task.settlement.status) on \(chainRef).")
+        }
+        if status.contains("mock") || chainRef == "local-devnet" || task.settlement.verifier == "local-dev" {
+            return AFMVerificationCheck(id: "settlement", status: .warning, message: "Settlement is local/mock and not chain-anchored evidence.")
+        }
+        if task.settlement.transactionHash != nil && (task.settlement.escrowID != nil || task.settlement.escrowContract != nil) {
+            return AFMVerificationCheck(id: "settlement", status: .passed, message: "Settlement has escrow and transaction evidence on \(chainRef).")
+        }
+        if status.contains("settled") || status.contains("anchored") {
+            return AFMVerificationCheck(id: "settlement", status: .warning, message: "Settlement is marked \(task.settlement.status) but lacks escrow or transaction evidence.")
+        }
+        return AFMVerificationCheck(id: "settlement", status: .warning, message: "Settlement is pending chain evidence on \(chainRef).")
+    }
+
+    nonisolated private static func state(for task: AFMNodeTaskResult, checks: [AFMVerificationCheck]) -> AFMVerificationState {
+        if checks.contains(where: { $0.status == .failed }) {
+            return .failed
+        }
+        let proofIsMock = task.proof.status.lowercased().contains("mock") || task.proof.verifier == "local-dev"
+        let settlementIsMock = task.settlement.status.lowercased().contains("mock") || task.settlement.chainRef == "local-devnet"
+        if proofIsMock || settlementIsMock || task.mode.contains("mock") {
+            return .mock
+        }
+        if task.settlement.transactionHash != nil && (task.settlement.escrowID != nil || task.settlement.escrowContract != nil) {
+            return .chainAnchored
+        }
+        if checks.contains(where: { $0.id == "proof" && $0.status == .passed }) {
+            return .pendingChainEvidence
+        }
+        return .locallyConsistent
+    }
+
+    nonisolated private static func summary(for state: AFMVerificationState, task: AFMNodeTaskResult) -> String {
+        switch state {
+        case .failed:
+            return "AFMarket verification failed for \(task.taskID); review failed binding or proof checks."
+        case .mock:
+            return "AFMarket verification for \(task.taskID) is local/mock only; no production chain trust is claimed."
+        case .locallyConsistent:
+            return "AFMarket node evidence for \(task.taskID) is locally consistent."
+        case .pendingChainEvidence:
+            return "AFMarket proof for \(task.taskID) is verifier-shaped; settlement still needs chain evidence."
+        case .chainAnchored:
+            return "AFMarket settlement for \(task.taskID) is chain-anchored on \(task.settlement.chainRef ?? "configured chain")."
+        }
+    }
+
+    nonisolated private static func firstPublicInputValue(_ inputs: [String: String]?, keys: [String]) -> String? {
+        guard let inputs else { return nil }
+        for key in keys {
+            if let value = inputs[key] {
+                return value
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func sha256Hex(_ value: String) -> String {
+        Data(SHA256.hash(data: Data(value.utf8))).hexString
+    }
+
+    nonisolated private static func normalizedHex(_ value: String) -> String {
+        var normalized = value.lowercased()
+        if normalized.hasPrefix("sha256:") {
+            normalized.removeFirst("sha256:".count)
+        }
+        if normalized.hasPrefix("0x") {
+            normalized.removeFirst(2)
+        }
+        return normalized
+    }
+
+    nonisolated private static func hexData(from value: String) -> Data? {
+        let normalized = normalizedHex(value)
+        guard normalized.count.isMultiple(of: 2), !normalized.isEmpty else { return nil }
+        var data = Data()
+        var index = normalized.startIndex
+        while index < normalized.endIndex {
+            let next = normalized.index(index, offsetBy: 2)
+            guard let byte = UInt8(normalized[index..<next], radix: 16) else { return nil }
+            data.append(byte)
+            index = next
+        }
+        return data
+    }
+}
+
+private extension Data {
+    nonisolated var hexString: String {
+        map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 enum AFMServicesClientError: Error, LocalizedError {
