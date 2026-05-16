@@ -19,6 +19,22 @@
 
 ## Active Task
 
+## Swift Move-Chain Trust Foundation Slice
+
+- [x] Triage Sui/Aptos Move-chain trust-state gap from #67.
+- [x] Create tracker issue for Swift Move-chain Sui/Aptos chain trust foundation (#100).
+- [ ] Add shared Swift Move-chain metadata for Sui/Aptos networks, endpoint config, checkpoint/ledger snapshot, committee/validator set, signature, object/account/transaction proof, verification result, and service snapshot models.
+- [ ] Add fixture-backed Sui checkpoint committee quorum and Aptos ledger-info validator quorum validation.
+- [ ] Add stale checkpoint/ledger detection and unsupported production verifier labeling.
+- [ ] Add local Sui object/transaction-effects and Aptos account/transaction proof verification bound to checkpoint/ledger roots.
+- [ ] Add weak quorum, stale, failed, and API/RPC fallback labeling.
+- [ ] Add Move service client contract and fixture-backed `services/chain-trust` endpoints for Sui and Aptos.
+- [ ] Bind Move-chain snapshots into the shared chain trust registry/runtime status.
+- [ ] Add focused Swift unit tests for chain routing, status modeling, stale detection, proof verification, fallback, service contract, registry updates, and runtime refresh.
+- [ ] Verify local service checks plus Swift tests/build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift XRP Ledger Chain Trust Foundation Slice
 
 - [x] Triage XRP Ledger validated/fallback trust-state gap from #66.
