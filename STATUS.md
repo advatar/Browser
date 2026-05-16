@@ -29,8 +29,8 @@
 - [x] Add Copilot activity events for memory correction requests and outcomes.
 - [x] Add focused Swift unit tests for review resources, correction calls, and view-model behavior.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift OpenMind MCP Transport Negotiation Slice
 
