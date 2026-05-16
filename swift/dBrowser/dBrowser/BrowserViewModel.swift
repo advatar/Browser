@@ -22,9 +22,11 @@ final class BrowserViewModel: ObservableObject {
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
     @Published var openMindContinuityState: OpenMindContinuityState
     @Published var openMindPostureState: OpenMindPostureState
+    @Published var openMindReviewTasks: [OpenMindReviewTask]
     @Published var latestOpenMindRecall: OpenMindMemoryRecallResult?
     @Published var latestOpenMindStepUpRequest: OpenMindStepUpRequest?
     @Published var latestOpenMindWriteback: OpenMindWritebackOutcome?
+    @Published var latestOpenMindCorrection: OpenMindCorrectionOutcome?
     @Published var llmConversation: LLMConversation
     @Published var llmModelOptions: [LLMModelProfile]
     @Published var selectedLLMModelID: String
@@ -67,6 +69,7 @@ final class BrowserViewModel: ObservableObject {
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
+        self.openMindReviewTasks = []
         self.llmModelOptions = initialLLMModelOptions
         self.selectedLLMModelID = restoredLLMState.selectedModelID
         self.llmConversation = restoredLLMState.conversation
@@ -216,10 +219,13 @@ final class BrowserViewModel: ObservableObject {
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmModelOptions = LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)
         normalizeSelectedLLMModelIfNeeded()
-        let openMindState = await openMindMemoryClient.refreshRuntimeState()
-        openMindCapabilityState = openMindState.capability
-        openMindContinuityState = openMindState.continuity
-        openMindPostureState = openMindState.posture
+        async let openMindState = openMindMemoryClient.refreshRuntimeState()
+        async let reviewTasks = openMindMemoryClient.refreshReviewTasks()
+        let resolvedOpenMindState = await openMindState
+        openMindCapabilityState = resolvedOpenMindState.capability
+        openMindContinuityState = resolvedOpenMindState.continuity
+        openMindPostureState = resolvedOpenMindState.posture
+        openMindReviewTasks = await reviewTasks
         if let selectedAFMPackID, !afmServiceSnapshot.availablePacks.contains(where: { $0.id == selectedAFMPackID }) {
             self.selectedAFMPackID = nil
         }
@@ -415,6 +421,7 @@ final class BrowserViewModel: ObservableObject {
         latestOpenMindRecall = nil
         latestOpenMindStepUpRequest = nil
         latestOpenMindWriteback = nil
+        latestOpenMindCorrection = nil
         persistLLMConversation()
     }
 
@@ -592,6 +599,52 @@ final class BrowserViewModel: ObservableObject {
         guard copilotRuns.contains(where: { $0.id == runID }) else { return nil }
         return Task { @MainActor in
             _ = await writeBackOpenMindMemory(for: runID)
+        }
+    }
+
+    @discardableResult
+    func requestOpenMindCorrection(targetID: String, correctionText: String) -> Task<Void, Never>? {
+        let trimmedTarget = targetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCorrection = correctionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTarget.isEmpty, !trimmedCorrection.isEmpty else {
+            return nil
+        }
+
+        return Task { @MainActor in
+            let run = copilotRuns.first
+            if let runID = run?.id {
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: .memoryCorrectionRequested,
+                    message: "Requested OpenMind correction for \(trimmedTarget)."
+                )
+            }
+
+            let snapshot = latestPageSnapshot?.urlString == run?.targetURLString ? latestPageSnapshot : nil
+            let request = OpenMindCorrectionRequest(
+                targetID: trimmedTarget,
+                correctionText: trimmedCorrection,
+                actor: "dBrowser.user",
+                source: OpenMindActionSource(
+                    product: "dBrowser.swift",
+                    runID: run?.id,
+                    pageURLString: run?.targetURLString ?? activeTab?.urlString,
+                    snapshotCommitment: OpenMindMemoryClient.snapshotCommitment(for: snapshot),
+                    prompt: run?.prompt
+                ),
+                idempotencyKey: Self.stableCorrectionKey(targetID: trimmedTarget, correctionText: trimmedCorrection)
+            )
+            let outcome = await openMindMemoryClient.createCorrection(request)
+            latestOpenMindCorrection = outcome
+            openMindReviewTasks = await openMindMemoryClient.refreshReviewTasks()
+
+            if let runID = run?.id {
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: copilotCorrectionEventKind(for: outcome),
+                    message: copilotCorrectionMessage(for: outcome)
+                )
+            }
         }
     }
 
@@ -1113,6 +1166,42 @@ final class BrowserViewModel: ObservableObject {
         case .unavailable:
             return "OpenMind memory writeback unavailable: \(outcome.message)"
         }
+    }
+
+    private func copilotCorrectionEventKind(for outcome: OpenMindCorrectionOutcome) -> CopilotRunEventKind {
+        switch outcome.status {
+        case .recorded:
+            return .memoryCorrectionRecorded
+        case .proposed:
+            return .memoryCorrectionProposed
+        case .denied:
+            return .memoryCorrectionDenied
+        case .unavailable:
+            return .memoryCorrectionUnavailable
+        }
+    }
+
+    private func copilotCorrectionMessage(for outcome: OpenMindCorrectionOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "OpenMind recorded correction \(outcome.correctionID ?? "without correction ID")."
+        case .proposed:
+            return "OpenMind queued correction for review: \(outcome.message)"
+        case .denied:
+            return "OpenMind denied correction: \(outcome.message)"
+        case .unavailable:
+            return "OpenMind correction unavailable: \(outcome.message)"
+        }
+    }
+
+    private static func stableCorrectionKey(targetID: String, correctionText: String) -> String {
+        let text = "\(targetID)\n\(correctionText)"
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x100000001b3
+        }
+        return "correction-\(String(hash, radix: 16))"
     }
 
     private func finishCopilotRun(

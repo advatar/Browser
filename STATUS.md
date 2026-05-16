@@ -19,6 +19,19 @@
 
 ## Active Task
 
+## Swift OpenMind Correction And Review Slice
+
+- [x] Triage remaining OpenMind/BrIAn correction and review gap from #70.
+- [x] Create tracker issue for memory correction and review affordances (#88).
+- [x] Add Swift OpenMind review-task and correction outcome models.
+- [x] Add direct HTTP and JSON-RPC client support for review tasks and corrections.
+- [x] Surface review-task and latest correction state in the Swift runtime/Copilot UI.
+- [x] Add Copilot activity events for memory correction requests and outcomes.
+- [x] Add focused Swift unit tests for review resources, correction calls, and view-model behavior.
+- [x] Verify local Swift tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close completed GitHub issues.
+
 ## Swift OpenMind MCP Transport Negotiation Slice
 
 - [x] Triage remaining OpenMind/BrIAn transport negotiation gap from #70.

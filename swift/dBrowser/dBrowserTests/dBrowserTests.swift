@@ -2373,6 +2373,170 @@ struct dBrowserTests {
         #expect(addSource?["clientSource"] as? String == "unit-test")
     }
 
+    @MainActor @Test func openMindMemoryClientLoadsReviewTasksAndCreatesCorrection() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "memoryreview") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/resources/mind/governed-memory/review-tasks" {
+                return Self.jsonResponse(for: request, body: [
+                    "items": [
+                        [
+                            "reviewTaskId": "review-1",
+                            "taskType": "claim_review",
+                            "state": "open",
+                            "entityId": "claim-1",
+                            "entityType": "Claim",
+                            "title": "Review proposed memory claim",
+                            "summary": "User prefers terse summaries.",
+                            "priority": 5,
+                            "recommendedDecision": "review",
+                            "createdAt": "2026-05-16T00:00:00Z"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/mcp/tools/gmem.create_correction" {
+                return Self.jsonResponse(for: request, body: [
+                    "correctionId": "corr-1",
+                    "targetId": "mem-1",
+                    "correctionText": "Actually prefers detailed implementation notes.",
+                    "mode": "supersede_not_overwrite",
+                    "createdAt": "2026-05-16T00:00:00Z"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = OpenMindMemoryClient(
+            configuration: memoryHarness.configuration,
+            session: memoryHarness.session
+        )
+
+        let reviewTasks = await client.refreshReviewTasks()
+        let outcome = await client.createCorrection(
+            OpenMindCorrectionRequest(
+                targetID: "mem-1",
+                correctionText: "Actually prefers detailed implementation notes.",
+                actor: "dBrowser.user",
+                source: OpenMindActionSource(
+                    product: "dBrowser.swift",
+                    runID: nil,
+                    pageURLString: "https://example.com",
+                    snapshotCommitment: "fnv1a64:abc",
+                    prompt: "Summarize"
+                ),
+                idempotencyKey: "correction-key"
+            )
+        )
+        let correctionBody = capturedRequests.body(for: "/mcp/tools/gmem.create_correction")
+        let sourceBody = correctionBody?["source"] as? [String: Any]
+
+        #expect(reviewTasks.first?.id == "review-1")
+        #expect(reviewTasks.first?.entityID == "claim-1")
+        #expect(outcome.status == .recorded)
+        #expect(outcome.correctionID == "corr-1")
+        #expect(outcome.targetID == "mem-1")
+        #expect(outcome.mode == "supersede_not_overwrite")
+        #expect(correctionBody?["targetId"] as? String == "mem-1")
+        #expect(correctionBody?["correctionText"] as? String == "Actually prefers detailed implementation notes.")
+        #expect(correctionBody?["actor"] as? String == "dBrowser.user")
+        #expect(correctionBody?["idempotencyKey"] as? String == "correction-key")
+        #expect(sourceBody?["product"] as? String == "dBrowser.swift")
+    }
+
+    @MainActor @Test func openMindMemoryClientUsesJSONRPCForReviewTasksAndCorrection() async {
+        let capturedRPC = JSONRPCRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "memoryreviewrpc") { request in
+            guard request.url?.path == "/mcp" else {
+                return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+            }
+
+            let payload = capturedRPC.capture(request) ?? [:]
+            let method = payload["method"] as? String
+            let id = payload["id"] ?? 1
+
+            if method == "resources/read" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "contents": [
+                            [
+                                "uri": "mind://governed-memory/review-tasks",
+                                "mimeType": "application/json",
+                                "text": Self.jsonString([
+                                    "items": [
+                                        [
+                                            "id": "review-rpc",
+                                            "taskType": "claim_review",
+                                            "state": "open",
+                                            "entityId": "claim-rpc",
+                                            "title": "Review RPC memory claim",
+                                            "summary": "RPC review task"
+                                        ]
+                                    ]
+                                ])
+                            ]
+                        ]
+                    ]
+                ])
+            }
+
+            if method == "tools/call",
+               let params = payload["params"] as? [String: Any],
+               params["name"] as? String == "gmem.create_correction" {
+                return Self.jsonResponse(for: request, body: [
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [
+                        "structuredContent": [
+                            "correctionId": "corr-rpc",
+                            "targetId": "mem-rpc",
+                            "correctionText": "Corrected via bridge",
+                            "mode": "supersede_not_overwrite"
+                        ],
+                        "isError": false
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 400, body: ["error": "unexpected JSON-RPC request"])
+        }
+        let client = OpenMindMemoryClient(
+            configuration: memoryHarness.configuration,
+            session: memoryHarness.session
+        )
+
+        let reviewTasks = await client.refreshReviewTasks()
+        let outcome = await client.createCorrection(
+            OpenMindCorrectionRequest(
+                targetID: "mem-rpc",
+                correctionText: "Corrected via bridge",
+                actor: "dBrowser.user",
+                source: OpenMindActionSource(
+                    product: "dBrowser.swift",
+                    runID: nil,
+                    pageURLString: nil,
+                    snapshotCommitment: nil,
+                    prompt: nil
+                ),
+                idempotencyKey: "correction-rpc"
+            )
+        )
+        let correctionArguments = capturedRPC.toolArguments(named: "gmem.create_correction")
+
+        #expect(reviewTasks.first?.id == "review-rpc")
+        #expect(reviewTasks.first?.entityID == "claim-rpc")
+        #expect(outcome.status == .recorded)
+        #expect(outcome.correctionID == "corr-rpc")
+        #expect(correctionArguments?["targetId"] as? String == "mem-rpc")
+        #expect(correctionArguments?["correctionText"] as? String == "Corrected via bridge")
+        #expect(correctionArguments?["idempotencyKey"] as? String == "correction-rpc")
+    }
+
     @MainActor
     @Test func copilotRequestsOpenMindMemoryBeforeModelRun() async {
         let memoryHarness = Self.makeOpenMindMemorySession(key: "copilotmemory") { request in
@@ -2704,6 +2868,80 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func copilotOpenMindCorrectionRecordsOutcomeAndEvents() async {
+        let capturedRequests = JSONRequestCapture()
+        let memoryHarness = Self.makeOpenMindMemorySession(key: "correctionvm") { request in
+            let path = request.url?.path ?? ""
+            capturedRequests.capture(request)
+
+            if path == "/mcp/resources/mind/governed-memory/review-tasks" {
+                return Self.jsonResponse(for: request, body: [
+                    "items": [
+                        [
+                            "id": "review-after-correction",
+                            "taskType": "claim_review",
+                            "state": "open",
+                            "entityId": "claim-after",
+                            "title": "Review updated memory"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/mcp/tools/gmem.create_correction" {
+                return Self.jsonResponse(for: request, body: [
+                    "correctionId": "corr-vm",
+                    "targetId": "mem-1",
+                    "correctionText": "Correction from Copilot panel",
+                    "mode": "supersede_not_overwrite"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let model = makeIsolatedBrowserViewModel(
+            openMindMemoryClient: OpenMindMemoryClient(
+                configuration: memoryHarness.configuration,
+                session: memoryHarness.session
+            )
+        )
+        model.navigate("https://example.com")
+        let runID = UUID()
+        model.copilotRuns = [
+            CopilotRun(
+                id: runID,
+                prompt: "Summarize",
+                activeTabID: model.activeTabID,
+                targetURLString: "https://example.com",
+                status: .completed
+            )
+        ]
+
+        let task = model.requestOpenMindCorrection(
+            targetID: "mem-1",
+            correctionText: "Correction from Copilot panel"
+        )
+        let completed = await waitForOpenMindCorrection(in: model)
+        let correctionBody = capturedRequests.body(for: "/mcp/tools/gmem.create_correction")
+        let sourceBody = correctionBody?["source"] as? [String: Any]
+        let events = model.copilotRuns.first(where: { $0.id == runID })?.events.map(\.kind) ?? []
+
+        #expect(task != nil)
+        #expect(completed)
+        #expect(model.latestOpenMindCorrection?.correctionID == "corr-vm")
+        #expect(model.latestOpenMindCorrection?.status == .recorded)
+        #expect(model.openMindReviewTasks.first?.id == "review-after-correction")
+        #expect(correctionBody?["targetId"] as? String == "mem-1")
+        #expect(correctionBody?["correctionText"] as? String == "Correction from Copilot panel")
+        #expect(correctionBody?["actor"] as? String == "dBrowser.user")
+        #expect((correctionBody?["idempotencyKey"] as? String)?.hasPrefix("correction-") == true)
+        #expect(sourceBody?["product"] as? String == "dBrowser.swift")
+        #expect(sourceBody?["runID"] as? String == runID.uuidString)
+        #expect(events.contains(.memoryCorrectionRequested))
+        #expect(events.contains(.memoryCorrectionRecorded))
+    }
+
+    @MainActor
     @Test func panelSelectionShowsPanelsAndNavigationReturnsToBrowser() {
         let model = BrowserViewModel()
 
@@ -2762,6 +3000,17 @@ struct dBrowserTests {
     private func waitForOpenMindStepUpRequest(in model: BrowserViewModel) async -> Bool {
         for _ in 0..<40 {
             if model.latestOpenMindStepUpRequest != nil {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+
+    @MainActor
+    private func waitForOpenMindCorrection(in model: BrowserViewModel) async -> Bool {
+        for _ in 0..<40 {
+            if model.latestOpenMindCorrection != nil {
                 return true
             }
             try? await Task.sleep(nanoseconds: 10_000_000)

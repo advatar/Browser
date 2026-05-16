@@ -318,6 +318,111 @@ struct OpenMindMemoryRuntimeState: Codable, Equatable {
     )
 }
 
+struct OpenMindReviewTask: Codable, Equatable, Identifiable {
+    var id: String
+    var title: String
+    var summary: String?
+    var state: String?
+    var taskType: String?
+    var entityID: String?
+    var entityType: String?
+    var priority: Int?
+    var recommendedDecision: String?
+    var createdAt: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case reviewTaskID
+        case reviewTaskId
+        case taskID
+        case taskId
+        case title
+        case summary
+        case state
+        case status
+        case taskType
+        case type
+        case entityID
+        case entityId
+        case targetID
+        case targetId
+        case entityType
+        case priority
+        case recommendedDecision
+        case createdAt
+    }
+
+    nonisolated init(
+        id: String,
+        title: String,
+        summary: String?,
+        state: String?,
+        taskType: String?,
+        entityID: String?,
+        entityType: String?,
+        priority: Int?,
+        recommendedDecision: String?,
+        createdAt: String?
+    ) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.state = state
+        self.taskType = taskType
+        self.entityID = entityID
+        self.entityType = entityType
+        self.priority = priority
+        self.recommendedDecision = recommendedDecision
+        self.createdAt = createdAt
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+            ?? container.decodeIfPresent(String.self, forKey: .reviewTaskID)
+            ?? container.decodeIfPresent(String.self, forKey: .reviewTaskId)
+            ?? container.decodeIfPresent(String.self, forKey: .taskID)
+            ?? container.decode(String.self, forKey: .taskId)
+        self.title = try container.decodeIfPresent(String.self, forKey: .title)
+            ?? "OpenMind review task"
+        self.summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        self.state = try container.decodeIfPresent(String.self, forKey: .state)
+            ?? container.decodeIfPresent(String.self, forKey: .status)
+        self.taskType = try container.decodeIfPresent(String.self, forKey: .taskType)
+            ?? container.decodeIfPresent(String.self, forKey: .type)
+        self.entityID = try container.decodeIfPresent(String.self, forKey: .entityID)
+            ?? container.decodeIfPresent(String.self, forKey: .entityId)
+            ?? container.decodeIfPresent(String.self, forKey: .targetID)
+            ?? container.decodeIfPresent(String.self, forKey: .targetId)
+        self.entityType = try container.decodeIfPresent(String.self, forKey: .entityType)
+        self.priority = try container.decodeIfPresent(Int.self, forKey: .priority)
+        self.recommendedDecision = try container.decodeIfPresent(String.self, forKey: .recommendedDecision)
+        self.createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(state, forKey: .state)
+        try container.encodeIfPresent(taskType, forKey: .taskType)
+        try container.encodeIfPresent(entityID, forKey: .entityID)
+        try container.encodeIfPresent(entityType, forKey: .entityType)
+        try container.encodeIfPresent(priority, forKey: .priority)
+        try container.encodeIfPresent(recommendedDecision, forKey: .recommendedDecision)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
+    }
+}
+
+struct OpenMindActionSource: Codable, Equatable {
+    var product: String
+    var runID: UUID?
+    var pageURLString: String?
+    var snapshotCommitment: String?
+    var prompt: String?
+}
+
 struct OpenMindAccessIntent: Codable, Equatable {
     var prompt: String
     var pageURLString: String?
@@ -683,6 +788,140 @@ struct OpenMindWritebackOutcome: Codable, Equatable {
     }
 }
 
+struct OpenMindCorrectionRequest: Codable, Equatable {
+    var targetID: String
+    var correctionText: String
+    var actor: String
+    var source: OpenMindActionSource
+    var idempotencyKey: String
+
+    private enum CodingKeys: String, CodingKey {
+        case targetID = "targetId"
+        case correctionText
+        case actor
+        case source
+        case idempotencyKey
+    }
+}
+
+struct OpenMindCorrectionOutcome: Codable, Equatable, Identifiable {
+    enum Status: String, Codable, Equatable {
+        case recorded
+        case proposed
+        case denied
+        case unavailable
+
+        nonisolated init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            let rawValue = try container.decode(String.self)
+            switch rawValue
+                .replacingOccurrences(of: "-", with: "_")
+                .lowercased()
+            {
+            case "recorded", "created", "ok", "accepted":
+                self = .recorded
+            case "proposed", "pending", "queued":
+                self = .proposed
+            case "denied", "rejected":
+                self = .denied
+            case "unavailable":
+                self = .unavailable
+            default:
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Unsupported OpenMind correction status: \(rawValue)"
+                )
+            }
+        }
+
+        nonisolated func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
+    }
+
+    var correctionID: String?
+    var targetID: String?
+    var status: Status
+    var message: String
+    var mode: String?
+    var createdAt: String?
+
+    var id: String {
+        correctionID ?? targetID ?? message
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case correctionID = "correctionId"
+        case id
+        case eventID
+        case eventId
+        case targetID = "targetId"
+        case status
+        case message
+        case summary
+        case correctionText
+        case mode
+        case createdAt
+    }
+
+    nonisolated init(
+        correctionID: String?,
+        targetID: String?,
+        status: Status,
+        message: String,
+        mode: String?,
+        createdAt: String?
+    ) {
+        self.correctionID = correctionID
+        self.targetID = targetID
+        self.status = status
+        self.message = message
+        self.mode = mode
+        self.createdAt = createdAt
+    }
+
+    nonisolated static func unavailable(_ message: String) -> OpenMindCorrectionOutcome {
+        OpenMindCorrectionOutcome(
+            correctionID: nil,
+            targetID: nil,
+            status: .unavailable,
+            message: message,
+            mode: nil,
+            createdAt: nil
+        )
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let correctionID = try container.decodeIfPresent(String.self, forKey: .correctionID)
+            ?? container.decodeIfPresent(String.self, forKey: .id)
+            ?? container.decodeIfPresent(String.self, forKey: .eventID)
+            ?? container.decodeIfPresent(String.self, forKey: .eventId)
+        let targetID = try container.decodeIfPresent(String.self, forKey: .targetID)
+        self.correctionID = correctionID
+        self.targetID = targetID
+        self.status = try container.decodeIfPresent(Status.self, forKey: .status)
+            ?? (correctionID == nil ? .proposed : .recorded)
+        self.mode = try container.decodeIfPresent(String.self, forKey: .mode)
+        self.createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
+        self.message = try container.decodeIfPresent(String.self, forKey: .message)
+            ?? container.decodeIfPresent(String.self, forKey: .summary)
+            ?? container.decodeIfPresent(String.self, forKey: .correctionText)
+            ?? (correctionID.map { "Correction recorded as \($0)." } ?? "Correction submitted for review.")
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(correctionID, forKey: .correctionID)
+        try container.encodeIfPresent(targetID, forKey: .targetID)
+        try container.encode(status, forKey: .status)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(mode, forKey: .mode)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
+    }
+}
+
 enum OpenMindMemoryClientError: Error, LocalizedError {
     case disabled
     case invalidResponse
@@ -712,6 +951,24 @@ final class OpenMindMemoryClient {
         var capabilities: [String]?
         var posture: String?
         var message: String?
+    }
+
+    private struct ReviewTasksResponse: Decodable {
+        var items: [OpenMindReviewTask]
+
+        private enum CodingKeys: String, CodingKey {
+            case items
+            case reviewTasks
+            case tasks
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.items = try container.decodeIfPresent([OpenMindReviewTask].self, forKey: .items)
+                ?? container.decodeIfPresent([OpenMindReviewTask].self, forKey: .reviewTasks)
+                ?? container.decodeIfPresent([OpenMindReviewTask].self, forKey: .tasks)
+                ?? []
+        }
     }
 
     private struct EmptyJSONRPCParams: Codable {}
@@ -1013,6 +1270,22 @@ final class OpenMindMemoryClient {
         )
     }
 
+    func refreshReviewTasks() async -> [OpenMindReviewTask] {
+        guard configuration.httpBaseURL != nil else {
+            return []
+        }
+
+        do {
+            let response: ReviewTasksResponse = try await readResource(
+                uri: "mind://governed-memory/review-tasks",
+                directPath: "/mcp/resources/mind/governed-memory/review-tasks"
+            )
+            return response.items
+        } catch {
+            return []
+        }
+    }
+
     func recall(
         prompt: String,
         pageURLString: String?,
@@ -1182,6 +1455,23 @@ final class OpenMindMemoryClient {
                 revisionID: nil,
                 message: error.localizedDescription
             )
+        }
+    }
+
+    func createCorrection(_ request: OpenMindCorrectionRequest) async -> OpenMindCorrectionOutcome {
+        guard configuration.httpBaseURL != nil else {
+            return .unavailable("OpenMind memory is disabled until an MCP endpoint is configured.")
+        }
+
+        do {
+            return try await sendTool(
+                name: "gmem.create_correction",
+                directPath: "/mcp/tools/gmem.create_correction",
+                directBody: request,
+                bridgeArguments: request
+            )
+        } catch {
+            return .unavailable(error.localizedDescription)
         }
     }
 

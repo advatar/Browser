@@ -596,6 +596,8 @@ private struct BookmarksPanelView: View {
 private struct CopilotPanelView: View {
     @ObservedObject var browser: BrowserViewModel
     @State private var draftMessage = "Summarize this page and suggest next actions."
+    @State private var correctionTargetID: String?
+    @State private var correctionText = ""
 
     private var latestRun: CopilotRun? {
         browser.copilotRuns.first
@@ -786,9 +788,52 @@ private struct CopilotPanelView: View {
                             .foregroundStyle(.secondary)
                         if !recall.memories.isEmpty {
                             ForEach(recall.memories.prefix(3)) { memory in
-                                Text(memory.summary)
-                                    .font(.caption)
-                                    .lineLimit(2)
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(memory.summary)
+                                        .font(.caption)
+                                        .lineLimit(2)
+                                    Spacer()
+                                    Button {
+                                        correctionTargetID = memory.id
+                                        correctionText = ""
+                                    } label: {
+                                        Label("Correct", systemImage: "exclamationmark.bubble")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                }
+                            }
+                        }
+                        if let correctionTargetID {
+                            Divider()
+                            Text("Correction for \(correctionTargetID)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            TextField("Correction", text: $correctionText)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("copilot-openmind-correction-text")
+                            HStack(spacing: 8) {
+                                Button {
+                                    _ = browser.requestOpenMindCorrection(
+                                        targetID: correctionTargetID,
+                                        correctionText: correctionText
+                                    )
+                                    self.correctionTargetID = nil
+                                    correctionText = ""
+                                } label: {
+                                    Label("Submit correction", systemImage: "checkmark.message")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(correctionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .accessibilityIdentifier("copilot-openmind-correction-submit")
+
+                                Button {
+                                    self.correctionTargetID = nil
+                                    correctionText = ""
+                                } label: {
+                                    Label("Cancel", systemImage: "xmark")
+                                }
+                                .buttonStyle(.bordered)
                             }
                         }
                         if let bundle = recall.evidenceBundle {
@@ -823,6 +868,12 @@ private struct CopilotPanelView: View {
                         if let writeback = browser.latestOpenMindWriteback {
                             Divider()
                             Label(openMindWritebackSummary(writeback), systemImage: openMindWritebackSystemImage(writeback))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let correction = browser.latestOpenMindCorrection {
+                            Divider()
+                            Label(openMindCorrectionSummary(correction), systemImage: openMindCorrectionSystemImage(correction))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -915,6 +966,32 @@ private struct CopilotPanelView: View {
         switch outcome.status {
         case .recorded:
             return "checkmark.seal"
+        case .proposed:
+            return "doc.badge.clock"
+        case .denied:
+            return "hand.raised"
+        case .unavailable:
+            return "xmark.seal"
+        }
+    }
+
+    private func openMindCorrectionSummary(_ outcome: OpenMindCorrectionOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "Correction recorded\(outcome.correctionID.map { " as \($0)" } ?? "")."
+        case .proposed:
+            return "Correction queued: \(outcome.message)"
+        case .denied:
+            return "Correction denied: \(outcome.message)"
+        case .unavailable:
+            return "Correction unavailable: \(outcome.message)"
+        }
+    }
+
+    private func openMindCorrectionSystemImage(_ outcome: OpenMindCorrectionOutcome) -> String {
+        switch outcome.status {
+        case .recorded:
+            return "checkmark.message"
         case .proposed:
             return "doc.badge.clock"
         case .denied:
@@ -1069,7 +1146,8 @@ private struct RuntimePanelView: View {
                 OpenMindMemoryPanelView(
                     state: browser.openMindCapabilityState,
                     continuity: browser.openMindContinuityState,
-                    posture: browser.openMindPostureState
+                    posture: browser.openMindPostureState,
+                    reviewTasks: browser.openMindReviewTasks
                 )
             }
             .padding(24)
@@ -1168,6 +1246,7 @@ private struct OpenMindMemoryPanelView: View {
     let state: OpenMindMemoryCapabilityState
     let continuity: OpenMindContinuityState
     let posture: OpenMindPostureState
+    let reviewTasks: [OpenMindReviewTask]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1189,6 +1268,11 @@ private struct OpenMindMemoryPanelView: View {
             }
             if let posture = state.posture {
                 Text("Posture: \(posture)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !reviewTasks.isEmpty {
+                Label("\(reviewTasks.count) memory review task\(reviewTasks.count == 1 ? "" : "s")", systemImage: "checklist")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
