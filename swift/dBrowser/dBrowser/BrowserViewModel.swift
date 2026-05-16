@@ -278,6 +278,11 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func openHistoryEntry(_ entry: BrowserHistoryEntry) {
+        if activeTab?.urlString == entry.urlString {
+            selectedPanel = nil
+            reload()
+            return
+        }
         navigate(entry.urlString)
     }
 
@@ -917,11 +922,12 @@ final class BrowserViewModel: ObservableObject {
 
     private func recordHistory(title: String, urlString: String) {
         guard urlString != BrowserURLResolver.homeURLString else { return }
-        if history.first?.urlString == urlString {
-            return
-        }
+        let previousEntry = history.first { $0.urlString == urlString }
+        history.removeAll { $0.urlString == urlString }
         let isIndexed = isSmartHistoryIndexable(urlString)
-        let summary = isIndexed ? SmartHistoryIndexer.summary(title: title, urlString: urlString) : nil
+        let summary = isIndexed
+            ? previousEntry?.summary ?? SmartHistoryIndexer.summary(title: title, urlString: urlString)
+            : nil
         history.insert(
             BrowserHistoryEntry(
                 title: title,

@@ -3522,6 +3522,52 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func openingCurrentRecentReloadsActivePage() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com")
+        guard let entry = model.history.first else {
+            Issue.record("Expected a recent history entry")
+            return
+        }
+
+        model.selectPanel(.history)
+        model.openHistoryEntry(entry)
+
+        #expect(model.selectedPanel == nil)
+        #expect(model.activeTab?.urlString == "https://example.com")
+        #expect(model.webCommand?.tabID == model.activeTabID)
+        #expect(model.webCommand?.command == .reload)
+        #expect(model.history.first?.urlString == "https://example.com")
+        #expect(model.history.filter { $0.urlString == "https://example.com" }.count == 1)
+    }
+
+    @MainActor
+    @Test func openingOlderRecentNavigatesAndMovesItToTop() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://first.example")
+        model.navigate("https://second.example")
+        model.navigate("https://third.example")
+        guard let firstEntry = model.history.first(where: { $0.urlString == "https://first.example" }) else {
+            Issue.record("Expected the first URL in history")
+            return
+        }
+
+        model.selectPanel(.history)
+        model.openHistoryEntry(firstEntry)
+
+        #expect(model.selectedPanel == nil)
+        #expect(model.activeTab?.urlString == "https://first.example")
+        #expect(model.addressText == "https://first.example")
+        #expect(model.activeTab?.isLoading == true)
+        #expect(model.history.map(\.urlString) == [
+            "https://first.example",
+            "https://third.example",
+            "https://second.example"
+        ])
+        #expect(model.history.filter { $0.urlString == "https://first.example" }.count == 1)
+    }
+
+    @MainActor
     @Test func defaultBookmarksExposeRequiredGateways() {
         let model = BrowserViewModel()
         let urls = Set(model.bookmarks.map(\.urlString))

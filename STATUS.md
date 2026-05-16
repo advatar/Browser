@@ -23,10 +23,10 @@
 
 - [x] Triage recents/history navigation report from #101.
 - [x] Create tracker issue for recents links not loading (#101).
-- [ ] Add a focused Swift regression test for opening recent/history entries.
-- [ ] Make the recents sidebar use the shared history-opening path.
-- [ ] Dedupe and move reopened history entries to the top.
-- [ ] Verify Swift tests and macOS build.
+- [x] Add a focused Swift regression test for opening recent/history entries.
+- [x] Make the recents sidebar use the shared history-opening path.
+- [x] Dedupe and move reopened history entries to the top.
+- [x] Verify Swift tests and macOS build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #101.
 

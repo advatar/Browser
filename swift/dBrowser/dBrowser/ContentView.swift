@@ -1692,7 +1692,7 @@ private struct BrowserSidebar: View {
             Section("Recent") {
                 ForEach(browser.history.prefix(8)) { entry in
                     Button {
-                        browser.navigate(entry.urlString)
+                        browser.openHistoryEntry(entry)
                     } label: {
                         Text(entry.title)
                             .lineLimit(1)
