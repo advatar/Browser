@@ -5,6 +5,7 @@ enum RuntimeBridgeMode: String, Equatable {
     case native
     case gateway
     case local
+    case service
     case remote
     case unavailable
 
@@ -13,6 +14,7 @@ enum RuntimeBridgeMode: String, Equatable {
         case .native: "Native"
         case .gateway: "Gateway"
         case .local: "Local"
+        case .service: "Service"
         case .remote: "Remote"
         case .unavailable: "Unavailable"
         }
@@ -32,15 +34,18 @@ struct RuntimeBridgeConfiguration: Equatable {
     var decentralizedGatewayHost: String
     var ensGatewaySuffix: String
     var remoteRuntimeBaseURL: URL?
+    var afmServices: AFMServiceEndpointConfiguration
 
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
-        remoteRuntimeBaseURL: URL? = nil
+        remoteRuntimeBaseURL: URL? = nil,
+        afmServices: AFMServiceEndpointConfiguration = .local
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
+        self.afmServices = afmServices
     }
 }
 
@@ -186,6 +191,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
 
     private let configuration: RuntimeBridgeConfiguration
+    private let afmServicesClient: AFMServicesClient
+    private var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     private var retainedWalletAddress: String?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -193,14 +200,17 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.init(configuration: RuntimeBridgeConfiguration())
     }
 
-    init(configuration: RuntimeBridgeConfiguration) {
+    init(configuration: RuntimeBridgeConfiguration, afmServicesClient: AFMServicesClient? = nil) {
         self.configuration = configuration
-        self.featureStates = Self.makeFeatureStates(configuration: configuration)
+        self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
+        self.featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: .unknown)
         self.walletInfo = .disconnected
     }
 
     func refreshStatus() async -> [RuntimeFeatureState] {
-        featureStates
+        afmServiceSnapshot = await afmServicesClient.snapshot()
+        featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: afmServiceSnapshot)
+        return featureStates
     }
 
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution {
@@ -261,6 +271,37 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let target = request.pageURLString?.trimmingCharacters(in: .whitespacesAndNewlines)
         let page = target?.isEmpty == false ? target! : "the active page"
         let task = prompt.isEmpty ? "Assist with the current browsing task." : prompt
+
+        do {
+            let snapshot = await afmServicesClient.snapshot()
+            afmServiceSnapshot = snapshot
+            featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: snapshot)
+
+            let route = try await afmServicesClient.route(
+                skill: "summarize",
+                prompt: task,
+                pageURLString: target
+            )
+            let selectedPack = route.selection?.displayName ?? "AFM router default"
+            let job = try await afmServicesClient.enqueueCopilotJob(
+                prompt: task,
+                pageURLString: target,
+                selectedPackID: route.selection?.id
+            )
+
+            return CopilotRunResult(
+                title: "AFM service Copilot",
+                summary: "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).",
+                suggestions: [
+                    "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
+                    "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
+                    "Pipelines accepted job \(job.id) with status \(job.status)."
+                ],
+                mode: .service
+            )
+        } catch {
+            featureStates = Self.makeFeatureStates(configuration: configuration, afmSnapshot: afmServiceSnapshot)
+        }
 
         return CopilotRunResult(
             title: "Local Copilot bridge",
@@ -357,7 +398,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         return markDownloadCancelled(id)
     }
 
-    private static func makeFeatureStates(configuration: RuntimeBridgeConfiguration) -> [RuntimeFeatureState] {
+    private static func makeFeatureStates(
+        configuration: RuntimeBridgeConfiguration,
+        afmSnapshot: AFMServiceSnapshot
+    ) -> [RuntimeFeatureState] {
         [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
             RuntimeFeatureState(feature: .tabs, mode: .native, isAvailable: true, status: "Swift state"),
@@ -367,7 +411,18 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 isAvailable: true,
                 status: configuration.remoteRuntimeBaseURL == nil ? "IPFS/IPNS/ENS gateway bridge" : "Remote runtime bridge"
             ),
-            RuntimeFeatureState(feature: .copilot, mode: .local, isAvailable: true, status: "Local command bridge"),
+            RuntimeFeatureState(
+                feature: .afmServices,
+                mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
+                isAvailable: afmSnapshot.allServicesAvailable,
+                status: afmSnapshot.serviceStatusText
+            ),
+            RuntimeFeatureState(
+                feature: .copilot,
+                mode: afmSnapshot.routerAvailable && afmSnapshot.pipelinesAvailable ? .service : .local,
+                isAvailable: true,
+                status: afmSnapshot.routerAvailable && afmSnapshot.pipelinesAvailable ? "AFM router + pipelines" : "Local fallback bridge"
+            ),
             RuntimeFeatureState(feature: .wallet, mode: .local, isAvailable: true, status: "Local policy bridge"),
             RuntimeFeatureState(feature: .downloads, mode: .native, isAvailable: true, status: "URLSession bridge")
         ]

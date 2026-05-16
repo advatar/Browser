@@ -145,6 +145,112 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func runtimeBridgeUsesAFMServicesForStatusAndCopilot() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "online") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "name": "Demo Writer",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://demo-writer",
+                            "maintainer": "core",
+                            "version": "0.1.0",
+                            "checksum": "0xabc"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://demo-writer",
+                        "name": "Demo Writer",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-1",
+                    "status": "queued"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let afmServices = states.first { $0.feature == .afmServices }
+        #expect(afmServices?.mode == .service)
+        #expect(afmServices?.isAvailable == true)
+        #expect(afmServices?.status.contains("router online") == true)
+
+        let copilot = await bridge.runCopilot(
+            CopilotRunRequest(prompt: "Summarize this page", pageURLString: "https://example.com")
+        )
+        #expect(copilot.mode == .service)
+        #expect(copilot.summary.contains("Demo Writer"))
+        #expect(copilot.summary.contains("job-1"))
+        #expect(copilot.suggestions.contains { $0.contains("Registry has 1 pack") })
+    }
+
+    @MainActor
+    @Test func runtimeBridgeFallsBackWhenAFMServicesAreOffline() async {
+        let serviceHarness = Self.makeAFMServiceSession(key: "offline") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let states = await bridge.refreshStatus()
+        let afmServices = states.first { $0.feature == .afmServices }
+        #expect(afmServices?.mode == .unavailable)
+        #expect(afmServices?.isAvailable == false)
+
+        let copilot = await bridge.runCopilot(
+            CopilotRunRequest(prompt: "Summarize this page", pageURLString: "https://example.com")
+        )
+        #expect(copilot.mode == .local)
+        #expect(copilot.summary.contains("Summarize this page"))
+    }
+
+    @MainActor
     @Test func viewModelLoadsIPFSAddressesThroughRuntimeBridge() async {
         let model = BrowserViewModel()
         model.navigate("ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/index.html")
@@ -229,4 +335,83 @@ struct dBrowserTests {
         return false
     }
 
+    private static func makeAFMServiceSession(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: AFMServiceEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoints = AFMServiceEndpointConfiguration(
+            routerBaseURL: URL(string: "http://\(key)-router.test:4810")!,
+            registryBaseURL: URL(string: "http://\(key)-registry.test:4820")!,
+            pipelinesBaseURL: URL(string: "http://\(key)-pipelines.test:4830")!
+        )
+        return (endpoints, URLSession(configuration: configuration))
+    }
+
+    private static func jsonResponse(
+        for request: URLRequest,
+        status: Int = 200,
+        body: Any
+    ) -> (HTTPURLResponse, Data) {
+        let data = try! JSONSerialization.data(withJSONObject: body)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        return (response, data)
+    }
+
+}
+
+private final class AFMServiceMockURLProtocol: URLProtocol {
+    nonisolated(unsafe) private static var requestHandlers: [String: (URLRequest) throws -> (HTTPURLResponse, Data)] = [:]
+    nonisolated(unsafe) private static let lock = NSLock()
+
+    nonisolated static func register(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) {
+        lock.lock()
+        requestHandlers[key] = handler
+        lock.unlock()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let key = request.url?.host?.split(separator: "-").first.map(String.init) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        Self.lock.lock()
+        let handler = Self.requestHandlers[key]
+        Self.lock.unlock()
+
+        guard let handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

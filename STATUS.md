@@ -19,6 +19,15 @@
 
 ## Active Task
 
+## Swift AFM Services Integration
+
+- [x] Create GitHub issue for Swift service-backed runtime work (#49).
+- [x] Add Swift runtime bridge configuration and client for AFM router, registry, and pipelines services.
+- [x] Wire Swift Copilot/status flows through those services with local fallback.
+- [x] Add focused unit tests for service-backed and fallback behavior.
+- [x] Verify Swift/Xcode build and AFM service package tests locally; Swift unit test execution is blocked by unrelated PersonaPlex/MLX test-link failures.
+- [x] Commit and push the scoped changes.
+
 ## iOS Panel Navigation and IPFS Rendering
 
 - [x] Add real panel content for History, Bookmarks, Copilot, and Runtime.

@@ -156,6 +156,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case webBrowsing
     case tabs
     case decentralizedProtocols
+    case afmServices
     case copilot
     case wallet
     case downloads
@@ -167,6 +168,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Web browsing"
         case .tabs: "Tabs and history"
         case .decentralizedProtocols: "IPFS, IPNS, ENS"
+        case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
         case .downloads: "Downloads"
@@ -178,6 +180,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Gateway bridge"
+        case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
         case .downloads: "Native URLSession"
@@ -189,6 +192,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "safari"
         case .tabs: "rectangle.on.rectangle"
         case .decentralizedProtocols: "link"
+        case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
         case .downloads: "arrow.down.circle"
@@ -231,10 +235,20 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Resolution results preserve a clear source, making it possible to show whether content came from native, gateway, or remote runtime resolution."
                 ]
             )
+        case .afmServices:
+            RuntimeFeatureExplanation(
+                overview: "Connects the Swift shell to the AFM router, registry, and pipelines services from the shared workspace.",
+                bridgeBehavior: "The bridge checks service health, reads pack metadata, asks the router for a Copilot selection, and enqueues work in pipelines when endpoints are reachable.",
+                detailPoints: [
+                    "Router calls use the same /route contract as the workspace service.",
+                    "Registry calls load pack metadata so mobile status reflects the available AFM catalog.",
+                    "Pipelines calls queue service-backed Copilot jobs while keeping a local fallback for offline development."
+                ]
+            )
         case .copilot:
             RuntimeFeatureExplanation(
                 overview: "Creates a mobile command surface for Copilot tasks tied to the active browsing context.",
-                bridgeBehavior: "The local bridge prepares deterministic run summaries and suggested actions; model execution can be connected to the desktop or cloud runtime later.",
+                bridgeBehavior: "The bridge routes through AFM services when available and falls back to deterministic local summaries when those services are offline.",
                 detailPoints: [
                     "Prompts can carry the active page URL so Copilot has a target for future page-context extraction.",
                     "Suggested actions stay explicit so wallet and download operations can remain approval-gated.",
