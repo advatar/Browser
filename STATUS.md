@@ -29,8 +29,8 @@
 - [x] Bind Bitcoin light-client snapshots into the shared chain trust registry/runtime status.
 - [x] Add focused Swift unit tests including known Bitcoin genesis header fixture coverage.
 - [x] Verify local Swift tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close completed GitHub issues.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
 
 ## Swift Chain Trust Registry Foundation Slice
 
