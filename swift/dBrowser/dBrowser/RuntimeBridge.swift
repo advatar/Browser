@@ -68,10 +68,12 @@ struct RuntimeBridgeResolution: Equatable {
 struct CopilotRunRequest: Equatable {
     var prompt: String
     var pageURLString: String?
+    var pageSnapshot: PageSnapshot?
 
-    init(prompt: String, pageURLString: String? = nil) {
+    init(prompt: String, pageURLString: String? = nil, pageSnapshot: PageSnapshot? = nil) {
         self.prompt = prompt
         self.pageURLString = pageURLString
+        self.pageSnapshot = pageSnapshot
     }
 }
 
@@ -271,6 +273,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let target = request.pageURLString?.trimmingCharacters(in: .whitespacesAndNewlines)
         let page = target?.isEmpty == false ? target! : "the active page"
         let task = prompt.isEmpty ? "Assist with the current browsing task." : prompt
+        let snapshotContext = request.pageSnapshot.map { snapshot in
+            " Snapshot includes \(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, and \(snapshot.formControls.count) form controls."
+        } ?? ""
 
         do {
             let snapshot = await afmServicesClient.snapshot()
@@ -291,7 +296,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
             return CopilotRunResult(
                 title: "AFM service Copilot",
-                summary: "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).",
+                summary: "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)",
                 suggestions: [
                     "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
                     "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
@@ -305,9 +310,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
         return CopilotRunResult(
             title: "Local Copilot bridge",
-            summary: "Prepared a mobile Copilot run for \(page): \(task)",
+            summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)",
             suggestions: [
-                "Attach page text from WKWebView before model execution.",
+                request.pageSnapshot == nil ? "Attach page text from WKWebView before model execution." : "Use the bounded page snapshot as local model context.",
                 "Send the prepared run to the desktop or cloud runtime when configured.",
                 "Keep wallet and download actions behind explicit approval."
             ],

@@ -423,7 +423,7 @@ struct dBrowserTests {
 
     @MainActor
     @Test func addressAutocompleteUsesPreviouslyVisitedURLs() {
-        let model = BrowserViewModel()
+        let model = makeIsolatedBrowserViewModel()
         model.navigate("https://example.com/docs/start")
         model.navigate("https://docs.ipfs.tech/concepts/ipns")
         model.addressText = "exa"
@@ -438,7 +438,7 @@ struct dBrowserTests {
 
     @MainActor
     @Test func addressAutocompleteRanksURLPrefixMatchesBeforeContainsMatches() {
-        let model = BrowserViewModel()
+        let model = makeIsolatedBrowserViewModel()
         model.navigate("https://example.com/docs")
         model.navigate("https://docs.example.com/guide")
         model.addressText = "example"
@@ -453,7 +453,7 @@ struct dBrowserTests {
 
     @MainActor
     @Test func addressAutocompleteDeduplicatesHistoryAndHidesExactMatch() {
-        let model = BrowserViewModel()
+        let model = makeIsolatedBrowserViewModel()
         model.navigate("https://repeat.example/path")
         model.navigate("https://other.example")
         model.navigate("https://repeat.example/path")
@@ -465,6 +465,172 @@ struct dBrowserTests {
 
         model.addressText = "https://repeat.example/path"
         #expect(model.addressAutocompleteSuggestions().isEmpty)
+    }
+
+    @MainActor
+    @Test func automationRequestsAreScopedToTheActiveTab() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com")
+
+        let request = model.requestDOMQuery(DOMQueryRequest(selector: "a", limit: 500))
+
+        #expect(request?.tabID == model.activeTabID)
+        guard case .domQuery(let query) = request?.command else {
+            Issue.record("Expected DOM query automation request")
+            return
+        }
+        #expect(query.selector == "a")
+        #expect(query.limit == 100)
+    }
+
+    @MainActor
+    @Test func pageSnapshotsUpdateSmartHistoryRecall() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com/research")
+        let snapshot = PageSnapshot(
+            urlString: "https://example.com/research",
+            title: "Research Notes",
+            visibleText: "A local summary about verifiable Strawberry automation and page actions.",
+            headings: ["Research"],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 0
+        )
+
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: model.activeTabID,
+                status: .success,
+                message: "snapshot",
+                pageSnapshot: snapshot
+            )
+        )
+
+        let recall = model.smartHistoryRecall("verifiable automation")
+        #expect(recall.first?.entry.urlString == "https://example.com/research")
+        #expect(model.latestPageSnapshot == snapshot)
+    }
+
+    @MainActor
+    @Test func sensitiveDOMActionsRequireApproval() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com/login")
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: model.activeTabID,
+                status: .success,
+                message: "query",
+                domQuery: DOMQueryResult(
+                    selector: "input",
+                    elements: [
+                        DOMElementRecord(
+                            index: 0,
+                            tagName: "input",
+                            role: nil,
+                            ariaLabel: "Password",
+                            text: nil,
+                            value: "[redacted]",
+                            href: nil,
+                            inputType: "password",
+                            name: "password",
+                            placeholder: "Password",
+                            disabled: false,
+                            hidden: false
+                        )
+                    ],
+                    totalMatched: 1,
+                    truncated: false
+                )
+            )
+        )
+
+        let request = model.requestDOMAction(
+            BrowserDOMAction(kind: .typeText, selector: "password", elementIndex: 0, text: "secret")
+        )
+
+        #expect(request == nil)
+        #expect(model.automationResults.first?.status == .needsApproval)
+        #expect(model.automationResults.first?.approval?.reasons.contains(.credentialField) == true)
+
+        let submitRequest = model.requestDOMAction(BrowserDOMAction(kind: .submit, selector: "form"))
+        #expect(submitRequest == nil)
+        #expect(model.automationResults.first?.approval?.reasons.contains(.formSubmit) == true)
+    }
+
+    @MainActor
+    @Test func copilotRunsTrackUsageAndCancellation() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com")
+
+        guard let runID = model.runCopilot(prompt: "Summarize the current page") else {
+            Issue.record("Expected Copilot run ID")
+            return
+        }
+
+        #expect(model.activeCopilotRunCount == 1)
+        #expect(model.copilotRuns.first?.usage?.isEstimated == true)
+        model.cancelCopilotRun(runID)
+        #expect(model.copilotRuns.first?.status == .cancelled)
+        #expect(model.copilotRuns.first?.events.contains { $0.kind == .cancelled } == true)
+    }
+
+    @MainActor
+    @Test func copilotWorkflowsPersistAndRunWhenEnabled() {
+        let workflowStore = CopilotWorkflowStore.ephemeral()
+        let firstModel = makeIsolatedBrowserViewModel(workflowStore: workflowStore)
+        let workflow = firstModel.saveCopilotWorkflow(
+            title: "Daily summary",
+            promptTemplate: "Summarize this page",
+            allowedActions: [.scroll, .waitForSelector],
+            schedule: .interval(hours: 24)
+        )
+
+        let secondModel = makeIsolatedBrowserViewModel(workflowStore: workflowStore)
+        #expect(secondModel.copilotWorkflows.first?.id == workflow.id)
+
+        secondModel.setWorkflow(workflow.id, isEnabled: false)
+        #expect(secondModel.runWorkflow(workflow.id) == nil)
+
+        secondModel.setWorkflow(workflow.id, isEnabled: true)
+        secondModel.navigate("https://example.com")
+        let runID = secondModel.runWorkflow(workflow.id)
+        #expect(runID != nil)
+        #expect(secondModel.copilotWorkflows.first?.lastRunAt != nil)
+        if let runID {
+            secondModel.cancelCopilotRun(runID)
+        }
+    }
+
+    @MainActor
+    @Test func smartHistoryRecallRespectsOptOutAndDeletion() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com/private-notes")
+        #expect(model.smartHistoryRecall("private notes").first?.entry.urlString == "https://example.com/private-notes")
+
+        model.setSmartHistoryIndexing(enabled: false, forDomain: "example.com")
+        #expect(model.smartHistoryRecall("private notes").isEmpty)
+
+        guard let entryID = model.history.first?.id else {
+            Issue.record("Expected history entry")
+            return
+        }
+        model.deleteHistoryEntry(entryID)
+        #expect(model.history.isEmpty)
+    }
+
+    @Test func creditEstimatorSeparatesBrowserFreeAndAIWork() {
+        let zero = CopilotCreditUsage.zeroBrowserOperation
+        let estimated = CopilotCreditUsage.estimate(prompt: "Summarize this page", snapshot: nil)
+
+        #expect(zero.creditsSpent == Decimal.zero)
+        #expect(!zero.isEstimated)
+        #expect(estimated.creditsSpent > Decimal.zero)
+        #expect(estimated.isEstimated)
     }
 
     @MainActor
@@ -505,6 +671,20 @@ struct dBrowserTests {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return false
+    }
+
+    @MainActor
+    private func makeIsolatedBrowserViewModel(
+        initialURL: String = BrowserURLResolver.homeURLString,
+        workflowStore: CopilotWorkflowStore = .ephemeral(),
+        smartHistoryStore: SmartHistoryStore = .ephemeral()
+    ) -> BrowserViewModel {
+        BrowserViewModel(
+            initialURL: initialURL,
+            runtimeBridge: MobileRuntimeBridge(),
+            copilotWorkflowStore: workflowStore,
+            smartHistoryStore: smartHistoryStore
+        )
     }
 
     private static func makeAFMServiceSession(

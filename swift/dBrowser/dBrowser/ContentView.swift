@@ -156,7 +156,9 @@ struct ContentView: View {
                 BrowserWebView(
                     tab: $browser.tabs[index],
                     command: browser.webCommand,
-                    onNavigationUpdate: browser.applyNavigationUpdate
+                    automationRequest: browser.automationRequest,
+                    onNavigationUpdate: browser.applyNavigationUpdate,
+                    onAutomationResult: browser.applyAutomationResult
                 )
             }
         } else {
@@ -171,6 +173,9 @@ struct ContentView: View {
                 .lineLimit(1)
                 .accessibilityIdentifier("active-url")
             Spacer()
+            if browser.activeCopilotRunCount > 0 {
+                Text("\(browser.activeCopilotRunCount) Copilot active")
+            }
             Text("\(browser.tabs.count) tab\(browser.tabs.count == 1 ? "" : "s")")
             Text(runtimeBridgeStatusText)
         }
@@ -404,6 +409,11 @@ private struct EmptyPanelView: View {
 
 private struct HistoryPanelView: View {
     @ObservedObject var browser: BrowserViewModel
+    @State private var smartHistoryQuery = ""
+
+    private var recallResults: [SmartHistoryRecallResult] {
+        browser.smartHistoryRecall(smartHistoryQuery)
+    }
 
     var body: some View {
         ScrollView {
@@ -411,8 +421,61 @@ private struct HistoryPanelView: View {
                 PanelHeaderView(
                     title: "History",
                     systemImage: BrowserPanel.history.systemImage,
-                    subtitle: "Recently visited pages from this iOS session."
+                    subtitle: "Recently visited pages and local Smart History recall."
                 )
+
+                HStack(spacing: 10) {
+                    TextField("Recall pages by description", text: $smartHistoryQuery)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .accessibilityIdentifier("smart-history-query")
+                    Button {
+                        browser.clearSmartHistorySummaries()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Clear Smart History summaries")
+                }
+
+                if !smartHistoryQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Recall")
+                            .font(.headline)
+                        if recallResults.isEmpty {
+                            Text("No local recall matches.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(recallResults) { result in
+                                Button {
+                                    browser.openHistoryEntry(result.entry)
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "magnifyingglass.circle")
+                                            .frame(width: 22)
+                                            .foregroundStyle(Color.accentColor)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(result.entry.title)
+                                                .font(.subheadline.weight(.semibold))
+                                                .lineLimit(1)
+                                            Text(result.matchedText)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.secondary.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("smart-history-results")
+                }
 
                 if browser.history.isEmpty {
                     EmptyPanelView(title: "No history yet", message: "Visited pages will appear here after navigation completes.")
@@ -533,8 +596,14 @@ private struct BookmarksPanelView: View {
 private struct CopilotPanelView: View {
     @ObservedObject var browser: BrowserViewModel
     @State private var prompt = "Summarize this page and suggest next actions."
-    @State private var result: CopilotRunResult?
-    @State private var isRunning = false
+
+    private var latestRun: CopilotRun? {
+        browser.copilotRuns.first
+    }
+
+    private var activeRun: CopilotRun? {
+        browser.copilotRuns.first { $0.status == .queued || $0.status == .running }
+    }
 
     var body: some View {
         ScrollView {
@@ -542,7 +611,7 @@ private struct CopilotPanelView: View {
                 PanelHeaderView(
                     title: "Copilot",
                     systemImage: BrowserPanel.copilot.systemImage,
-                    subtitle: "Prepare an AI run against the active browsing context."
+                    subtitle: "Run, inspect, and stop page-scoped AI work."
                 )
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -563,24 +632,75 @@ private struct CopilotPanelView: View {
                             .truncationMode(.middle)
                         Spacer()
                         Button {
-                            runCopilot()
+                            browser.requestPageSnapshot()
                         } label: {
-                            Label(isRunning ? "Running" : "Run Copilot", systemImage: "sparkles")
+                            Label("Snapshot", systemImage: "doc.viewfinder")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            saveWorkflow()
+                        } label: {
+                            Label("Save", systemImage: "tray.and.arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+
+                        if let activeRun {
+                            Button {
+                                browser.cancelCopilotRun(activeRun.id)
+                            } label: {
+                                Label("Stop", systemImage: "stop.circle")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("copilot-stop")
+                        }
+
+                        Button {
+                            _ = browser.runCopilot(prompt: prompt)
+                        } label: {
+                            Label(activeRun == nil ? "Run Copilot" : "Running", systemImage: "sparkles")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(isRunning)
+                        .disabled(activeRun != nil)
                         .accessibilityIdentifier("copilot-run")
                     }
                 }
 
-                if let result {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(result.title)
+                if let snapshot = browser.latestPageSnapshot {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Page Snapshot", systemImage: "doc.text.magnifyingglass")
                             .font(.headline)
-                        Text(result.summary)
+                        Text("\(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, \(snapshot.buttons.count) buttons, \(snapshot.formControls.count) form controls")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                        ForEach(result.suggestions, id: \.self) { suggestion in
-                            Label(suggestion, systemImage: "checkmark.circle")
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                if let latestRun {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(latestRun.result?.title ?? "Copilot run")
+                            .font(.headline)
+                        HStack(spacing: 8) {
+                            Text(latestRun.status.rawValue.capitalized)
+                            if let usage = latestRun.usage {
+                                Text("\(NSDecimalNumber(decimal: usage.creditsSpent).stringValue) credits")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let summary = latestRun.result?.summary {
+                            Text(summary)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(latestRun.events.suffix(5)) { event in
+                            Label(event.message, systemImage: event.kind == .approvalRequired ? "exclamationmark.triangle" : "checkmark.circle")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -590,6 +710,39 @@ private struct CopilotPanelView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityIdentifier("copilot-result")
                 }
+
+                if !browser.copilotWorkflows.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Workflows")
+                            .font(.headline)
+                        ForEach(browser.copilotWorkflows) { workflow in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(workflow.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(workflow.promptTemplate)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Button {
+                                    _ = browser.runWorkflow(workflow.id)
+                                } label: {
+                                    Image(systemName: "play.fill")
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(!workflow.isEnabled || activeRun != nil)
+                                .help("Run workflow")
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                    .padding(16)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-workflows")
+                }
             }
             .padding(24)
             .frame(maxWidth: 900, alignment: .leading)
@@ -598,13 +751,12 @@ private struct CopilotPanelView: View {
         .accessibilityIdentifier("panel-content-copilot")
     }
 
-    private func runCopilot() {
-        isRunning = true
-        let request = CopilotRunRequest(prompt: prompt, pageURLString: browser.activeTab?.urlString)
-        Task { @MainActor in
-            result = await browser.runtimeBridge.runCopilot(request)
-            isRunning = false
-        }
+    private func saveWorkflow() {
+        _ = browser.saveCopilotWorkflow(
+            title: "Saved Copilot prompt",
+            promptTemplate: prompt,
+            allowedActions: [.click, .focus, .scroll, .waitForSelector]
+        )
     }
 }
 

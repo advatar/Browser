@@ -90,11 +90,29 @@ struct BrowserTab: Identifiable, Equatable {
     }
 }
 
-struct BrowserHistoryEntry: Identifiable, Equatable {
-    let id = UUID()
+struct BrowserHistoryEntry: Identifiable, Equatable, Codable {
+    let id: UUID
     let title: String
     let urlString: String
     let visitedAt: Date
+    var summary: String?
+    var isSmartHistoryIndexed: Bool
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        urlString: String,
+        visitedAt: Date,
+        summary: String? = nil,
+        isSmartHistoryIndexed: Bool = true
+    ) {
+        self.id = id
+        self.title = title
+        self.urlString = urlString
+        self.visitedAt = visitedAt
+        self.summary = summary
+        self.isSmartHistoryIndexed = isSmartHistoryIndexed
+    }
 }
 
 struct BrowserAddressSuggestion: Identifiable, Equatable {

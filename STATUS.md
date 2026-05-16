@@ -19,6 +19,22 @@
 
 ## Active Task
 
+## Swift Strawberry Open Issues Build
+
+- [x] Triage open GitHub issues and select the Swift Strawberry sequence (#50-#58).
+- [x] Create tracker issue for the implementation batch (#77).
+- [x] Implement WKWebView automation, DOM query/action, and page snapshot primitives (#50-#53).
+- [x] Implement Copilot activity, cancellation, credit metering, workflows, concurrent runs, and Smart History recall (#54-#58).
+- [x] Add focused Swift unit tests for the new Strawberry primitives and surfaces.
+- [x] Verify the Swift/Xcode build and focused tests locally.
+- [x] Commit and push only the scoped Strawberry changes.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-strawberry-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-strawberry-tests -only-testing:dBrowserTests` passed.
+
 ## KeyMeIn Secret Handling Decision
 
 - [x] Inspect `KeyMeIn/` docs, browser integration notes, SDK notes, and security checklist.
