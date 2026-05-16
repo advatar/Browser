@@ -19,6 +19,24 @@
 
 ## Active Task
 
+## Swift LLM Conversation And Model Switching Slice
+
+- [x] Triage open Swift LLM issue #72 and choose the first implementation slice.
+- [x] Create tracker issue for the conversation/model switching work (#81).
+- [x] Add provider-neutral Swift conversation ledger models.
+- [x] Add Swift model registry and context rendering/compression helpers.
+- [x] Wire BrowserViewModel conversation send, model switching, and Copilot run continuity.
+- [x] Replace the narrow Copilot prompt/result surface with a chat-style model-aware UI.
+- [x] Add focused Swift unit tests.
+- [x] Verify local builds/tests.
+- [x] Commit and push only scoped files.
+- [x] Update and close completed GitHub issues.
+
+Validation notes:
+
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-llm-chat-build` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-chat-tests -only-testing:dBrowserTests` passed.
+
 ## Swift OpenMind Governed Writeback And Continuity Slice
 
 - [x] Triage remaining BrIAn/OpenMind gaps from #70.

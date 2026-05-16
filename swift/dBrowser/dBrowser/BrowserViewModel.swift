@@ -24,6 +24,9 @@ final class BrowserViewModel: ObservableObject {
     @Published var openMindPostureState: OpenMindPostureState
     @Published var latestOpenMindRecall: OpenMindMemoryRecallResult?
     @Published var latestOpenMindWriteback: OpenMindWritebackOutcome?
+    @Published var llmConversation: LLMConversation
+    @Published var llmModelOptions: [LLMModelProfile]
+    @Published var selectedLLMModelID: String
 
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
@@ -55,6 +58,9 @@ final class BrowserViewModel: ObservableObject {
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
+        self.llmModelOptions = LLMModelRegistry.models(afmSnapshot: runtimeBridge.afmServiceSnapshot)
+        self.selectedLLMModelID = LLMModelRegistry.defaultModelID
+        self.llmConversation = LLMConversation(activeModelID: LLMModelRegistry.defaultModelID)
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
@@ -89,6 +95,12 @@ final class BrowserViewModel: ObservableObject {
 
     var availableAFMPacks: [AFMPackSummary] {
         afmServiceSnapshot.availablePacks
+    }
+
+    var activeLLMModel: LLMModelProfile {
+        llmModelOptions.first { $0.id == selectedLLMModelID }
+            ?? LLMModelRegistry.model(withID: selectedLLMModelID, afmSnapshot: afmServiceSnapshot)
+            ?? LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)[0]
     }
 
     func activateTab(_ id: UUID) {
@@ -190,6 +202,7 @@ final class BrowserViewModel: ObservableObject {
     func refreshRuntimeBridgeStatus() async {
         runtimeFeatureStates = await runtimeBridge.refreshStatus()
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
+        llmModelOptions = LLMModelRegistry.models(afmSnapshot: afmServiceSnapshot)
         let openMindState = await openMindMemoryClient.refreshRuntimeState()
         openMindCapabilityState = openMindState.capability
         openMindContinuityState = openMindState.continuity
@@ -206,6 +219,18 @@ final class BrowserViewModel: ObservableObject {
         }
         guard afmServiceSnapshot.availablePacks.contains(where: { $0.id == id }) else { return }
         selectedAFMPackID = id
+    }
+
+    func selectLLMModel(_ id: String) {
+        guard let model = llmModelOptions.first(where: { $0.id == id }) else { return }
+        guard selectedLLMModelID != id else { return }
+        let previous = selectedLLMModelID
+        selectedLLMModelID = id
+        llmConversation.switchModel(to: id, displayName: model.displayName)
+        appendConversationLinkedCopilotEvent(
+            kind: .modelSwitched,
+            message: "Conversation switched model from \(previous) to \(model.displayName)."
+        )
     }
 
     func openBookmark(_ bookmark: BrowserBookmark) {
@@ -298,23 +323,116 @@ final class BrowserViewModel: ObservableObject {
 
     @discardableResult
     func runCopilot(prompt: String) -> UUID? {
+        startCopilotRun(
+            prompt: prompt,
+            conversationID: nil,
+            model: activeLLMModel,
+            renderedContext: nil,
+            recordsAssistantMessage: false
+        )
+    }
+
+    @discardableResult
+    func sendLLMMessage(_ text: String) -> UUID? {
+        guard let tab = activeTab else { return nil }
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return nil }
+
+        let model = activeLLMModel
+        let snapshot = latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let userMessage = LLMConversationMessage(
+            role: .user,
+            text: prompt,
+            pageURLString: tab.urlString,
+            snapshotAttachment: snapshot.map(LLMPageSnapshotAttachment.init(snapshot:))
+        )
+        llmConversation.appendMessage(userMessage)
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .userMessageAdded,
+                message: "Added user message for \(model.displayName).",
+                toModelID: model.id,
+                relatedMessageID: userMessage.id
+            )
+        )
+
+        if snapshot != nil {
+            llmConversation.appendEvent(
+                LLMConversationEvent(
+                    kind: .pageSnapshotAttached,
+                    message: "Attached active page snapshot to the conversation.",
+                    relatedMessageID: userMessage.id
+                )
+            )
+        }
+
+        let renderedContext = LLMConversationContextRenderer.render(
+            conversation: llmConversation,
+            model: model,
+            latestPageSnapshot: snapshot,
+            memoryRecall: latestOpenMindRecall
+        )
+        if renderedContext.wasCompressed {
+            appendContextCompressionEvent(renderedContext, model: model)
+        }
+
+        return startCopilotRun(
+            prompt: prompt,
+            conversationID: llmConversation.id,
+            model: model,
+            renderedContext: renderedContext,
+            recordsAssistantMessage: true
+        )
+    }
+
+    @discardableResult
+    private func startCopilotRun(
+        prompt: String,
+        conversationID: UUID?,
+        model: LLMModelProfile,
+        renderedContext: LLMRenderedConversationContext?,
+        recordsAssistantMessage: Bool
+    ) -> UUID? {
         guard let tab = activeTab else { return nil }
         let runID = UUID()
         let snapshot = latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
-        let usage = CopilotCreditUsage.estimate(prompt: prompt, snapshot: snapshot)
+        let preferredPackID = selectedAFMPackID
+        let usage = CopilotCreditUsage.estimate(prompt: renderedContext?.prompt ?? prompt, snapshot: snapshot, provider: model.providerKind.rawValue)
+        var events = [
+            CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(tab.displayURL) with \(model.displayName)."),
+            CopilotRunEvent(kind: .pageSnapshotRequested, message: "Requested a bounded page snapshot for context.")
+        ]
+        if renderedContext?.wasCompressed == true {
+            events.append(
+                CopilotRunEvent(
+                    kind: .conversationContextCompressed,
+                    message: "Compressed prior conversation context for \(model.displayName)."
+                )
+            )
+        }
         let run = CopilotRun(
             id: runID,
             prompt: prompt,
             activeTabID: tab.id,
             targetURLString: tab.urlString,
+            conversationID: conversationID,
+            modelID: model.id,
             status: .running,
-            events: [
-                CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(tab.displayURL)."),
-                CopilotRunEvent(kind: .pageSnapshotRequested, message: "Requested a bounded page snapshot for context.")
-            ],
+            events: events,
             usage: usage
         )
         copilotRuns.insert(run, at: 0)
+        if recordsAssistantMessage, let conversationID {
+            llmConversation.appendEvent(
+                LLMConversationEvent(
+                    kind: .assistantRunStarted,
+                    message: "Started \(model.displayName) run.",
+                    toModelID: model.id,
+                    relatedRunID: runID
+                )
+            )
+            assert(conversationID == llmConversation.id)
+        }
         requestPageSnapshot()
 
         let task = Task { @MainActor in
@@ -330,15 +448,45 @@ final class BrowserViewModel: ObservableObject {
                 kind: copilotEventKind(for: memoryRecall),
                 message: copilotMemoryMessage(for: memoryRecall)
             )
+            if recordsAssistantMessage, conversationID == llmConversation.id, !memoryRecall.memories.isEmpty {
+                llmConversation.appendEvent(
+                    LLMConversationEvent(
+                        kind: .memoryContextAttached,
+                        message: "Attached \(memoryRecall.memories.count) approved memory citation\(memoryRecall.memories.count == 1 ? "" : "s").",
+                        toModelID: model.id,
+                        relatedRunID: runID
+                    )
+                )
+            }
 
             guard !Task.isCancelled, isCopilotRunActive(runID) else { return }
-            appendCopilotEvent(runID: runID, kind: .modelStarted, message: "Started model bridge.")
+            let renderedWithMemory = recordsAssistantMessage
+                ? LLMConversationContextRenderer.render(
+                    conversation: llmConversation,
+                    model: model,
+                    latestPageSnapshot: snapshot,
+                    memoryRecall: memoryRecall
+                )
+                : renderedContext
+            if recordsAssistantMessage, let renderedWithMemory, renderedWithMemory.wasCompressed, renderedWithMemory.compressedMessageIDs != renderedContext?.compressedMessageIDs {
+                appendContextCompressionEvent(renderedWithMemory, model: model)
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: .conversationContextCompressed,
+                    message: "Compressed prior conversation context after memory recall."
+                )
+            }
+
+            appendCopilotEvent(runID: runID, kind: .modelStarted, message: "Started \(model.displayName) model bridge.")
             let result = await runtimeBridge.runCopilot(
                 CopilotRunRequest(
                     prompt: prompt,
                     pageURLString: tab.urlString,
                     pageSnapshot: snapshot,
-                    preferredAFMPackID: selectedAFMPackID,
+                    preferredAFMPackID: preferredPackID,
+                    preferredModelID: model.id,
+                    conversationID: conversationID,
+                    renderedConversationContext: renderedWithMemory,
                     memoryRecall: memoryRecall
                 )
             )
@@ -349,8 +497,25 @@ final class BrowserViewModel: ObservableObject {
             }
 
             let provider = result.mode == .service ? "afm" : "local"
-            let finalUsage = CopilotCreditUsage.estimate(prompt: prompt, snapshot: snapshot, provider: provider)
+            let finalUsage = CopilotCreditUsage.estimate(
+                prompt: renderedWithMemory?.prompt ?? prompt,
+                snapshot: snapshot,
+                provider: provider
+            )
             appendAFMarketEvents(runID: runID, result: result)
+            if recordsAssistantMessage, result.mode != model.runtimeMode {
+                appendProviderFallback(runID: runID, requestedModel: model, actualMode: result.mode)
+            }
+            if recordsAssistantMessage, conversationID == llmConversation.id {
+                appendAssistantConversationMessage(
+                    result: result,
+                    runID: runID,
+                    model: model,
+                    targetURLString: tab.urlString,
+                    memoryRecall: memoryRecall,
+                    usage: finalUsage
+                )
+            }
             finishCopilotRun(
                 runID,
                 status: .completed,
@@ -690,6 +855,68 @@ final class BrowserViewModel: ObservableObject {
     private func appendCopilotEvent(runID: UUID, kind: CopilotRunEventKind, message: String) {
         guard let index = copilotRuns.firstIndex(where: { $0.id == runID }) else { return }
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
+    }
+
+    private func appendConversationLinkedCopilotEvent(kind: CopilotRunEventKind, message: String) {
+        guard let runID = copilotRuns.first(where: {
+            $0.conversationID == llmConversation.id && ($0.status == .queued || $0.status == .running)
+        })?.id else {
+            return
+        }
+        appendCopilotEvent(runID: runID, kind: kind, message: message)
+    }
+
+    private func appendContextCompressionEvent(_ renderedContext: LLMRenderedConversationContext, model: LLMModelProfile) {
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .contextCompressed,
+                message: "Compressed \(renderedContext.compressedMessageIDs.count) prior message\(renderedContext.compressedMessageIDs.count == 1 ? "" : "s") for \(model.displayName).",
+                toModelID: model.id
+            )
+        )
+    }
+
+    private func appendProviderFallback(runID: UUID, requestedModel: LLMModelProfile, actualMode: RuntimeBridgeMode) {
+        let message = "\(requestedModel.displayName) requested \(requestedModel.runtimeMode.title) execution; runtime used \(actualMode.title)."
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .providerFallback,
+                message: message,
+                toModelID: requestedModel.id,
+                relatedRunID: runID
+            )
+        )
+        appendCopilotEvent(runID: runID, kind: .providerFallback, message: message)
+    }
+
+    private func appendAssistantConversationMessage(
+        result: CopilotRunResult,
+        runID: UUID,
+        model: LLMModelProfile,
+        targetURLString: String,
+        memoryRecall: OpenMindMemoryRecallResult,
+        usage: CopilotCreditUsage
+    ) {
+        let suggestions = result.suggestions.isEmpty ? "" : "\n\n" + result.suggestions.map { "- \($0)" }.joined(separator: "\n")
+        let assistantMessage = LLMConversationMessage(
+            role: .assistant,
+            text: result.summary + suggestions,
+            modelID: model.id,
+            pageURLString: targetURLString,
+            memoryCitations: memoryRecall.memories.map(LLMMemoryCitation.init(memory:)),
+            usage: usage,
+            sourceRunID: runID
+        )
+        llmConversation.appendMessage(assistantMessage)
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .assistantMessageAdded,
+                message: "Added assistant message from \(model.displayName).",
+                toModelID: model.id,
+                relatedRunID: runID,
+                relatedMessageID: assistantMessage.id
+            )
+        )
     }
 
     private func appendAFMarketEvents(runID: UUID, result: CopilotRunResult) {

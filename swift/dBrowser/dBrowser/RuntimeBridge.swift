@@ -73,6 +73,9 @@ struct CopilotRunRequest: Equatable {
     var pageURLString: String?
     var pageSnapshot: PageSnapshot?
     var preferredAFMPackID: String?
+    var preferredModelID: String?
+    var conversationID: UUID?
+    var renderedConversationContext: LLMRenderedConversationContext?
     var memoryRecall: OpenMindMemoryRecallResult?
 
     init(
@@ -80,12 +83,18 @@ struct CopilotRunRequest: Equatable {
         pageURLString: String? = nil,
         pageSnapshot: PageSnapshot? = nil,
         preferredAFMPackID: String? = nil,
+        preferredModelID: String? = nil,
+        conversationID: UUID? = nil,
+        renderedConversationContext: LLMRenderedConversationContext? = nil,
         memoryRecall: OpenMindMemoryRecallResult? = nil
     ) {
         self.prompt = prompt
         self.pageURLString = pageURLString
         self.pageSnapshot = pageSnapshot
         self.preferredAFMPackID = preferredAFMPackID
+        self.preferredModelID = preferredModelID
+        self.conversationID = conversationID
+        self.renderedConversationContext = renderedConversationContext
         self.memoryRecall = memoryRecall
     }
 }
@@ -292,8 +301,13 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let target = request.pageURLString?.trimmingCharacters(in: .whitespacesAndNewlines)
         let page = target?.isEmpty == false ? target! : "the active page"
         let task = prompt.isEmpty ? "Assist with the current browsing task." : prompt
+        let adapterPrompt = request.renderedConversationContext?.prompt ?? task
         let snapshotContext = request.pageSnapshot.map { snapshot in
             " Snapshot includes \(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, and \(snapshot.formControls.count) form controls."
+        } ?? ""
+        let conversationContext = request.renderedConversationContext.map { rendered in
+            let compression = rendered.wasCompressed ? " with compressed prior context" : ""
+            return " Conversation \(request.conversationID?.uuidString ?? "context") rendered \(rendered.estimatedPromptTokens) prompt tokens\(compression)."
         } ?? ""
         let memoryIDs = request.memoryRecall?.memories.map(\.id) ?? []
         let memoryContext = request.memoryRecall.map { recall in
@@ -308,7 +322,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
             let route = try await afmServicesClient.route(
                 skill: "summarize",
-                prompt: task,
+                prompt: adapterPrompt,
                 pageURLString: target,
                 preferredPackID: request.preferredAFMPackID,
                 pageSnapshotCommitment: snapshotCommitment,
@@ -317,14 +331,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             let selectedPackID = route.selection?.id ?? request.preferredAFMPackID
             let selectedPack = route.selection?.displayName ?? request.preferredAFMPackID ?? "AFM router default"
             let job = try await afmServicesClient.enqueueCopilotJob(
-                prompt: task,
+                prompt: adapterPrompt,
                 pageURLString: target,
                 selectedPackID: selectedPackID,
                 preferredPackID: request.preferredAFMPackID,
                 pageSnapshotCommitment: snapshotCommitment,
                 memoryContextIDs: memoryIDs
             )
-            var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(memoryContext)"
+            var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(conversationContext)\(memoryContext)"
             var suggestions = [
                 "Router selected \(selectedPack) for \(route.requestedSkill ?? "summarize").",
                 "Registry has \(snapshot.registryPacks.count) pack\(snapshot.registryPacks.count == 1 ? "" : "s") available to the Swift shell.",
@@ -342,7 +356,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                         checksum: selectedPackSummary?.checksum
                     )
                     let nodeTask = try await afmServicesClient.dispatchTask(
-                        prompt: task,
+                        prompt: adapterPrompt,
                         pageURLString: target,
                         selectedPackID: selectedPackID,
                         pageSnapshotCommitment: snapshotCommitment,
@@ -377,9 +391,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
         return CopilotRunResult(
             title: "Local Copilot bridge",
-            summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(memoryContext)",
+            summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(conversationContext)\(memoryContext)",
             suggestions: [
-                request.pageSnapshot == nil ? "Attach page text from WKWebView before model execution." : "Use the bounded page snapshot as local model context.",
+                request.renderedConversationContext == nil ? "Attach page text from WKWebView before model execution." : "Use the rendered conversation ledger as local model context.",
                 request.memoryRecall?.decision.status == .allowed ? "Use only the approved OpenMind memory context." : "Continue without personal memory unless OpenMind grants access.",
                 "Send the prepared run to the desktop or cloud runtime when configured.",
                 "Keep wallet and download actions behind explicit approval."

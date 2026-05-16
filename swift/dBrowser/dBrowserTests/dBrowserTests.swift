@@ -200,6 +200,175 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func llmConversationRendererCompressesWithoutMutatingLedger() {
+        var conversation = LLMConversation(activeModelID: LLMModelRegistry.localGemmaID)
+        for index in 0..<12 {
+            conversation.appendMessage(
+                LLMConversationMessage(
+                    role: index.isMultiple(of: 2) ? .user : .assistant,
+                    text: "Message \(index) " + String(repeating: "context ", count: 80),
+                    modelID: index.isMultiple(of: 2) ? nil : LLMModelRegistry.localGemmaID
+                )
+            )
+        }
+        let originalMessageIDs = conversation.messages.map(\.id)
+        let smallModel = LLMModelProfile(
+            id: "unit.small",
+            displayName: "Small Test Model",
+            providerKind: .localMLX,
+            trustBoundary: .onDevice,
+            contextWindowTokens: 700,
+            supportsTools: false,
+            supportsMemoryCitations: true,
+            runtimeMode: .local,
+            availability: .available,
+            detail: "Small context test model."
+        )
+
+        let rendered = LLMConversationContextRenderer.render(
+            conversation: conversation,
+            model: smallModel,
+            latestPageSnapshot: nil
+        )
+
+        #expect(rendered.wasCompressed)
+        #expect(!rendered.compressedMessageIDs.isEmpty)
+        #expect(rendered.includedMessageIDs.contains(originalMessageIDs.last!))
+        #expect(rendered.prompt.contains("Compressed prior context"))
+        #expect(conversation.messages.map(\.id) == originalMessageIDs)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeForwardsRenderedConversationContextToAFMServices() async {
+        let capturedRequests = JSONRequestCapture()
+        let serviceHarness = Self.makeAFMServiceSession(key: "llmcontext") { request in
+            let path = request.url?.path ?? ""
+            let port = request.url?.port
+            capturedRequests.capture(request)
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" && port == 4810 {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "afm://conversation",
+                            "name": "Conversation Runner",
+                            "skills": ["summarize"],
+                            "status": "healthy"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/packs" && port == 4820 {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/route" {
+                return Self.jsonResponse(for: request, body: [
+                    "selection": [
+                        "id": "afm://conversation",
+                        "name": "Conversation Runner",
+                        "skills": ["summarize"],
+                        "status": "healthy"
+                    ],
+                    "requestedSkill": "summarize"
+                ])
+            }
+
+            if path == "/jobs" {
+                return Self.jsonResponse(for: request, status: 202, body: [
+                    "ok": true,
+                    "id": "job-context",
+                    "status": "queued"
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+        var conversation = LLMConversation(activeModelID: LLMModelRegistry.afMarketRouterID)
+        conversation.appendMessage(LLMConversationMessage(role: .user, text: "Summarize the current report."))
+        conversation.appendMessage(
+            LLMConversationMessage(
+                role: .assistant,
+                text: "Earlier context should remain available.",
+                modelID: LLMModelRegistry.localGemmaID
+            )
+        )
+        let model = LLMModelRegistry.model(withID: LLMModelRegistry.afMarketRouterID)!
+        let rendered = LLMConversationContextRenderer.render(
+            conversation: conversation,
+            model: model,
+            latestPageSnapshot: nil
+        )
+
+        let result = await bridge.runCopilot(
+            CopilotRunRequest(
+                prompt: "Continue",
+                pageURLString: "https://example.com",
+                preferredModelID: model.id,
+                conversationID: conversation.id,
+                renderedConversationContext: rendered
+            )
+        )
+        let routeBody = capturedRequests.body(for: "/route")
+        let jobBody = capturedRequests.body(for: "/jobs")
+        let jobPayload = jobBody?["payload"] as? [String: Any]
+
+        #expect(result.mode == .service)
+        #expect((routeBody?["prompt"] as? String)?.contains("Conversation messages") == true)
+        #expect((routeBody?["prompt"] as? String)?.contains("Earlier context should remain available.") == true)
+        #expect((jobPayload?["prompt"] as? String)?.contains("Active model: AFMarket Router") == true)
+    }
+
+    @MainActor
+    @Test func llmChatModelSwitchPreservesContextAndRecordsFallback() async {
+        let offlineServices = Self.makeAFMServiceSession(key: "llmfallback") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: offlineServices.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineServices.configuration,
+                session: offlineServices.session
+            )
+        )
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        model.navigate("https://example.com")
+        let conversationID = model.llmConversation.id
+
+        model.selectLLMModel(LLMModelRegistry.afMarketRouterID)
+        guard let runID = model.sendLLMMessage("Keep the prior context while changing models.") else {
+            Issue.record("Expected LLM conversation run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+        let eventKinds = model.llmConversation.events.map(\.kind)
+        let run = model.copilotRuns.first { $0.id == runID }
+
+        #expect(completed)
+        #expect(model.llmConversation.id == conversationID)
+        #expect(model.llmConversation.activeModelID == LLMModelRegistry.afMarketRouterID)
+        #expect(model.llmConversation.messages.contains { $0.role == .user })
+        #expect(model.llmConversation.messages.contains { $0.role == .assistant && $0.modelID == LLMModelRegistry.afMarketRouterID })
+        #expect(eventKinds.contains(.modelSwitched))
+        #expect(eventKinds.contains(.assistantMessageAdded))
+        #expect(eventKinds.contains(.providerFallback))
+        #expect(run?.conversationID == conversationID)
+        #expect(run?.modelID == LLMModelRegistry.afMarketRouterID)
+    }
+
+    @MainActor
     @Test func decentralizedStartingPointsResolveToRenderableGatewayURLs() async {
         let bridge = MobileRuntimeBridge()
 
@@ -1099,7 +1268,7 @@ struct dBrowserTests {
         #expect(estimated.isEstimated)
     }
 
-    @Test func openMindMemoryClientRecallsAllowedContextAndWriteback() async {
+    @MainActor @Test func openMindMemoryClientRecallsAllowedContextAndWriteback() async {
         let memoryHarness = Self.makeOpenMindMemorySession(key: "memory") { request in
             let path = request.url?.path ?? ""
 
@@ -1178,7 +1347,7 @@ struct dBrowserTests {
         #expect(outcome.revisionID == "rev-1")
     }
 
-    @Test func openMindMemoryClientHandlesDeniedStepUpAndUnavailableStates() async {
+    @MainActor @Test func openMindMemoryClientHandlesDeniedStepUpAndUnavailableStates() async {
         let deniedHarness = Self.makeOpenMindMemorySession(key: "denied") { request in
             if request.url?.path == "/mcp/tools/gateway.evaluate_access_intent" {
                 return Self.jsonResponse(for: request, body: [
@@ -1226,7 +1395,7 @@ struct dBrowserTests {
         #expect(unavailable.decision.status == .unavailable)
     }
 
-    @Test func openMindMemoryClientLoadsContinuityAndPosture() async {
+    @MainActor @Test func openMindMemoryClientLoadsContinuityAndPosture() async {
         let capturedRequests = JSONRequestCapture()
         let memoryHarness = Self.makeOpenMindMemorySession(key: "runtime") { request in
             let path = request.url?.path ?? ""
@@ -1692,7 +1861,7 @@ private final class JSONRequestCapture {
 
 private final class AFMServiceMockURLProtocol: URLProtocol {
     nonisolated(unsafe) private static var requestHandlers: [String: (URLRequest) throws -> (HTTPURLResponse, Data)] = [:]
-    nonisolated(unsafe) private static let lock = NSLock()
+    private static let lock = NSLock()
 
     nonisolated static func register(
         key: String,

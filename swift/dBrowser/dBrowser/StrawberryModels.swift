@@ -359,6 +359,9 @@ enum CopilotRunEventKind: String, Codable, Equatable {
     case afMarketDispatchCompleted
     case afMarketAttestationRecorded
     case afMarketSettlementRecorded
+    case modelSwitched
+    case conversationContextCompressed
+    case providerFallback
     case modelStarted
     case modelCompleted
     case actionRequested
@@ -419,6 +422,8 @@ struct CopilotRun: Identifiable, Equatable {
     var prompt: String
     var activeTabID: UUID
     var targetURLString: String?
+    var conversationID: UUID?
+    var modelID: String?
     var status: CopilotRunStatus
     var startedAt: Date
     var finishedAt: Date?
@@ -432,6 +437,8 @@ struct CopilotRun: Identifiable, Equatable {
         prompt: String,
         activeTabID: UUID,
         targetURLString: String?,
+        conversationID: UUID? = nil,
+        modelID: String? = nil,
         status: CopilotRunStatus = .queued,
         startedAt: Date = Date(),
         finishedAt: Date? = nil,
@@ -444,6 +451,8 @@ struct CopilotRun: Identifiable, Equatable {
         self.prompt = prompt
         self.activeTabID = activeTabID
         self.targetURLString = targetURLString
+        self.conversationID = conversationID
+        self.modelID = modelID
         self.status = status
         self.startedAt = startedAt
         self.finishedAt = finishedAt

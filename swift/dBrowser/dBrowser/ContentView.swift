@@ -595,7 +595,7 @@ private struct BookmarksPanelView: View {
 
 private struct CopilotPanelView: View {
     @ObservedObject var browser: BrowserViewModel
-    @State private var prompt = "Summarize this page and suggest next actions."
+    @State private var draftMessage = "Summarize this page and suggest next actions."
 
     private var latestRun: CopilotRun? {
         browser.copilotRuns.first
@@ -615,9 +615,35 @@ private struct CopilotPanelView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Prompt")
-                        .font(.headline)
-                    TextEditor(text: $prompt)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Conversation")
+                            .font(.headline)
+                        Spacer()
+                        Picker(
+                            "Model",
+                            selection: Binding(
+                                get: { browser.selectedLLMModelID },
+                                set: { browser.selectLLMModel($0) }
+                            )
+                        ) {
+                            ForEach(browser.llmModelOptions) { model in
+                                Text(model.displayName).tag(model.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("copilot-model-picker")
+                    }
+
+                    HStack(spacing: 8) {
+                        Label(browser.activeLLMModel.trustBoundary.title, systemImage: modelBoundarySystemImage(browser.activeLLMModel))
+                        Text(browser.activeLLMModel.availability.message)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    LLMConversationTranscriptView(browser: browser)
+
+                    TextEditor(text: $draftMessage)
                         .frame(minHeight: 110)
                         .padding(8)
                         .background(Color.secondary.opacity(0.08))
@@ -656,12 +682,14 @@ private struct CopilotPanelView: View {
                         }
 
                         Button {
-                            _ = browser.runCopilot(prompt: prompt)
+                            if browser.sendLLMMessage(draftMessage) != nil {
+                                draftMessage = ""
+                            }
                         } label: {
-                            Label(activeRun == nil ? "Run Copilot" : "Running", systemImage: "sparkles")
+                            Label(activeRun == nil ? "Send" : "Running", systemImage: "paperplane.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(activeRun != nil)
+                        .disabled(activeRun != nil || draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("copilot-run")
                     }
 
@@ -809,9 +837,20 @@ private struct CopilotPanelView: View {
     private func saveWorkflow() {
         _ = browser.saveCopilotWorkflow(
             title: "Saved Copilot prompt",
-            promptTemplate: prompt,
+            promptTemplate: draftMessage,
             allowedActions: [.click, .focus, .scroll, .waitForSelector]
         )
+    }
+
+    private func modelBoundarySystemImage(_ model: LLMModelProfile) -> String {
+        switch model.trustBoundary {
+        case .onDevice:
+            return "cpu"
+        case .serviceBacked:
+            return "server.rack"
+        case .remoteGateway:
+            return "network"
+        }
     }
 
     private func openMindWritebackSummary(_ outcome: OpenMindWritebackOutcome) -> String {
@@ -851,6 +890,114 @@ private struct CopilotPanelView: View {
         case .unavailable:
             return "Unavailable: \(recall.decision.reason)"
         }
+    }
+}
+
+private struct LLMConversationTranscriptView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if browser.llmConversation.messages.isEmpty {
+                Text("No messages yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(Color.secondary.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                ForEach(browser.llmConversation.messages.suffix(8)) { message in
+                    LLMConversationMessageRow(
+                        message: message,
+                        modelName: modelName(for: message.modelID)
+                    )
+                }
+            }
+
+            if let event = browser.llmConversation.events.last {
+                Label(event.message, systemImage: conversationEventSystemImage(event.kind))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .accessibilityIdentifier("copilot-conversation")
+    }
+
+    private func modelName(for id: String?) -> String? {
+        guard let id else { return nil }
+        return browser.llmModelOptions.first { $0.id == id }?.displayName ?? id
+    }
+
+    private func conversationEventSystemImage(_ kind: LLMConversationEventKind) -> String {
+        switch kind {
+        case .conversationCreated:
+            return "message"
+        case .modelSwitched:
+            return "arrow.triangle.2.circlepath"
+        case .userMessageAdded:
+            return "person"
+        case .assistantRunStarted:
+            return "sparkles"
+        case .assistantMessageAdded:
+            return "checkmark.circle"
+        case .pageSnapshotAttached:
+            return "doc.viewfinder"
+        case .memoryContextAttached:
+            return "brain"
+        case .contextCompressed:
+            return "rectangle.compress.vertical"
+        case .providerFallback:
+            return "arrow.uturn.backward.circle"
+        }
+    }
+}
+
+private struct LLMConversationMessageRow: View {
+    let message: LLMConversationMessage
+    let modelName: String?
+
+    private var isUser: Bool {
+        message.role == .user
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Label(isUser ? "You" : (modelName ?? "Assistant"), systemImage: isUser ? "person.crop.circle" : "sparkles")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                if let usage = message.usage {
+                    Text("\(NSDecimalNumber(decimal: usage.creditsSpent).stringValue) credits")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(message.text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let snapshot = message.snapshotAttachment {
+                Label(snapshot.title, systemImage: "doc.text.magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            if !message.memoryCitations.isEmpty {
+                Text(message.memoryCitations.map(\.id).joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isUser ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
