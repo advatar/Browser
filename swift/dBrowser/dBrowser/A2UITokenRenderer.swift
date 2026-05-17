@@ -173,9 +173,70 @@ struct A2UIRuntimeProfile: Identifiable, Equatable {
         ]
     )
 
+    static let aztecNetwork = A2UIRuntimeProfile(
+        id: "aztec-network",
+        title: "Aztec Network",
+        status: "Privacy-first Ethereum L2 protocol",
+        description: "Offer Aztec as the A2UI protocol profile for private smart-contract apps that need client-side proof generation, private state, public state, and Ethereum L1 settlement.",
+        repositoryURL: URL(string: "https://github.com/AztecProtocol/aztec-packages"),
+        documentationURL: URL(string: "https://docs.aztec.network/"),
+        setupCommands: [
+            "VERSION=4.2.0 bash -i <(curl -sL https://install.aztec.network/4.2.0)",
+            "aztec start --local-network",
+            "aztec new my_project",
+            "aztec compile",
+            "npm install @aztec/aztec.js@4.2.0 @aztec/accounts@4.2.0 @aztec/wallets@4.2.0",
+            "npx @aztec/mcp-server@latest"
+        ],
+        capabilities: [
+            A2UIRuntimeCapability(
+                title: "Private smart contracts",
+                detail: "Aztec private functions execute and prove on the user's device so logic and data can remain confidential.",
+                systemImage: "lock.shield"
+            ),
+            A2UIRuntimeCapability(
+                title: "PXE client boundary",
+                detail: "The Private Execution Environment stores secrets, notes, nullifier keys, viewing keys, and proof inputs locally.",
+                systemImage: "person.badge.key"
+            ),
+            A2UIRuntimeCapability(
+                title: "Public/private state",
+                detail: "A2UI apps can compose encrypted private state with transparent public state and Ethereum L1/L2 messages.",
+                systemImage: "square.split.2x1"
+            ),
+            A2UIRuntimeCapability(
+                title: "Aztec.nr / Noir",
+                detail: "Contracts use the Aztec.nr Noir framework, including private circuits, public AVM bytecode, and utility functions.",
+                systemImage: "curlybraces"
+            ),
+            A2UIRuntimeCapability(
+                title: "Aztec.js",
+                detail: "The JavaScript SDK talks to PXE for accounts, contracts, deployments, reads, and transactions.",
+                systemImage: "terminal"
+            ),
+            A2UIRuntimeCapability(
+                title: "Sequencers and provers",
+                detail: "Permissionless sequencers validate blocks while decentralized provers produce rollup proofs posted to Ethereum.",
+                systemImage: "network"
+            ),
+            A2UIRuntimeCapability(
+                title: "AI/MCP tooling",
+                detail: "Aztec publishes AI guidance, llms.txt, @aztec/mcp-server, and Noir MCP support for current docs and examples.",
+                systemImage: "wand.and.stars"
+            )
+        ],
+        runtimeNotes: [
+            "Use Aztec when an A2UI app needs programmable privacy, private wallet state, confidential workflows, or proof-backed settlement.",
+            "Use the aztec CLI wrapper for Aztec contracts: aztec compile and aztec test, not direct nargo compile/test.",
+            "Generated Noir and Aztec.nr code needs verification and tests because the protocol and APIs evolve quickly.",
+            "The current Swift bridge offers the protocol profile and setup guidance; native PXE or wallet embedding is the next integration layer."
+        ]
+    )
+
     static let available = [
         nativeSwiftUI,
-        logosBasecamp
+        logosBasecamp,
+        aztecNetwork
     ]
 }
 
@@ -189,7 +250,7 @@ final class A2UITokenRenderer: ObservableObject {
 
     static let sampleTokens = """
     {"version":"v0.9","createSurface":{"surfaceId":"dbrowser-a2ui-demo","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#0A7AFF"}}}
-    {"version":"v0.9","updateComponents":{"surfaceId":"dbrowser-a2ui-demo","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","subtitle","gatewayRow","logosRuntime","prompt","button"]},{"id":"title","component":"Text","text":"A2UI runtime card","variant":"h3"},{"id":"subtitle","component":"Text","text":"Native SwiftUI widgets rendered from A2UI v0.9 tokens.","variant":"body"},{"id":"gatewayRow","component":"Row","children":["zeroK","llmGateway"]},{"id":"zeroK","component":"Text","text":"ZeroK: https://zerok.cloud","variant":"caption"},{"id":"llmGateway","component":"Text","text":"LLM Gateway: https://llmos.showntell.dev","variant":"caption"},{"id":"logosRuntime","component":"Text","text":"Logos runtime: Basecamp modules for storage, messaging, blockchain, wallets, and AI inspection.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Prompt intent","value":"Summarize this page with privacy policy context.","variant":"longText"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.preview","context":{"gateway":"https://zerok.cloud","route":"llm-gateway","runtime":"logos-basecamp"}}}},{"id":"buttonLabel","component":"Text","text":"Preview action","variant":"body"}]}}
+    {"version":"v0.9","updateComponents":{"surfaceId":"dbrowser-a2ui-demo","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","subtitle","gatewayRow","logosRuntime","aztecProtocol","prompt","button"]},{"id":"title","component":"Text","text":"A2UI runtime card","variant":"h3"},{"id":"subtitle","component":"Text","text":"Native SwiftUI widgets rendered from A2UI v0.9 tokens.","variant":"body"},{"id":"gatewayRow","component":"Row","children":["zeroK","llmGateway"]},{"id":"zeroK","component":"Text","text":"ZeroK: https://zerok.cloud","variant":"caption"},{"id":"llmGateway","component":"Text","text":"LLM Gateway: https://llmos.showntell.dev","variant":"caption"},{"id":"logosRuntime","component":"Text","text":"Logos runtime: Basecamp modules for storage, messaging, blockchain, wallets, and AI inspection.","variant":"caption"},{"id":"aztecProtocol","component":"Text","text":"Aztec protocol: PXE, Noir private contracts, client-side proofs, and Ethereum L1 settlement.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Prompt intent","value":"Summarize this page with privacy policy context.","variant":"longText"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.preview","context":{"gateway":"https://zerok.cloud","route":"llm-gateway","runtime":"logos-basecamp","protocol":"aztec-network"}}}},{"id":"buttonLabel","component":"Text","text":"Preview action","variant":"body"}]}}
     """
 
     var hasSurface: Bool {

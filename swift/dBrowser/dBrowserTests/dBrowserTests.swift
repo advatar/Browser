@@ -125,6 +125,38 @@ struct dBrowserTests {
         #expect(searchableText.contains("MCP/QML Inspector"))
     }
 
+    @Test func a2uiRuntimeProfilesOfferAztecProtocol() {
+        let aztec = A2UIRuntimeProfile.aztecNetwork
+        let searchableText = (
+            [
+                aztec.title,
+                aztec.status,
+                aztec.description
+            ] + aztec.setupCommands + aztec.runtimeNotes + aztec.capabilities.flatMap { [$0.title, $0.detail] }
+        ).joined(separator: " ")
+
+        #expect(A2UIRuntimeProfile.available.contains(where: { $0.id == aztec.id }))
+        #expect(aztec.repositoryURL?.absoluteString == "https://github.com/AztecProtocol/aztec-packages")
+        #expect(aztec.documentationURL?.absoluteString == "https://docs.aztec.network/")
+        #expect(searchableText.contains("Aztec Network"))
+        #expect(searchableText.contains("Privacy-first Ethereum L2"))
+        #expect(searchableText.contains("private smart-contract"))
+        #expect(searchableText.contains("PXE"))
+        #expect(searchableText.contains("Private Execution Environment"))
+        #expect(searchableText.contains("nullifier keys"))
+        #expect(searchableText.contains("viewing keys"))
+        #expect(searchableText.contains("Aztec.nr / Noir"))
+        #expect(searchableText.contains("Aztec.js"))
+        #expect(searchableText.contains("Public/private state"))
+        #expect(searchableText.contains("Ethereum L1"))
+        #expect(searchableText.contains("sequencers"))
+        #expect(searchableText.contains("provers"))
+        #expect(searchableText.contains("aztec compile"))
+        #expect(searchableText.contains("@aztec/aztec.js@4.2.0"))
+        #expect(searchableText.contains("@aztec/mcp-server"))
+        #expect(searchableText.contains("nargo compile/test"))
+    }
+
     @MainActor
     @Test func a2uiRenderingIsTopLevelPanelAndRuntimeFeature() {
         #expect(BrowserPanel.allCases.contains(.a2ui))
@@ -133,8 +165,10 @@ struct dBrowserTests {
         let bridge = MobileRuntimeBridge()
         let state = bridge.featureStates.first { $0.feature == .a2uiRendering }
         let logosState = bridge.featureStates.first { $0.feature == .logosRuntime }
+        let aztecState = bridge.featureStates.first { $0.feature == .aztecProtocol }
         let explanation = MobileRuntimeFeature.a2uiRendering.explanation
         let logosExplanation = MobileRuntimeFeature.logosRuntime.explanation
+        let aztecExplanation = MobileRuntimeFeature.aztecProtocol.explanation
         let searchableText = (
             [
                 MobileRuntimeFeature.a2uiRendering.title,
@@ -151,6 +185,14 @@ struct dBrowserTests {
                 logosExplanation.bridgeBehavior
             ] + logosExplanation.detailPoints
         ).joined(separator: " ")
+        let aztecSearchableText = (
+            [
+                MobileRuntimeFeature.aztecProtocol.title,
+                MobileRuntimeFeature.aztecProtocol.status,
+                aztecExplanation.overview,
+                aztecExplanation.bridgeBehavior
+            ] + aztecExplanation.detailPoints
+        ).joined(separator: " ")
 
         #expect(state?.mode == .native)
         #expect(state?.isAvailable == true)
@@ -158,12 +200,16 @@ struct dBrowserTests {
         #expect(logosState?.mode == .local)
         #expect(logosState?.isAvailable == true)
         #expect(logosState?.status.contains("Logos Basecamp") == true)
+        #expect(aztecState?.mode == .local)
+        #expect(aztecState?.isAvailable == true)
+        #expect(aztecState?.status.contains("Aztec PXE") == true)
         #expect(searchableText.contains("A2UIStreamParser"))
         #expect(searchableText.contains("SurfaceViewModel"))
         #expect(searchableText.contains("A2UISurfaceView"))
         #expect(searchableText.contains("A2UISwiftCore"))
         #expect(searchableText.contains("A2UISwiftUI"))
         #expect(searchableText.contains("Logos Basecamp"))
+        #expect(searchableText.contains("Aztec Network"))
         #expect(searchableText.contains("https://zerok.cloud"))
         #expect(searchableText.contains("https://llmos.showntell.dev"))
         #expect(logosSearchableText.contains("Logos Basecamp"))
@@ -178,6 +224,23 @@ struct dBrowserTests {
         #expect(logosSearchableText.contains("LEZ Wallet"))
         #expect(logosSearchableText.contains("--user-dir"))
         #expect(logosSearchableText.contains("MCP/QML Inspector"))
+        #expect(aztecSearchableText.contains("Aztec Network"))
+        #expect(aztecSearchableText.contains("https://docs.aztec.network/"))
+        #expect(aztecSearchableText.contains("https://github.com/AztecProtocol/aztec-packages"))
+        #expect(aztecSearchableText.contains("privacy-first Layer 2 zkRollup"))
+        #expect(aztecSearchableText.contains("not EVM compatible"))
+        #expect(aztecSearchableText.contains("Private Execution Environment (PXE)"))
+        #expect(aztecSearchableText.contains("Aztec Virtual Machine"))
+        #expect(aztecSearchableText.contains("nullifier keys"))
+        #expect(aztecSearchableText.contains("Aztec.nr"))
+        #expect(aztecSearchableText.contains("Noir"))
+        #expect(aztecSearchableText.contains("aztec compile"))
+        #expect(aztecSearchableText.contains("@aztec/aztec.js@4.2.0"))
+        #expect(aztecSearchableText.contains("sequencers"))
+        #expect(aztecSearchableText.contains("decentralized provers"))
+        #expect(aztecSearchableText.contains("L1 to L2 messaging"))
+        #expect(aztecSearchableText.contains("@aztec/mcp-server"))
+        #expect(aztecSearchableText.contains("noir-mcp-server"))
     }
 
     @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {

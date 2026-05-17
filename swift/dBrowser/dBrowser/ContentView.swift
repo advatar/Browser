@@ -1204,7 +1204,7 @@ private struct A2UITokenPanelView: View {
                 PanelHeaderView(
                     title: "A2UI Tokens",
                     systemImage: BrowserPanel.a2ui.systemImage,
-                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets or target a local-first Logos Basecamp runtime."
+                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets or target protocol profiles like Logos Basecamp and Aztec."
                 )
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {

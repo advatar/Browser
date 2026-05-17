@@ -1226,6 +1226,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: "Logos Basecamp profile ready"
             ),
             RuntimeFeatureState(
+                feature: .aztecProtocol,
+                mode: .local,
+                isAvailable: true,
+                status: "Aztec PXE protocol profile ready"
+            ),
+            RuntimeFeatureState(
                 feature: .afmServices,
                 mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
                 isAvailable: afmSnapshot.allServicesAvailable,

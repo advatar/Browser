@@ -255,6 +255,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case mcpServers
     case a2uiRendering
     case logosRuntime
+    case aztecProtocol
     case afmServices
     case copilot
     case wallet
@@ -272,6 +273,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .mcpServers: "MCP servers"
         case .a2uiRendering: "A2UI rendering"
         case .logosRuntime: "Logos runtime"
+        case .aztecProtocol: "Aztec protocol"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -289,6 +291,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .mcpServers: "HTTP, WebSocket, STDIO"
         case .a2uiRendering: "Native SwiftUI widgets"
         case .logosRuntime: "Basecamp modules"
+        case .aztecProtocol: "PXE + private contracts"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -306,6 +309,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .mcpServers: "network"
         case .a2uiRendering: "square.grid.2x2"
         case .logosRuntime: "shippingbox"
+        case .aztecProtocol: "lock.shield"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -391,13 +395,14 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
             )
         case .a2uiRendering:
             RuntimeFeatureExplanation(
-                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer, while letting app authors choose a runtime profile such as Logos Basecamp.",
+                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer, while letting app authors choose a runtime or protocol profile such as Logos Basecamp or Aztec Network.",
                 bridgeBehavior: "The A2UI panel feeds raw LLM or gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, renders the result through A2UISurfaceView, and keeps the selected runtime profile available for action routing.",
                 detailPoints: [
                     "The app links A2UISwiftCore for token parsing, schema decoding, and surface state.",
                     "The app links A2UISwiftUI for the native widget catalog including text, cards, rows, columns, text fields, and buttons.",
                     "Resolved button actions are logged locally today and can be routed through the same approval boundaries used by Copilot, wallet, MCP, ZeroK, and LLM Gateway flows.",
                     "A2UI apps can stay in the native SwiftUI profile or target Logos Basecamp when they need decentralized storage, messaging, blockchain, wallet, or AI-inspection modules.",
+                    "A2UI apps can target Aztec Network when they need PXE-backed private execution, Noir smart contracts, private state, public state, or Ethereum L1/L2 messaging.",
                     "The renderer is isolated behind a Swift wrapper so future tokens from https://zerok.cloud and https://llmos.showntell.dev can use the same surface contract."
                 ]
             )
@@ -412,6 +417,21 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Important modules for dBrowser A2UI apps are Storage, Messaging / Logos Delivery, Blockchain / Execution Zone, and LEZ Wallet flows for private and public state.",
                     "Use nix build '.#bin-macos-app' and open result/LogosBasecamp.app for the macOS bundle, or use LogosBasecamp --user-dir <path> / LOGOS_USER_DIR=<path> for isolated app profiles.",
                     "Basecamp also exposes MCP/QML Inspector support, which lines up with the app's MCP server UI and AI assistant control surface."
+                ]
+            )
+        case .aztecProtocol:
+            RuntimeFeatureExplanation(
+                overview: "Offers Aztec Network as the privacy-first Ethereum L2 protocol profile for A2UI apps that need private smart contracts, private state, public state, and proof-backed settlement.",
+                bridgeBehavior: "The Swift app currently exposes Aztec as a selectable A2UI profile with local-network, Aztec.js, Aztec.nr, PXE, and MCP guidance; the next bridge layer should embed or broker PXE and wallet access instead of only launching external tooling.",
+                detailPoints: [
+                    "Aztec docs live at https://docs.aztec.network/ and the monorepo lives at https://github.com/AztecProtocol/aztec-packages.",
+                    "Aztec is a privacy-first Layer 2 zkRollup on Ethereum, not EVM compatible, with a privacy-preserving virtual machine for private and public execution.",
+                    "Private functions execute and prove on the user's device through the Private Execution Environment (PXE), while public functions execute in the Aztec Virtual Machine.",
+                    "PXE stores secrets, notes, nullifier keys, incoming viewing keys, outgoing viewing keys, tagging keys, and private proof inputs locally.",
+                    "Aztec.nr is the Noir framework for contracts; use the aztec CLI wrapper with aztec compile and aztec test rather than direct nargo compile or nargo test for Aztec contracts.",
+                    "Aztec.js communicates with PXE for accounts, contract deployment, reads, and transactions; current docs use @aztec/aztec.js@4.2.0 for the alpha/testnet line.",
+                    "The network path includes permissionless sequencers, decentralized provers, rollup proofs posted to Ethereum, and L1 to L2 messaging.",
+                    "Aztec publishes AI tooling guidance, docs llms.txt, @aztec/mcp-server, noir-mcp-server, and Aztec/Noir skill references for current protocol context."
                 ]
             )
         case .afmServices:

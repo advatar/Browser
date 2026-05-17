@@ -22,6 +22,16 @@
 
 ## Active Task
 
+## Swift A2UI Aztec Protocol
+
+- [x] Inspect Aztec docs, network page, AI tooling, PXE, and monorepo for current protocol wording.
+- [x] Add an Aztec Network protocol profile for A2UI apps.
+- [x] Surface Aztec as a selectable A2UI app runtime/protocol profile in the Swift panel.
+- [x] Add Aztec runtime status and explanations to the runtime grid.
+- [x] Add focused unit tests for the Aztec A2UI protocol offering.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Swift A2UI Logos Runtime
 
 - [x] Inspect Logos Basecamp and Logos docs for current runtime/module wording.
