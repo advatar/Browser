@@ -21,6 +21,16 @@
 
 ## Active Task
 
+## A2UI Imageboard Demo App
+
+- [x] Create tracker issue for the imageboard demo app (#112).
+- [ ] Inspect agent app manifest, app-store metadata, and registry test surfaces.
+- [ ] Add an Imageboard A2UI app with boards, threads, image upload metadata, comments, and safe posting instructions.
+- [ ] Add focused registry tests for imageboard metadata, approval gates, and rendered task instructions.
+- [ ] Verify relevant Rust/frontend tests locally.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issue #112.
+
 ## Swift Wallet Capability Contracts
 
 - [x] Create tracker issue for wallet and chain capability contracts (#111).
