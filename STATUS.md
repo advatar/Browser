@@ -21,6 +21,16 @@
 
 ## Active Task
 
+## Swift A2UI Token Rendering
+
+- [x] Inspect `a2ui-swift` package shape and current Swift package setup.
+- [x] Import `A2UISwiftUI`/`A2UISwiftCore` into the Xcode project.
+- [x] Add a Swift A2UI token renderer model backed by the package parser/view model.
+- [x] Add a top-level A2UI panel with sample token rendering and action logging.
+- [x] Add focused unit/UI tests for token parsing and panel visibility.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Swift MCP Server Connection UI
 
 - [x] Inspect existing desktop MCP profile support and Swift runtime surfaces.

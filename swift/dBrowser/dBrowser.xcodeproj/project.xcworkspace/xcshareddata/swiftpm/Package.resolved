@@ -1,6 +1,14 @@
 {
-  "originHash" : "facc0ac7c70363ea20f6cd1235de91dea6b06f0d00190946045a6c8ae753abc2",
+  "originHash" : "ff08cf6d8dd8008bc35e37f60a02b6ccc9e214f130ba57385035e981130a3d44",
   "pins" : [
+    {
+      "identity" : "a2ui-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/BBC6BAE9/a2ui-swift",
+      "state" : {
+        "revision" : "c98cdcc5a29cfa2689ec4704ee7f6a8476286bdd"
+      }
+    },
     {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",
@@ -17,6 +25,15 @@
       "state" : {
         "revision" : "1c05248bb0899e2a7a4962b84d319cf12f4e12aa",
         "version" : "3.31.3"
+      }
+    },
+    {
+      "identity" : "swift-foundation-icu",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-foundation-icu.git",
+      "state" : {
+        "branch" : "swift-6.3.1-RELEASE",
+        "revision" : "2e2854eee567589ed44c5f3c85c7343e6d91978d"
       }
     },
     {

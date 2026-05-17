@@ -364,6 +364,8 @@ private struct BrowserPanelContentView: View {
                 WalletPanelView(browser: browser)
             case .mcp:
                 MCPServersPanelView(browser: browser)
+            case .a2ui:
+                A2UITokenPanelView()
             case .copilot:
                 CopilotPanelView(browser: browser)
             case .runtime:
@@ -1175,6 +1177,187 @@ private struct MCPServersPanelView: View {
         }
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-mcp")
+    }
+}
+
+private struct A2UITokenPanelView: View {
+    @StateObject private var renderer = A2UITokenRenderer()
+    @State private var tokenText = A2UITokenRenderer.sampleTokens
+    @State private var isRendering = false
+    @State private var didRenderInitialSample = false
+
+    private var statusColor: Color {
+        if !renderer.errors.isEmpty {
+            return .orange
+        }
+        return renderer.hasSurface ? .green : .secondary
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "A2UI Tokens",
+                    systemImage: BrowserPanel.a2ui.systemImage,
+                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets with the a2ui-swift catalog."
+                )
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
+                    A2UIMetricTile(title: "Library", value: "a2ui-swift 0.2.8", systemImage: "shippingbox")
+                    A2UIMetricTile(title: "Parser", value: "\(renderer.renderSummary.messageCount) messages", systemImage: "curlybraces")
+                    A2UIMetricTile(title: "Surface", value: renderer.hasSurface ? "Rendered" : "Empty", systemImage: renderer.hasSurface ? "checkmark.circle" : "circle")
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label(renderer.renderSummary.statusText, systemImage: renderer.hasSurface ? "square.grid.2x2" : "square.dashed")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(statusColor)
+                        Spacer()
+                    }
+
+                    if !renderer.renderedTextEvents.isEmpty {
+                        Text(renderer.renderedTextEvents.joined(separator: "\n"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if !renderer.errors.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(renderer.errors, id: \.self) { error in
+                                Text(error)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.orange)
+                                    .lineLimit(3)
+                            }
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Token stream")
+                        .font(.headline)
+                    TextEditor(text: $tokenText)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(minHeight: 220)
+                        .padding(8)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
+                        }
+                        .accessibilityIdentifier("a2ui-token-editor")
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], alignment: .leading, spacing: 8) {
+                        Button {
+                            Task { await renderTokens() }
+                        } label: {
+                            Label(isRendering ? "Rendering" : "Render", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isRendering)
+                        .accessibilityIdentifier("a2ui-render")
+
+                        Button {
+                            tokenText = A2UITokenRenderer.sampleTokens
+                            Task { await renderTokens() }
+                        } label: {
+                            Label("Sample", systemImage: "arrow.counterclockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            renderer.clearActionLog()
+                        } label: {
+                            Label("Clear Log", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(renderer.actionLog.isEmpty)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Rendered widgets")
+                        .font(.headline)
+                    A2UITokenSurfacePreview(renderer: renderer)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Action log")
+                        .font(.headline)
+                    if renderer.actionLog.isEmpty {
+                        Text("No widget actions yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(renderer.actionLog) { action in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(action.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(action.sourceComponentID) - \(action.contextSummary)")
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-a2ui")
+        .task {
+            guard !didRenderInitialSample else { return }
+            didRenderInitialSample = true
+            await renderTokens()
+        }
+    }
+
+    @MainActor
+    private func renderTokens() async {
+        guard !isRendering else { return }
+        isRendering = true
+        await renderer.render(rawTokens: tokenText)
+        isRendering = false
+    }
+}
+
+private struct A2UIMetricTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .frame(width: 24)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

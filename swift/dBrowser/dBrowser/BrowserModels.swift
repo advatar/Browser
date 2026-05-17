@@ -5,6 +5,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case bookmarks
     case wallet
     case mcp
+    case a2ui
     case copilot
     case runtime
 
@@ -14,6 +15,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         .history,
         .bookmarks,
         .mcp,
+        .a2ui,
         .copilot,
         .runtime
     ]
@@ -24,6 +26,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .bookmarks: "Bookmarks"
         case .wallet: "Wallet"
         case .mcp: "MCP"
+        case .a2ui: "A2UI"
         case .copilot: "Copilot"
         case .runtime: "Runtime"
         }
@@ -35,6 +38,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .bookmarks: "bookmark"
         case .wallet: "wallet.pass"
         case .mcp: "network"
+        case .a2ui: "square.grid.2x2"
         case .copilot: "sparkles"
         case .runtime: "server.rack"
         }
@@ -249,6 +253,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case architectureOverview
     case chainTrust
     case mcpServers
+    case a2uiRendering
     case afmServices
     case copilot
     case wallet
@@ -264,6 +269,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .architectureOverview: "Architecture"
         case .chainTrust: "Chain trust"
         case .mcpServers: "MCP servers"
+        case .a2uiRendering: "A2UI rendering"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -279,6 +285,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .chainTrust: "Gateway/RPC fallback"
         case .mcpServers: "HTTP, WebSocket, STDIO"
+        case .a2uiRendering: "Native SwiftUI widgets"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -294,6 +301,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .architectureOverview: "square.stack.3d.up"
         case .chainTrust: "checkmark.shield"
         case .mcpServers: "network"
+        case .a2uiRendering: "square.grid.2x2"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -375,6 +383,17 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Disabled servers stay inert until the user enables and connects them.",
                     "Connection results record status text and discovered tool names so the UI can show negotiated capability readiness.",
                     "Secrets should move through the existing encrypted MCP profile/keyring service before production use."
+                ]
+            )
+        case .a2uiRendering:
+            RuntimeFeatureExplanation(
+                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer.",
+                bridgeBehavior: "The A2UI panel feeds raw LLM or gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, and renders the result through A2UISurfaceView.",
+                detailPoints: [
+                    "The app links A2UISwiftCore for token parsing, schema decoding, and surface state.",
+                    "The app links A2UISwiftUI for the native widget catalog including text, cards, rows, columns, text fields, and buttons.",
+                    "Resolved button actions are logged locally today and can be routed through the same approval boundaries used by Copilot, wallet, MCP, ZeroK, and LLM Gateway flows.",
+                    "The renderer is isolated behind a Swift wrapper so future tokens from https://zerok.cloud and https://llmos.showntell.dev can use the same surface contract."
                 ]
             )
         case .afmServices:

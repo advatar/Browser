@@ -984,6 +984,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: mcpInventory.summary
             ),
             RuntimeFeatureState(
+                feature: .a2uiRendering,
+                mode: .native,
+                isAvailable: true,
+                status: "A2UISwiftUI renderer"
+            ),
+            RuntimeFeatureState(
                 feature: .afmServices,
                 mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
                 isAvailable: afmSnapshot.allServicesAvailable,

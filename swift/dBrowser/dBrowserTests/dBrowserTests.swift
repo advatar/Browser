@@ -83,6 +83,48 @@ struct dBrowserTests {
         #expect(stdio?.environmentText == "API_KEY=set-me")
     }
 
+    @MainActor
+    @Test func a2uiRendererParsesSampleTokensIntoSurface() async {
+        let renderer = A2UITokenRenderer()
+
+        await renderer.render(rawTokens: A2UITokenRenderer.sampleTokens)
+
+        #expect(renderer.renderSummary.messageCount == 2)
+        #expect(renderer.renderSummary.rootComponentID == "root")
+        #expect(renderer.renderSummary.statusText.contains("2 A2UI messages"))
+        #expect(renderer.hasSurface)
+        #expect(renderer.errors.isEmpty)
+    }
+
+    @MainActor
+    @Test func a2uiRenderingIsTopLevelPanelAndRuntimeFeature() {
+        #expect(BrowserPanel.allCases.contains(.a2ui))
+        #expect(BrowserPanel.browserSidebarPanels.contains(.a2ui))
+
+        let bridge = MobileRuntimeBridge()
+        let state = bridge.featureStates.first { $0.feature == .a2uiRendering }
+        let explanation = MobileRuntimeFeature.a2uiRendering.explanation
+        let searchableText = (
+            [
+                MobileRuntimeFeature.a2uiRendering.title,
+                MobileRuntimeFeature.a2uiRendering.status,
+                explanation.overview,
+                explanation.bridgeBehavior
+            ] + explanation.detailPoints
+        ).joined(separator: " ")
+
+        #expect(state?.mode == .native)
+        #expect(state?.isAvailable == true)
+        #expect(state?.status.contains("A2UISwiftUI") == true)
+        #expect(searchableText.contains("A2UIStreamParser"))
+        #expect(searchableText.contains("SurfaceViewModel"))
+        #expect(searchableText.contains("A2UISurfaceView"))
+        #expect(searchableText.contains("A2UISwiftCore"))
+        #expect(searchableText.contains("A2UISwiftUI"))
+        #expect(searchableText.contains("https://zerok.cloud"))
+        #expect(searchableText.contains("https://llmos.showntell.dev"))
+    }
+
     @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {
         let feature = MobileRuntimeFeature.architectureOverview
         let explanation = feature.explanation
@@ -5025,7 +5067,7 @@ struct dBrowserTests {
         #expect(BrowserPanel.wallet.title == "Wallet")
         #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
         #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
-        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .copilot, .runtime])
+        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .runtime])
     }
 
     @MainActor

@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		451F78EAD7736A2F932730E3 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 41336243A89F768EDC117F21 /* A2UISwiftUI */; };
 		74537CA1039C7B731A4AB345 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 0234635C5599E4E9FA57EED8 /* MLXLMCommon */; };
+		7E8832D3B799843B11CB0EA5 /* A2UISwiftCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6BF49234D51B56FBEA51A64C /* A2UISwiftCore */; };
 		8BD15F1A81BC1DC587186A6D /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = F4C8BDD7D068B495E7B2B951 /* MLXLMCommon */; };
 		D3590F01C04BCD8D9A9AF658 /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0A9E53321FCDF3C9F0CC8530 /* MLXVLM */; };
 /* End PBXBuildFile section */
@@ -71,7 +73,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				451F78EAD7736A2F932730E3 /* A2UISwiftUI in Frameworks */,
 				D3590F01C04BCD8D9A9AF658 /* MLXVLM in Frameworks */,
+				7E8832D3B799843B11CB0EA5 /* A2UISwiftCore in Frameworks */,
 				8BD15F1A81BC1DC587186A6D /* MLXLMCommon in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -134,6 +138,8 @@
 			);
 			name = dBrowser;
 			packageProductDependencies = (
+				6BF49234D51B56FBEA51A64C /* A2UISwiftCore */,
+				41336243A89F768EDC117F21 /* A2UISwiftUI */,
 				0A9E53321FCDF3C9F0CC8530 /* MLXVLM */,
 				F4C8BDD7D068B495E7B2B951 /* MLXLMCommon */,
 			);
@@ -221,6 +227,7 @@
 			mainGroup = 0C135A742FB7C4D4002F9C73;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */,
 				B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -651,6 +658,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/BBC6BAE9/a2ui-swift";
+			requirement = {
+				kind = revision;
+				revision = c98cdcc5a29cfa2689ec4704ee7f6a8476286bdd;
+			};
+		};
 		B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ml-explore/mlx-swift-lm";
@@ -671,6 +686,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXVLM;
+		};
+		41336243A89F768EDC117F21 /* A2UISwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */;
+			productName = A2UISwiftUI;
+		};
+		6BF49234D51B56FBEA51A64C /* A2UISwiftCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */;
+			productName = A2UISwiftCore;
 		};
 		F4C8BDD7D068B495E7B2B951 /* MLXLMCommon */ = {
 			isa = XCSwiftPackageProductDependency;
