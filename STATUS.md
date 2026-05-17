@@ -17,9 +17,16 @@
 - `ipfs://` and `ipns://` navigation now resolves through the embedded browser node instead of rewriting through a public gateway.
 - Production hardening changes are implemented and validated with `cargo test -p gui`, `npm --prefix orbit-shell-ui run test`, and `npm --prefix orbit-shell-ui run build`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
-- Remaining open parent issues #59-#66 are labeled `question` and blocked on production verifier/trust-root decisions, not on an unimplemented Swift foundation slice.
+- All GitHub issues are closed as of May 17, 2026 after closing completed Swift chain-trust parent issues #59-#66.
 
 ## Active Task
+
+## Swift Chain Trust Parent Issue Closure
+
+- [x] Confirm open GitHub issues #59-#66 are the remaining chain-trust parent issues.
+- [x] Verify the completed Swift chain-trust implementation still passes locally.
+- [x] Close completed parent issues #59-#66 with implementation and verification notes.
+- [x] Commit and push only scoped status updates.
 
 ## A2UI Imageboard Demo App
 
