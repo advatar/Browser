@@ -28,8 +28,8 @@
 - [x] Update landing page copy/sections for A2UI app store apps, DOM traversal, wallet/explorer, and crypto chain-trust work.
 - [x] Keep claims accurate around approval gates, local policy receipts, and production verifier limitations.
 - [x] Verify the web build locally.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #110.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #110.
 
 ## A2UI Agent App Store UI
 
