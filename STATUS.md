@@ -22,6 +22,16 @@
 
 ## Active Task
 
+## Web A2UI Logos Aztec Deployment Copy
+
+- [x] Inspect existing website A2UI/App Store messaging and current Swift catalog support.
+- [x] Add specific website copy for Swift A2UI App Store install/open/preview behavior.
+- [x] Explain Logos Basecamp deployment support for A2UI apps.
+- [x] Explain Aztec deployment support for A2UI apps.
+- [x] Add or update focused web tests for the new website claims.
+- [x] Verify the web content test and production build locally; lint remains blocked by existing UI/tailwind lint errors.
+- [x] Commit and push only scoped files.
+
 ## Swift A2UI App Store
 
 - [x] Inspect the current Swift A2UI debug panel and existing app catalog references.
