@@ -22,6 +22,16 @@
 
 ## Active Task
 
+## Swift A2UI App Store
+
+- [x] Inspect the current Swift A2UI debug panel and existing app catalog references.
+- [x] Add an A2UI app catalog model with install state.
+- [x] Surface an App Store section above the token debug renderer.
+- [x] Add install/open behavior that renders each app's A2UI preview.
+- [x] Add focused unit tests for catalog metadata and install state.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Swift A2UI Aztec Protocol
 
 - [x] Inspect Aztec docs, network page, AI tooling, PXE, and monorepo for current protocol wording.

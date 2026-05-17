@@ -395,9 +395,10 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
             )
         case .a2uiRendering:
             RuntimeFeatureExplanation(
-                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer, while letting app authors choose a runtime or protocol profile such as Logos Basecamp or Aztec Network.",
-                bridgeBehavior: "The A2UI panel feeds raw LLM or gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, renders the result through A2UISurfaceView, and keeps the selected runtime profile available for action routing.",
+                overview: "Offers an A2UI App Store for installing A2UI-powered apps, then renders each app's A2UI v0.9 token stream as native SwiftUI widgets through the imported a2ui-swift renderer.",
+                bridgeBehavior: "The A2UI panel keeps app catalog, install, open, and runtime selection state in Swift, feeds installed app tokens or raw LLM/gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, renders the result through A2UISurfaceView, and keeps the selected runtime profile available for action routing.",
                 detailPoints: [
+                    "The App Store catalog exposes installable A2UI apps with categories, runtime profile IDs, required capabilities, install notes, sample prompts, and preview token streams.",
                     "The app links A2UISwiftCore for token parsing, schema decoding, and surface state.",
                     "The app links A2UISwiftUI for the native widget catalog including text, cards, rows, columns, text fields, and buttons.",
                     "Resolved button actions are logged locally today and can be routed through the same approval boundaries used by Copilot, wallet, MCP, ZeroK, and LLM Gateway flows.",

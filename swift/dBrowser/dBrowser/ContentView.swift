@@ -1181,11 +1181,13 @@ private struct MCPServersPanelView: View {
 }
 
 private struct A2UITokenPanelView: View {
+    @StateObject private var appStore = A2UIAppStore()
     @StateObject private var renderer = A2UITokenRenderer()
-    @State private var tokenText = A2UITokenRenderer.sampleTokens
+    @State private var tokenText = A2UIAppStoreListing.travelBooker.tokenStream
     @State private var isRendering = false
     @State private var didRenderInitialSample = false
-    @State private var selectedRuntimeID = A2UIRuntimeProfile.logosBasecamp.id
+    @State private var selectedStoreAppID = A2UIAppStoreListing.featured.first?.id ?? ""
+    @State private var selectedRuntimeID = A2UIAppStoreListing.travelBooker.runtimeProfileID
 
     private var statusColor: Color {
         if !renderer.errors.isEmpty {
@@ -1198,20 +1200,34 @@ private struct A2UITokenPanelView: View {
         A2UIRuntimeProfile.available.first { $0.id == selectedRuntimeID } ?? .logosBasecamp
     }
 
+    private var selectedStoreApp: A2UIAppStoreListing {
+        appStore.listings.first { $0.id == selectedStoreAppID } ?? appStore.listings.first ?? .travelBooker
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 PanelHeaderView(
-                    title: "A2UI Tokens",
+                    title: "A2UI App Store",
                     systemImage: BrowserPanel.a2ui.systemImage,
-                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets or target protocol profiles like Logos Basecamp and Aztec."
+                    subtitle: "Install A2UI-powered apps, bind them to a runtime profile, and inspect token streams when needed."
                 )
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
-                    A2UIMetricTile(title: "Library", value: "a2ui-swift 0.2.8", systemImage: "shippingbox")
-                    A2UIMetricTile(title: "Parser", value: "\(renderer.renderSummary.messageCount) messages", systemImage: "curlybraces")
+                    A2UIMetricTile(title: "Apps", value: "\(appStore.listings.count) listed", systemImage: "square.grid.3x3")
+                    A2UIMetricTile(title: "Installed", value: "\(appStore.installedCount)", systemImage: "checkmark.seal")
+                    A2UIMetricTile(title: "Runtime", value: selectedRuntime.title, systemImage: "shippingbox")
                     A2UIMetricTile(title: "Surface", value: renderer.hasSurface ? "Rendered" : "Empty", systemImage: renderer.hasSurface ? "checkmark.circle" : "circle")
                 }
+
+                A2UIAppStoreSectionView(
+                    appStore: appStore,
+                    selectedAppID: $selectedStoreAppID,
+                    onInstall: installStoreApp,
+                    onOpen: openStoreApp,
+                    onPreview: loadStoreAppPreview,
+                    onUninstall: uninstallStoreApp
+                )
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Runtime")
@@ -1254,8 +1270,11 @@ private struct A2UITokenPanelView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Token stream")
+                    Text("Developer token stream")
                         .font(.headline)
+                    Text("Loaded from \(selectedStoreApp.title) or the sample stream. Edit the stream to inspect how A2UI output becomes native widgets.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     TextEditor(text: $tokenText)
                         .font(.system(.caption, design: .monospaced))
                         .frame(minHeight: 220)
@@ -1298,7 +1317,7 @@ private struct A2UITokenPanelView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Rendered widgets")
+                    Text("App preview")
                         .font(.headline)
                     A2UITokenSurfacePreview(renderer: renderer)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1349,6 +1368,210 @@ private struct A2UITokenPanelView: View {
         isRendering = true
         await renderer.render(rawTokens: tokenText)
         isRendering = false
+    }
+
+    private func installStoreApp(_ listing: A2UIAppStoreListing) {
+        selectedStoreAppID = listing.id
+        appStore.install(listing)
+    }
+
+    private func openStoreApp(_ listing: A2UIAppStoreListing) {
+        appStore.open(listing)
+        loadStoreAppPreview(listing)
+    }
+
+    private func loadStoreAppPreview(_ listing: A2UIAppStoreListing) {
+        selectedStoreAppID = listing.id
+        selectedRuntimeID = listing.runtimeProfileID
+        tokenText = listing.tokenStream
+        Task { await renderTokens() }
+    }
+
+    private func uninstallStoreApp(_ listing: A2UIAppStoreListing) {
+        appStore.uninstall(listing)
+    }
+}
+
+private struct A2UIAppStoreSectionView: View {
+    @ObservedObject var appStore: A2UIAppStore
+    @Binding var selectedAppID: String
+    let onInstall: (A2UIAppStoreListing) -> Void
+    let onOpen: (A2UIAppStoreListing) -> Void
+    let onPreview: (A2UIAppStoreListing) -> Void
+    let onUninstall: (A2UIAppStoreListing) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("App Store")
+                    .font(.headline)
+                Spacer()
+                Label("\(appStore.installedCount) installed", systemImage: "checkmark.seal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], alignment: .leading, spacing: 12) {
+                ForEach(appStore.listings) { listing in
+                    A2UIAppStoreCardView(
+                        listing: listing,
+                        state: appStore.state(for: listing),
+                        isSelected: selectedAppID == listing.id,
+                        onSelect: { selectedAppID = listing.id },
+                        onInstall: { onInstall(listing) },
+                        onOpen: { onOpen(listing) },
+                        onPreview: { onPreview(listing) },
+                        onUninstall: { onUninstall(listing) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct A2UIAppStoreCardView: View {
+    let listing: A2UIAppStoreListing
+    let state: A2UIAppInstallState
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onInstall: () -> Void
+    let onOpen: () -> Void
+    let onPreview: () -> Void
+    let onUninstall: () -> Void
+
+    private var borderColor: Color {
+        isSelected ? Color.accentColor : Color.secondary.opacity(0.2)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: listing.systemImage)
+                    .frame(width: 30, height: 30)
+                    .foregroundStyle(Color.accentColor)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(listing.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(listing.category)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                Spacer(minLength: 0)
+
+                A2UIInstallStateBadge(state: state)
+            }
+
+            Text(listing.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Label(listing.runtimeProfile.title, systemImage: "cpu")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], alignment: .leading, spacing: 6) {
+                ForEach(listing.requiredCapabilities.prefix(4), id: \.self) { capability in
+                    A2UIAppCapabilityPill(title: capability)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(listing.installNotes, id: \.self) { note in
+                    Label(note, systemImage: "checkmark.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Text(listing.samplePrompt)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 8)], alignment: .leading, spacing: 8) {
+                if state.isInstalled {
+                    Button(action: onOpen) {
+                        Label(state.title == "Running" ? "Running" : "Open", systemImage: state.systemImage)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(action: onPreview) {
+                        Label("Preview", systemImage: "rectangle.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button(action: onUninstall) {
+                        Label("Remove", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button(action: onInstall) {
+                        Label("Install", systemImage: state.systemImage)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button(action: onPreview) {
+                        Label("Preview", systemImage: "rectangle.on.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isSelected ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(borderColor, lineWidth: isSelected ? 1.5 : 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onTapGesture(perform: onSelect)
+        .accessibilityIdentifier("a2ui-store-app-\(listing.id)")
+    }
+}
+
+private struct A2UIInstallStateBadge: View {
+    let state: A2UIAppInstallState
+
+    var body: some View {
+        Label(state.title, systemImage: state.systemImage)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct A2UIAppCapabilityPill: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

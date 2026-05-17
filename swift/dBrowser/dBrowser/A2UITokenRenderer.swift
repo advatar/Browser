@@ -240,6 +240,229 @@ struct A2UIRuntimeProfile: Identifiable, Equatable {
     ]
 }
 
+enum A2UIAppInstallState: Equatable {
+    case available
+    case installed(Date)
+    case running(Date)
+
+    var title: String {
+        switch self {
+        case .available:
+            return "Available"
+        case .installed:
+            return "Installed"
+        case .running:
+            return "Running"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .available:
+            return "arrow.down.circle"
+        case .installed:
+            return "checkmark.seal"
+        case .running:
+            return "play.circle.fill"
+        }
+    }
+
+    var isInstalled: Bool {
+        switch self {
+        case .available:
+            return false
+        case .installed, .running:
+            return true
+        }
+    }
+}
+
+struct A2UIAppStoreListing: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let category: String
+    let summary: String
+    let systemImage: String
+    let runtimeProfileID: String
+    let requiredCapabilities: [String]
+    let installNotes: [String]
+    let samplePrompt: String
+    let tokenStream: String
+
+    var runtimeProfile: A2UIRuntimeProfile {
+        A2UIRuntimeProfile.available.first { $0.id == runtimeProfileID } ?? .nativeSwiftUI
+    }
+
+    static let travelBooker = A2UIAppStoreListing(
+        id: "travel-booker",
+        title: "Travel Booker",
+        category: "Travel",
+        summary: "Compares flights, stays, and policy pages with A2UI itinerary cards before any booking step.",
+        systemImage: "airplane.departure",
+        runtimeProfileID: A2UIRuntimeProfile.logosBasecamp.id,
+        requiredCapabilities: ["A2UI v0.9", "DOM traversal", "Wallet approval", "LLM Gateway"],
+        installNotes: [
+            "Installs a reusable travel agent profile with booking approval gates.",
+            "Uses https://llmos.showntell.dev for model routing when online."
+        ],
+        samplePrompt: "Find a refundable Stockholm to Lisbon weekend trip with one cabin bag.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"travel-booker-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#0F766E"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"travel-booker-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"Travel Booker","variant":"h3"},{"id":"summary","component":"Text","text":"Compare flights, stays, total price, cancellation terms, timing risk, and source URLs before booking.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Logos Basecamp with A2UI v0.9 and DOM traversal.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Trip request","value":"Find a refundable Stockholm to Lisbon weekend trip with one cabin bag.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: personal data, checkout, wallet spend, booking confirmation.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"travel-booker","runtime":"logos-basecamp","gateway":"https://llmos.showntell.dev"}}}},{"id":"buttonLabel","component":"Text","text":"Run Travel Booker","variant":"body"}]}}
+        """
+    )
+
+    static let disruptionRebooker = A2UIAppStoreListing(
+        id: "travel-disruption-rebooker",
+        title: "Disruption Rebooker",
+        category: "Travel",
+        summary: "Builds recovery options for cancellations, delays, missed connections, refunds, and overnight stays.",
+        systemImage: "exclamationmark.triangle",
+        runtimeProfileID: A2UIRuntimeProfile.logosBasecamp.id,
+        requiredCapabilities: ["A2UI v0.9", "DOM evidence", "Policy checks", "Approval gates"],
+        installNotes: [
+            "Keeps rebooking, claim submission, and payment actions approval gated.",
+            "Pairs browser evidence with local-first recovery notes."
+        ],
+        samplePrompt: "My evening flight was canceled. Find same-day or next-morning recovery options.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"travel-disruption-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#B45309"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"travel-disruption-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"Disruption Rebooker","variant":"h3"},{"id":"summary","component":"Text","text":"Ranks fastest, cheapest, and lowest-risk recovery paths with refund and overnight-policy notes.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Logos Basecamp for local recovery state and decentralized messaging handoff.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Disruption request","value":"My evening flight was canceled. Find same-day or next-morning recovery options.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: change booking, submit claim, enter personal data, pay difference.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"travel-disruption-rebooker","runtime":"logos-basecamp"}}}},{"id":"buttonLabel","component":"Text","text":"Open Recovery Console","variant":"body"}]}}
+        """
+    )
+
+    static let formConcierge = A2UIAppStoreListing(
+        id: "form-filling-concierge",
+        title: "Form-Filling Concierge",
+        category: "Productivity",
+        summary: "Inspects complex forms, maps missing information, and drafts safe submissions without pressing submit.",
+        systemImage: "doc.text.magnifyingglass",
+        runtimeProfileID: A2UIRuntimeProfile.nativeSwiftUI.id,
+        requiredCapabilities: ["A2UI v0.9", "DOM traversal", "Sensitive data gates", "Native widgets"],
+        installNotes: [
+            "Runs well as a native SwiftUI A2UI app because the primary surface is checklist and draft state.",
+            "Stops before uploads, sends, or form submission."
+        ],
+        samplePrompt: "Inspect the current form and list required fields, missing values, and validation risks.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"form-concierge-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#7C3AED"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"form-concierge-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"Form-Filling Concierge","variant":"h3"},{"id":"summary","component":"Text","text":"Turns form DOM into a required-field checklist, safe draft plan, provenance, and explicit approval gates.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Native SwiftUI A2UI widgets with local action logging.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Form request","value":"Inspect the current form and list required fields, missing values, and validation risks.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: sensitive data entry, uploads, submit, send, wallet spend.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"form-filling-concierge","runtime":"native-swiftui"}}}},{"id":"buttonLabel","component":"Text","text":"Open Form Checklist","variant":"body"}]}}
+        """
+    )
+
+    static let walletPolicy = A2UIAppStoreListing(
+        id: "wallet-policy-concierge",
+        title: "Wallet Policy Concierge",
+        category: "Wallet",
+        summary: "Explains requested wallet permissions, simulates transaction intent, and routes private proof work through ZeroK.",
+        systemImage: "wallet.pass",
+        runtimeProfileID: A2UIRuntimeProfile.aztecNetwork.id,
+        requiredCapabilities: ["A2UI v0.9", "Wallet", "ZeroK", "Aztec PXE"],
+        installNotes: [
+            "Treats wallet reads, signing, broadcasting, and proof requests as first-class approval surfaces.",
+            "Uses https://zerok.cloud as the zero knowledge gateway."
+        ],
+        samplePrompt: "Explain this wallet request and show what proof or signature is needed before I approve.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"wallet-policy-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#2563EB"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"wallet-policy-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"Wallet Policy Concierge","variant":"h3"},{"id":"summary","component":"Text","text":"Reviews account reads, transaction simulation, signing scope, broadcast risk, and proof-backed settlement.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Aztec PXE profile with ZeroK gateway routing.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Wallet request","value":"Explain this wallet request and show what proof or signature is needed before I approve.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: account read, proof generation, signature, broadcast, settlement.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"wallet-policy-concierge","runtime":"aztec-network","gateway":"https://zerok.cloud"}}}},{"id":"buttonLabel","component":"Text","text":"Review Wallet Request","variant":"body"}]}}
+        """
+    )
+
+    static let dwebPublisher = A2UIAppStoreListing(
+        id: "dweb-publisher",
+        title: "DWeb Publisher",
+        category: "Decentralized Web",
+        summary: "Packages notes or app output for IPFS publishing with local-first storage and verifiable gateway links.",
+        systemImage: "network",
+        runtimeProfileID: A2UIRuntimeProfile.logosBasecamp.id,
+        requiredCapabilities: ["A2UI v0.9", "IPFS", "Logos Storage", "ZeroK receipts"],
+        installNotes: [
+            "Highlights IPFS/IPNS starting points and content-addressed publish plans.",
+            "Designed to bridge Logos storage, AF Market receipts, and ZeroK verification."
+        ],
+        samplePrompt: "Prepare a short research note for IPFS with provenance, hash checklist, and publish approval.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"dweb-publisher-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#047857"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"dweb-publisher-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"DWeb Publisher","variant":"h3"},{"id":"summary","component":"Text","text":"Creates a publish checklist for IPFS/IPNS, provenance, content hashes, gateway checks, and rollback notes.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Logos Basecamp storage plus dBrowser IPFS link handling.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Publish request","value":"Prepare a short research note for IPFS with provenance, hash checklist, and publish approval.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: publish, pin, update IPNS, attach wallet receipt.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"dweb-publisher","runtime":"logos-basecamp","protocol":"ipfs"}}}},{"id":"buttonLabel","component":"Text","text":"Open Publish Flow","variant":"body"}]}}
+        """
+    )
+
+    static let imageboardAgent = A2UIAppStoreListing(
+        id: "imageboard-agent",
+        title: "Imageboard Agent",
+        category: "Social",
+        summary: "Creates board, thread, image attachment, comment, preview, and moderation-aware A2UI surfaces.",
+        systemImage: "photo.on.rectangle",
+        runtimeProfileID: A2UIRuntimeProfile.nativeSwiftUI.id,
+        requiredCapabilities: ["A2UI v0.9", "Image metadata", "Thread composer", "Moderation gates"],
+        installNotes: [
+            "Installs the imageboard demo app already modeled in the desktop A2UI catalog.",
+            "Keeps upload, publish, delete, moderate, and wallet-spend actions gated."
+        ],
+        samplePrompt: "Create a photography imageboard with starter threads and an image upload metadata checklist.",
+        tokenStream: """
+        {"version":"v0.9","createSurface":{"surfaceId":"imageboard-agent-store","catalogId":"https://a2ui.org/specification/v0_9/basic_catalog.json","sendDataModel":false,"theme":{"primaryColor":"#DC2626"}}}
+        {"version":"v0.9","updateComponents":{"surfaceId":"imageboard-agent-store","components":[{"id":"root","component":"Card","child":"body"},{"id":"body","component":"Column","children":["title","summary","runtime","prompt","gate","button"]},{"id":"title","component":"Text","text":"Imageboard Agent","variant":"h3"},{"id":"summary","component":"Text","text":"Builds board lists, thread cards, comment drafts, image metadata, preview state, and moderation notices.","variant":"body"},{"id":"runtime","component":"Text","text":"Runtime: Native SwiftUI A2UI with media approval boundaries.","variant":"caption"},{"id":"prompt","component":"TextField","label":"Board request","value":"Create a photography imageboard with starter threads and an image upload metadata checklist.","variant":"longText"},{"id":"gate","component":"Text","text":"Approval gates: upload image, publish thread, publish comment, moderate, spend wallet funds.","variant":"caption"},{"id":"button","component":"Button","child":"buttonLabel","variant":"primary","action":{"event":{"name":"a2ui.app.open","context":{"appID":"imageboard-agent","runtime":"native-swiftui"}}}},{"id":"buttonLabel","component":"Text","text":"Open Board Builder","variant":"body"}]}}
+        """
+    )
+
+    static let featured = [
+        travelBooker,
+        disruptionRebooker,
+        formConcierge,
+        walletPolicy,
+        dwebPublisher,
+        imageboardAgent
+    ]
+}
+
+@MainActor
+final class A2UIAppStore: ObservableObject {
+    @Published private(set) var listings: [A2UIAppStoreListing]
+    @Published private(set) var installedApps: [String: A2UIAppInstallState]
+
+    init(
+        listings: [A2UIAppStoreListing] = A2UIAppStoreListing.featured,
+        installedApps: [String: A2UIAppInstallState] = [:]
+    ) {
+        self.listings = listings
+        self.installedApps = installedApps
+    }
+
+    var installedCount: Int {
+        installedApps.values.filter(\.isInstalled).count
+    }
+
+    var runningListingID: String? {
+        installedApps.first { _, state in
+            if case .running = state {
+                return true
+            }
+            return false
+        }?.key
+    }
+
+    func state(for listing: A2UIAppStoreListing) -> A2UIAppInstallState {
+        installedApps[listing.id] ?? .available
+    }
+
+    func install(_ listing: A2UIAppStoreListing, installedAt: Date = Date()) {
+        installedApps[listing.id] = .installed(installedAt)
+    }
+
+    func open(_ listing: A2UIAppStoreListing, openedAt: Date = Date()) {
+        if !state(for: listing).isInstalled {
+            install(listing, installedAt: openedAt)
+        }
+        installedApps[listing.id] = .running(openedAt)
+    }
+
+    func uninstall(_ listing: A2UIAppStoreListing) {
+        installedApps.removeValue(forKey: listing.id)
+    }
+}
+
 @MainActor
 final class A2UITokenRenderer: ObservableObject {
     @Published private(set) var surfaceViewModel = SurfaceViewModel(catalog: basicCatalog)

@@ -96,6 +96,91 @@ struct dBrowserTests {
         #expect(renderer.errors.isEmpty)
     }
 
+    @Test func a2uiAppStoreCatalogOffersInstallableApps() {
+        let catalog = A2UIAppStoreListing.featured
+        let catalogText = catalog.flatMap { listing in
+            [
+                listing.id,
+                listing.title,
+                listing.category,
+                listing.summary,
+                listing.runtimeProfileID,
+                listing.samplePrompt,
+                listing.tokenStream
+            ] + listing.requiredCapabilities + listing.installNotes
+        }.joined(separator: " ")
+
+        #expect(catalog.count >= 6)
+        #expect(Set(catalog.map(\.id)).count == catalog.count)
+        #expect(catalog.contains { $0.id == "travel-booker" })
+        #expect(catalog.contains { $0.id == "imageboard-agent" })
+        #expect(catalog.contains { $0.id == "wallet-policy-concierge" })
+        #expect(Set(catalog.map(\.runtimeProfileID)).contains(A2UIRuntimeProfile.nativeSwiftUI.id))
+        #expect(Set(catalog.map(\.runtimeProfileID)).contains(A2UIRuntimeProfile.logosBasecamp.id))
+        #expect(Set(catalog.map(\.runtimeProfileID)).contains(A2UIRuntimeProfile.aztecNetwork.id))
+        #expect(catalogText.contains("A2UI v0.9"))
+        #expect(catalogText.contains("ZeroK"))
+        #expect(catalogText.contains("https://zerok.cloud"))
+        #expect(catalogText.contains("https://llmos.showntell.dev"))
+        #expect(catalogText.contains("IPFS"))
+        #expect(catalogText.contains("Wallet"))
+
+        for listing in catalog {
+            #expect(!listing.title.isEmpty)
+            #expect(!listing.category.isEmpty)
+            #expect(!listing.summary.isEmpty)
+            #expect(!listing.requiredCapabilities.isEmpty)
+            #expect(!listing.installNotes.isEmpty)
+            #expect(!listing.samplePrompt.isEmpty)
+            #expect(listing.tokenStream.contains("\"createSurface\""))
+            #expect(listing.tokenStream.contains("\"updateComponents\""))
+            #expect(listing.tokenStream.contains(listing.id))
+            #expect(A2UIRuntimeProfile.available.contains { $0.id == listing.runtimeProfileID })
+        }
+    }
+
+    @MainActor
+    @Test func a2uiAppStoreInstallOpenAndUninstallStateTransitions() {
+        let installDate = Date(timeIntervalSince1970: 10)
+        let openDate = Date(timeIntervalSince1970: 20)
+        let store = A2UIAppStore()
+        let listing = A2UIAppStoreListing.walletPolicy
+
+        #expect(store.state(for: listing) == .available)
+        #expect(store.installedCount == 0)
+
+        store.install(listing, installedAt: installDate)
+
+        #expect(store.state(for: listing) == .installed(installDate))
+        #expect(store.installedCount == 1)
+
+        store.open(listing, openedAt: openDate)
+
+        #expect(store.state(for: listing) == .running(openDate))
+        #expect(store.runningListingID == listing.id)
+        #expect(store.installedCount == 1)
+
+        store.uninstall(listing)
+
+        #expect(store.state(for: listing) == .available)
+        #expect(store.runningListingID == nil)
+        #expect(store.installedCount == 0)
+    }
+
+    @MainActor
+    @Test func a2uiStoreListingsRenderA2UITokenPreviews() async {
+        let renderer = A2UITokenRenderer()
+
+        for listing in A2UIAppStoreListing.featured {
+            await renderer.render(rawTokens: listing.tokenStream)
+
+            #expect(renderer.renderSummary.messageCount == 2)
+            #expect(renderer.renderSummary.rootComponentID == "root")
+            #expect(renderer.hasSurface)
+            #expect(renderer.errors.isEmpty)
+        }
+    }
+
     @Test func a2uiRuntimeProfilesOfferLogosBasecamp() {
         let logos = A2UIRuntimeProfile.logosBasecamp
         let searchableText = (
@@ -208,6 +293,7 @@ struct dBrowserTests {
         #expect(searchableText.contains("A2UISurfaceView"))
         #expect(searchableText.contains("A2UISwiftCore"))
         #expect(searchableText.contains("A2UISwiftUI"))
+        #expect(searchableText.contains("A2UI App Store"))
         #expect(searchableText.contains("Logos Basecamp"))
         #expect(searchableText.contains("Aztec Network"))
         #expect(searchableText.contains("https://zerok.cloud"))
