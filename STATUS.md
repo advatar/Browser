@@ -24,10 +24,10 @@
 ## Web Landing Page Refresh
 
 - [x] Create tracker issue for web landing page refresh (#110).
-- [ ] Inspect current `web` landing page structure and existing messaging.
-- [ ] Update landing page copy/sections for A2UI app store apps, DOM traversal, wallet/explorer, and crypto chain-trust work.
-- [ ] Keep claims accurate around approval gates, local policy receipts, and production verifier limitations.
-- [ ] Verify the web build locally.
+- [x] Inspect current `web` landing page structure and existing messaging.
+- [x] Update landing page copy/sections for A2UI app store apps, DOM traversal, wallet/explorer, and crypto chain-trust work.
+- [x] Keep claims accurate around approval gates, local policy receipts, and production verifier limitations.
+- [x] Verify the web build locally.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #110.
 
