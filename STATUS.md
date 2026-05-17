@@ -21,6 +21,18 @@
 
 ## Active Task
 
+## AFMarket A2A Expert Training
+
+- [x] Create tracker issue for AFMarket A2A expert marketplace and embedded expert training (#113).
+- [ ] Inspect Swift AFMarket service, router, registry, node, Copilot, and panel surfaces.
+- [ ] Add typed Swift models for peer AFM experts, A2A calls, embedded training jobs, fine-tune policy, and publish readiness.
+- [ ] Extend runtime bridge/view model with local training job creation and A2A peer expert call previews/results.
+- [ ] Surface AFMarket peer experts and embedded training jobs in the Swift AFM services panel.
+- [ ] Add focused Swift tests for contracts, lifecycle, and safe fallback labeling.
+- [ ] Verify the Swift test lane locally.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issue #113.
+
 ## Swift Chain Trust Parent Issue Closure
 
 - [x] Confirm open GitHub issues #59-#66 are the remaining chain-trust parent issues.
