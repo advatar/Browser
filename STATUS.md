@@ -28,8 +28,8 @@
 - [x] Add an Imageboard A2UI app with boards, threads, image upload metadata, comments, and safe posting instructions.
 - [x] Add focused registry tests for imageboard metadata, approval gates, and rendered task instructions.
 - [x] Verify relevant Rust/frontend tests locally.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #112.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #112.
 
 ## Swift Wallet Capability Contracts
 
