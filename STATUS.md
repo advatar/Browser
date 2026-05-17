@@ -12,13 +12,28 @@
 
 - dBrowser is now a native Swift app under `swift/dBrowser`.
 - `docs/ARCHITECTURE.md` is the canonical current architecture and implementation plan.
-- Deprecated Rust/Tauri planning, validation, review, and roadmap documents are being moved to `archive/deprecated-documents/`.
+- Deprecated Rust/Tauri planning, validation, review, and roadmap documents have been moved to `archive/deprecated-documents/`.
 - Current validation uses the Swift/Xcode build and focused Swift test lane documented in `README.md`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
 - All GitHub issues are closed as of May 17, 2026 after closing completed Swift chain-trust parent issues #59-#66.
 - AFMarket A2A peer expert and embedded training surfaces are implemented in Swift, tested locally, pushed, and #113 is closed.
 
 ## Active Task
+
+## External LLM Context Efficiency Plan
+
+- [x] Inspect `../Prune` context engine docs, Swift language-pack notes, MCP/CLI surfaces, and packing strategy features.
+- [x] Inspect `/Users/johansellstrom/dev/advatar/SwiftLM` README, package products, control-plane client, local API, and model/runtime contracts.
+- [x] Create a GitHub issue with detailed integration plans for Prune and SwiftLM to reduce external LLM usage (#115).
+- [x] Capture the recommended app boundary for context packing, local runtime routing, model switching, and provider exposure labels.
+- [x] Verify the status-only change locally.
+- [x] Commit and push only the scoped status update.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
 
 ## Deprecated Documentation Cleanup
 
