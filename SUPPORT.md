@@ -8,4 +8,4 @@ If you need help or want to get involved, here are the main channels:
   - Ask questions, propose ideas, and share tips.
 - Security: See the Security section in `README.md` or email security@yourdomain.com.
 
-Before opening an issue, please check the [Troubleshooting Guide](docs/TROUBLESHOOTING.md) and existing discussions.
+Before opening an issue, please check the current architecture and validation guidance in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and existing discussions.

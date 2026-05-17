@@ -16,40 +16,35 @@ Thank you for your interest in contributing! This document outlines how to set u
    ```bash
    git checkout -b feat/short-description
    ```
-2. Set up the development environment (see `docs/DEVELOPMENT.md`).
+2. Install Xcode and open the Swift project under `swift/dBrowser`.
 3. Run the project locally:
    ```bash
-   pnpm install
-   pnpm run dev
+   xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'
    ```
 4. Run tests and linters:
    ```bash
-   cargo test --workspace
-   pnpm run test
-   cargo fmt --check && cargo clippy -- -D warnings
-   pnpm run lint && pnpm run typecheck
+   xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests
    ```
 
 ## Project Structure
 
-- Rust workspace crates are in `crates/` (e.g. `blockchain/`, `p2p/`, `ipfs/`, `gui/`).
-- Frontend (Tauri + TS) lives in `crates/gui/`.
-- Docs are in `docs/`.
+- Current Swift app: `swift/dBrowser`.
+- Current architecture docs: `docs/`.
+- Historical Rust/Tauri reference material: `archive/deprecated-documents/` and legacy code under `crates/`.
 
-Refer to `docs/ARCHITECTURE.md` and `docs/DEVELOPMENT.md` for details.
+Refer to `docs/ARCHITECTURE.md` for details.
 
 ## Development Guidelines
 
-- Rust: follow `rustfmt` and fix `clippy` warnings.
-- TypeScript: keep ESLint clean; prefer explicit types.
+- Swift: follow the existing SwiftUI, model, and test patterns in `swift/dBrowser`.
 - Add or update unit/integration/e2e tests as appropriate.
 - Keep PRs atomic; include a clear description and rationale.
 
 ## Commit Style (Conventional Commits)
 
 Examples:
-- `feat(gui): add wallet connect dialog`
-- `fix(p2p): handle disconnections during discovery`
+- `feat(swift): add wallet connect dialog`
+- `fix(browser): handle decentralized URL fallback`
 - `docs: add troubleshooting guide`
 
 Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `build`, `ci`.
@@ -58,12 +53,12 @@ Common types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `build
 
 - [ ] Tests added/updated and passing
 - [ ] Docs updated (`README.md`, `docs/*` as needed)
-- [ ] Lint and typecheck pass
+- [ ] Swift build and focused tests pass
 - [ ] Linked issue (if applicable) and changelog entry (if maintained)
 
 ## Reporting Issues
 
-Use GitHub Issues and include reproduction steps, expected/actual behavior, and environment details (OS, Rust, Node, Tauri versions). See our issue templates for guidance.
+Use GitHub Issues and include reproduction steps, expected/actual behavior, and environment details such as OS, Xcode version, and target platform. See our issue templates for guidance.
 
 ## Security
 

@@ -4,6 +4,8 @@ dBrowser is now a native Swift browser and agent app. The current product lives 
 
 The old Rust/Tauri implementation remains useful as reference for behavior, contracts, fixtures, and tests, but it is not the current product architecture. Any capability that exists only in Rust must be recreated as a Swift package and integrated with the Swift app before it counts as supported.
 
+Deprecated Rust/Tauri planning and review documents have been moved to `archive/deprecated-documents/` and should not be used as active guidance.
+
 ## Current App
 
 - SwiftUI shell: `swift/dBrowser/dBrowser/ContentView.swift`

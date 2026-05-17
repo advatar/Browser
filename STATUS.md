@@ -10,17 +10,30 @@
 
 ## Current Status
 
-- Strawberry parity work is implemented and committed.
-- Automated validation is green across Rust, the runtime frontend, and the Playwright UI lane.
-- Remaining follow-up is manual smoke from `VALIDATE.md`.
-- The Tauri/Vite dev stack has been cold-restarted after clearing build artifacts, and the fresh dev binary is running.
-- `ipfs://` and `ipns://` navigation now resolves through the embedded browser node instead of rewriting through a public gateway.
-- Production hardening changes are implemented and validated with `cargo test -p gui`, `npm --prefix orbit-shell-ui run test`, and `npm --prefix orbit-shell-ui run build`.
+- dBrowser is now a native Swift app under `swift/dBrowser`.
+- `docs/ARCHITECTURE.md` is the canonical current architecture and implementation plan.
+- Deprecated Rust/Tauri planning, validation, review, and roadmap documents are being moved to `archive/deprecated-documents/`.
+- Current validation uses the Swift/Xcode build and focused Swift test lane documented in `README.md`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
 - All GitHub issues are closed as of May 17, 2026 after closing completed Swift chain-trust parent issues #59-#66.
 - AFMarket A2A peer expert and embedded training surfaces are implemented in Swift, tested locally, pushed, and #113 is closed.
 
 ## Active Task
+
+## Deprecated Documentation Cleanup
+
+- [x] Inventory root-level Markdown and narrative docs for current Swift relevance.
+- [x] Create a GitHub issue for archiving/removing deprecated Rust/Tauri documents (#114).
+- [x] Move deprecated Rust/Tauri documents into `archive/` and leave current Swift docs in place.
+- [x] Update current documentation references so they do not point at archived validation/plans as active guidance.
+- [x] Verify Markdown hygiene and the Swift/Xcode build locally.
+- [x] Commit and push only the scoped documentation cleanup.
+
+Validation notes:
+
+- `git diff --check` passed.
+- Live-doc reference scan found no active pointers to removed root validation/plans, aside from intentional historical status entries.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
 
 ## Universal Decentralized URI Resolution
 

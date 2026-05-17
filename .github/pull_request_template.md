@@ -19,8 +19,8 @@
 
 ## Checklist
 - [ ] Tests added/updated
-- [ ] Lint and typecheck pass (`pnpm run lint`, `pnpm run typecheck`)
-- [ ] Rust lints pass (`cargo fmt`, `cargo clippy -- -D warnings`)
+- [ ] Swift build passes (`xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'`)
+- [ ] Swift tests pass (`xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests`)
 - [ ] Docs updated (README/docs)
 - [ ] Linked issues and added a clear PR title (Conventional Commits)
 

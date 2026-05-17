@@ -415,7 +415,7 @@ P3: Distribution and hardening
 - Add signed/content-addressed updates if still needed.
 - Add diagnostics export.
 - Add UI tests around high-risk approval flows.
-- Remove or archive legacy Rust/Tauri code once Swift parity is complete.
+- Remove or archive legacy Rust/Tauri code once Swift parity is complete. Deprecated Rust/Tauri narrative documents live in `archive/deprecated-documents/`.
 
 ## Verification
 

@@ -1,6 +1,6 @@
 # Swift Strawberry Equivalence Plan
 
-This is the Swift-app version of `STRAWBERRY.md`. It targets the native app under `swift/dBrowser` instead of the Rust/Tauri runtime.
+This is the Swift-app version of `archive/deprecated-documents/STRAWBERRY.md`. It targets the native app under `swift/dBrowser` instead of the Rust/Tauri runtime.
 
 The Rust code remains useful reference material for behavior, contracts, fixtures, and tests. It is not a supported runtime path. Anything still implemented only in Rust must be recreated as Swift packages and wired into the Swift app.
 
