@@ -28,8 +28,8 @@
 - [x] Keep A2UI, DOM traversal, and approval-gate metadata visible on app cards.
 - [x] Add focused frontend tests for install, open, quick prompt, launch, and schedule behavior.
 - [x] Verify relevant frontend tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #109.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #109.
 
 ## A2UI Agent App Concepts
 
