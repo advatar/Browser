@@ -24,10 +24,10 @@
 ## A2UI Imageboard Demo App
 
 - [x] Create tracker issue for the imageboard demo app (#112).
-- [ ] Inspect agent app manifest, app-store metadata, and registry test surfaces.
-- [ ] Add an Imageboard A2UI app with boards, threads, image upload metadata, comments, and safe posting instructions.
-- [ ] Add focused registry tests for imageboard metadata, approval gates, and rendered task instructions.
-- [ ] Verify relevant Rust/frontend tests locally.
+- [x] Inspect agent app manifest, app-store metadata, and registry test surfaces.
+- [x] Add an Imageboard A2UI app with boards, threads, image upload metadata, comments, and safe posting instructions.
+- [x] Add focused registry tests for imageboard metadata, approval gates, and rendered task instructions.
+- [x] Verify relevant Rust/frontend tests locally.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #112.
 

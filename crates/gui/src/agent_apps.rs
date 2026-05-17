@@ -211,6 +211,47 @@ mod tests {
     }
 
     #[test]
+    fn default_manifest_includes_imageboard_demo_app() {
+        let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
+        let app = registry.find("imageboard-agent").expect("imageboard app");
+        let summary = app.summary();
+
+        assert_eq!(summary.name, "Imageboard Agent");
+        assert_eq!(summary.communication_surface.as_deref(), Some("a2ui-v0.9"));
+        assert!(summary.categories.iter().any(|category| category == "imageboard"));
+        assert!(summary.categories.iter().any(|category| category == "media"));
+        assert!(summary.required_tools.iter().any(|tool| tool == "a2ui.image_input"));
+        assert!(summary.required_tools.iter().any(|tool| tool == "a2ui.thread_composer"));
+        assert!(summary
+            .approval_gates
+            .iter()
+            .any(|gate| gate.contains("upload image")));
+        assert!(summary
+            .approval_gates
+            .iter()
+            .any(|gate| gate.contains("publish a comment")));
+        assert!(summary
+            .approval_gates
+            .iter()
+            .any(|gate| gate.contains("moderate")));
+        let blockchain_access = summary.blockchain_access.expect("blockchain access");
+        assert!(blockchain_access.read_chain_data);
+        assert!(blockchain_access.request_signing);
+        assert!(blockchain_access.request_broadcast);
+
+        let task = app.render_task(Some("Draft a thread for sunset photos with one image slot."));
+        assert!(task.contains("sunset photos"));
+        assert!(task.contains("A2UI v0.9"));
+        assert!(task.contains("boards"));
+        assert!(task.contains("thread"));
+        assert!(task.contains("image upload area"));
+        assert!(task.contains("comment"));
+        assert!(task.contains("moderation"));
+        assert!(task.contains("explicit user approval"));
+        assert!(task.contains("Never publish"));
+    }
+
+    #[test]
     fn travel_booker_rendered_task_preserves_dom_a2ui_and_approval_requirements() {
         let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
         let app = registry.find("travel-booker").expect("travel-booker app");

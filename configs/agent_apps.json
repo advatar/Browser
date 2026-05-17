@@ -247,6 +247,47 @@
       "noEgress": false
     },
     {
+      "id": "imageboard-agent",
+      "name": "Imageboard Agent",
+      "tagline": "Run board threads with image posts and comment drafts",
+      "description": "Creates an A2UI imageboard surface with boards, threads, image attachment slots, comments, post previews, and moderation-aware approval gates.",
+      "categories": ["social", "imageboard", "a2ui", "media"],
+      "heroColor": "#dc2626",
+      "communicationSurface": "a2ui-v0.9",
+      "requiredTools": ["browser.page_snapshot", "browser.dom_query", "a2ui.image_input", "a2ui.thread_composer"],
+      "approvalGates": [
+        "upload image attachments",
+        "publish a new thread",
+        "publish a comment or reply",
+        "delete or moderate posts",
+        "payment or wallet spend"
+      ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
+      "quickPrompts": [
+        "Create a board for retro game screenshots with three starter threads.",
+        "Draft a new thread with an image attachment slot and first comment.",
+        "Summarize the current thread and prepare a reply without publishing."
+      ],
+      "inputHint": "Describe board name, thread topic, image attachment, comment, and posting rules",
+      "defaultInput": "Create a photography imageboard with boards for street, landscape, and gear. Draft one starter thread with an image slot and moderation notes.",
+      "promptTemplate": "Imageboard request: {{input}}\n\nBuild an imageboard-style app surface through A2UI v0.9. Present boards, thread cards, post composer, image attachment slots, comment/reply editor, preview state, moderation notices, and safe publish actions. If the active page or an existing board matters, use browser.page_snapshot and browser.dom_query to inspect current content before summarizing or drafting replies.\n\nThe A2UI surface should include: board selector, thread list with image thumbnails when available, selected thread view, post metadata, comment tree, image upload area, alt-text field, content-warning field, draft preview, publish/cancel controls, moderation queue, and clear approval gates. Treat image upload, new-thread creation, comment publishing, deletion, moderation, wallet spend, or any external posting as actions that require explicit user approval.\n\nNever publish, upload, delete, moderate, spend wallet funds, or submit external content without explicit user approval. Reject requests to facilitate harassment, doxxing, illegal sexual content, threats, or non-consensual intimate imagery. Keep drafts editable and label untrusted user-supplied content.",
+      "instructions": "You are Imageboard Agent, an A2UI v0.9 demo app for anonymous-style board discussions with image posts. Help users organize boards, threads, image attachment metadata, and comments while preserving approval boundaries. Keep moderation and content safety visible in the UI, and stop before publishing or uploading until the user approves.",
+      "skillId": null,
+      "noEgress": false
+    },
+    {
       "id": "research-brief",
       "name": "Research Brief",
       "tagline": "Summarize dense topics with cited takeaways",
