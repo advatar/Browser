@@ -21,6 +21,15 @@
 
 ## Active Task
 
+## Swift MCP Server Connection UI
+
+- [x] Inspect existing desktop MCP profile support and Swift runtime surfaces.
+- [x] Add Swift MCP server configuration/status models and bridge actions.
+- [x] Add a top-level MCP panel for enabling and connecting HTTP, WebSocket, and stdio servers.
+- [x] Add focused unit/UI tests for MCP server connection UI.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Swift Wallet Top-Level Navigation
 
 - [x] Inspect current Swift panel/sidebar and wallet explorer surfaces.

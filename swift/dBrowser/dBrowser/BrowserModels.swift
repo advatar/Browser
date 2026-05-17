@@ -4,6 +4,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case history
     case bookmarks
     case wallet
+    case mcp
     case copilot
     case runtime
 
@@ -12,6 +13,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     static let browserSidebarPanels: [BrowserPanel] = [
         .history,
         .bookmarks,
+        .mcp,
         .copilot,
         .runtime
     ]
@@ -21,6 +23,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .history: "History"
         case .bookmarks: "Bookmarks"
         case .wallet: "Wallet"
+        case .mcp: "MCP"
         case .copilot: "Copilot"
         case .runtime: "Runtime"
         }
@@ -31,6 +34,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .history: "clock.arrow.circlepath"
         case .bookmarks: "bookmark"
         case .wallet: "wallet.pass"
+        case .mcp: "network"
         case .copilot: "sparkles"
         case .runtime: "server.rack"
         }
@@ -244,6 +248,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case decentralizedProtocols
     case architectureOverview
     case chainTrust
+    case mcpServers
     case afmServices
     case copilot
     case wallet
@@ -258,6 +263,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols: "IPFS, IPNS, ENS"
         case .architectureOverview: "Architecture"
         case .chainTrust: "Chain trust"
+        case .mcpServers: "MCP servers"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -272,6 +278,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols: "Gateway bridge"
         case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .chainTrust: "Gateway/RPC fallback"
+        case .mcpServers: "HTTP, WebSocket, STDIO"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -286,6 +293,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols: "link"
         case .architectureOverview: "square.stack.3d.up"
         case .chainTrust: "checkmark.shield"
+        case .mcpServers: "network"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -356,6 +364,17 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Gateway or RPC data stays marked as fallback and is not presented as local verification.",
                     "AFMarket settlement receipts can raise a chain entry to proof-checked without implying full light-client verification.",
                     "Future chain-specific clients can plug in verified, syncing, stale, failed, and unavailable states without changing UI contracts."
+                ]
+            )
+        case .mcpServers:
+            RuntimeFeatureExplanation(
+                overview: "Connects Model Context Protocol servers so Copilot and future agent workflows can use external tools, resources, and prompts.",
+                bridgeBehavior: "The Swift bridge keeps editable MCP server configuration and connection state in app state today; the same contract can be backed by the desktop MCP profile service later.",
+                detailPoints: [
+                    "HTTP, WebSocket, and STDIO transports are modeled explicitly so endpoint and program validation match the desktop manifest shape.",
+                    "Disabled servers stay inert until the user enables and connects them.",
+                    "Connection results record status text and discovered tool names so the UI can show negotiated capability readiness.",
+                    "Secrets should move through the existing encrypted MCP profile/keyring service before production use."
                 ]
             )
         case .afmServices:

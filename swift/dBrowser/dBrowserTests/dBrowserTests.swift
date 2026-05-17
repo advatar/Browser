@@ -65,6 +65,24 @@ struct dBrowserTests {
         }
     }
 
+    @Test func mcpDefaultServersMirrorDesktopSeedProfile() {
+        let servers = MCPServerConfiguration.defaultServers
+        let demo = servers.first { $0.id == "demo-weather" }
+        let stdio = servers.first { $0.id == "local-stdio" }
+
+        #expect(servers.map(\.id) == ["demo-weather", "local-stdio"])
+        #expect(demo?.name == "Local Demo MCP")
+        #expect(demo?.transport == .http)
+        #expect(demo?.endpoint == "http://127.0.0.1:7410/mcp")
+        #expect(demo?.enabled == false)
+        #expect(demo?.status.state == .disabled)
+        #expect(stdio?.name == "Local STDIO MCP")
+        #expect(stdio?.transport == .stdio)
+        #expect(stdio?.program == "./bin/mcp-server")
+        #expect(stdio?.argumentsText == "--stdio")
+        #expect(stdio?.environmentText == "API_KEY=set-me")
+    }
+
     @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {
         let feature = MobileRuntimeFeature.architectureOverview
         let explanation = feature.explanation
@@ -692,6 +710,37 @@ struct dBrowserTests {
         #expect(download.state == .queued)
         let cancelled = await bridge.cancelDownload(download.id)
         #expect(cancelled?.state == .cancelled)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeConnectsAndValidatesMCPServers() async {
+        let bridge = MobileRuntimeBridge()
+        var http = bridge.mcpServers.first { $0.id == "demo-weather" }!
+        http.enabled = true
+
+        _ = await bridge.updateMCPServer(http)
+        let connected = await bridge.connectMCPServer(http.id)
+        let mcpFeature = bridge.featureStates.first { $0.feature == .mcpServers }
+
+        #expect(connected?.status.state == .connected)
+        #expect(connected?.status.discoveredTools.contains("tools/list") == true)
+        #expect(mcpFeature?.mode == .service)
+        #expect(mcpFeature?.status.contains("1 connected") == true)
+
+        let invalidWebSocket = MCPServerConfiguration(
+            id: "bad-ws",
+            name: "Bad WebSocket",
+            transport: .websocket,
+            endpoint: "https://example.com/mcp",
+            enabled: true
+        )
+        _ = await bridge.updateMCPServer(invalidWebSocket)
+        let failed = await bridge.connectMCPServer(invalidWebSocket.id)
+        #expect(failed?.status.state == .failed)
+        #expect(failed?.status.message.contains("WS") == true)
+
+        let disconnected = await bridge.disconnectMCPServer(http.id)
+        #expect(disconnected?.status.state == .disconnected)
     }
 
     @Test func blockchainExplorerCatalogBuildsChainSpecificURLs() {
@@ -4959,6 +5008,9 @@ struct dBrowserTests {
         model.selectPanel(.wallet)
         #expect(model.selectedPanel == .wallet)
 
+        model.selectPanel(.mcp)
+        #expect(model.selectedPanel == .mcp)
+
         model.navigate("example.com")
         #expect(model.selectedPanel == nil)
 
@@ -4973,7 +5025,29 @@ struct dBrowserTests {
         #expect(BrowserPanel.wallet.title == "Wallet")
         #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
         #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
-        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .copilot, .runtime])
+        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .copilot, .runtime])
+    }
+
+    @MainActor
+    @Test func browserViewModelSurfacesMCPPanelAndConnections() async {
+        let model = BrowserViewModel()
+
+        #expect(BrowserPanel.allCases.contains(.mcp))
+        #expect(BrowserPanel.mcp.title == "MCP")
+        #expect(BrowserPanel.mcp.systemImage == "network")
+        #expect(BrowserPanel.browserSidebarPanels.contains(.mcp))
+
+        model.selectPanel(.mcp)
+        #expect(model.selectedPanel == .mcp)
+
+        var server = model.mcpServers.first { $0.id == "demo-weather" }!
+        server.enabled = true
+        await model.updateMCPServer(server)
+        let connected = await model.connectMCPServer(server.id)
+
+        #expect(connected?.status.state == .connected)
+        #expect(model.mcpServers.first { $0.id == server.id }?.status.state == .connected)
+        #expect(model.runtimeFeatureStates.first { $0.feature == .mcpServers }?.status.contains("1 connected") == true)
     }
 
     @MainActor

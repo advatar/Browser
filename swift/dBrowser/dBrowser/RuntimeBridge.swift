@@ -48,6 +48,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var suiMoveLightClient: MoveLightClientEndpointConfiguration
     var aptosMoveLightClient: MoveLightClientEndpointConfiguration
     var chainTrustRegistry: ChainTrustRegistry
+    var mcpServers: [MCPServerConfiguration]
 
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
@@ -66,7 +67,8 @@ struct RuntimeBridgeConfiguration: Equatable {
         xrplLightClient: XRPLLightClientEndpointConfiguration = .disabled,
         suiMoveLightClient: MoveLightClientEndpointConfiguration = .disabled(chain: .suiMainnet),
         aptosMoveLightClient: MoveLightClientEndpointConfiguration = .disabled(chain: .aptosMainnet),
-        chainTrustRegistry: ChainTrustRegistry = .defaultRegistry
+        chainTrustRegistry: ChainTrustRegistry = .defaultRegistry,
+        mcpServers: [MCPServerConfiguration] = MCPServerConfiguration.defaultServers
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
@@ -85,6 +87,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.suiMoveLightClient = suiMoveLightClient
         self.aptosMoveLightClient = aptosMoveLightClient
         self.chainTrustRegistry = chainTrustRegistry
+        self.mcpServers = mcpServers
     }
 }
 
@@ -258,6 +261,7 @@ protocol RuntimeBridge: AnyObject {
     var walletInfo: WalletBridgeInfo { get }
     var walletPortfolio: WalletPortfolioSnapshot { get }
     var downloadItems: [DownloadBridgeItem] { get }
+    var mcpServers: [MCPServerConfiguration] { get }
 
     func refreshStatus() async -> [RuntimeFeatureState]
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
@@ -269,6 +273,11 @@ protocol RuntimeBridge: AnyObject {
     func previewWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferPreview
     func signWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferReceipt
     func explorerURL(for target: BlockchainExplorerTarget) -> URL?
+    func updateMCPServer(_ server: MCPServerConfiguration) async -> [MCPServerConfiguration]
+    func addMCPServer(transport: MCPServerTransport) async -> MCPServerConfiguration
+    func removeMCPServer(_ id: String) async -> [MCPServerConfiguration]
+    func connectMCPServer(_ id: String) async -> MCPServerConfiguration?
+    func disconnectMCPServer(_ id: String) async -> MCPServerConfiguration?
     func startDownload(_ url: URL, autoStart: Bool) async -> DownloadBridgeItem
     func cancelDownload(_ id: UUID) async -> DownloadBridgeItem?
 }
@@ -279,6 +288,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var walletInfo: WalletBridgeInfo
     @Published private(set) var walletPortfolio: WalletPortfolioSnapshot = .disconnected
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
+    @Published private(set) var mcpServers: [MCPServerConfiguration]
 
     private let configuration: RuntimeBridgeConfiguration
     private let explorerCatalog: BlockchainExplorerCatalog = .default
@@ -372,7 +382,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.xrplLightClientServiceClient = xrplLightClientServiceClient ?? XRPLLightClientServiceClient(configuration: configuration.xrplLightClient)
         self.suiMoveLightClientServiceClient = suiMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.suiMoveLightClient)
         self.aptosMoveLightClientServiceClient = aptosMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.aptosMoveLightClient)
+        let initialMCPServers = configuration.mcpServers.map(\.sanitizedForSave)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
+        self.mcpServers = initialMCPServers
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
             lastError: "Bitcoin light-client service not checked yet."
@@ -417,7 +429,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: .unknown,
             llmRouterSnapshot: .unknown,
-            chainTrustSnapshot: configuration.chainTrustRegistry
+            chainTrustSnapshot: configuration.chainTrustRegistry,
+            mcpServers: initialMCPServers
         )
         self.walletInfo = .disconnected
         self.walletPortfolio = .disconnected.withChainTrust(configuration.chainTrustRegistry)
@@ -463,7 +476,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
-            chainTrustSnapshot: chainTrustSnapshot
+            chainTrustSnapshot: chainTrustSnapshot,
+            mcpServers: mcpServers
         )
         return featureStates
     }
@@ -549,7 +563,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     configuration: configuration,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: routerSnapshot,
-                    chainTrustSnapshot: chainTrustSnapshot
+                    chainTrustSnapshot: chainTrustSnapshot,
+                    mcpServers: mcpServers
                 )
                 guard routerSnapshot.isModelAvailable(provider: .appleFoundation) else {
                     throw LLMRouterServiceClientError.invalidResponse
@@ -600,7 +615,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 configuration: configuration,
                 afmSnapshot: snapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
-                chainTrustSnapshot: chainTrustSnapshot
+                chainTrustSnapshot: chainTrustSnapshot,
+                mcpServers: mcpServers
             )
 
             let route = try await afmServicesClient.route(
@@ -710,7 +726,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 configuration: configuration,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
-                chainTrustSnapshot: chainTrustSnapshot
+                chainTrustSnapshot: chainTrustSnapshot,
+                mcpServers: mcpServers
             )
         }
 
@@ -812,6 +829,53 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         explorerCatalog.url(for: target)
     }
 
+    func updateMCPServer(_ server: MCPServerConfiguration) async -> [MCPServerConfiguration] {
+        let sanitized = server.sanitizedForSave
+        guard let index = mcpServers.firstIndex(where: { $0.id == sanitized.id }) else {
+            mcpServers.append(sanitized)
+            refreshMCPFeatureState()
+            return mcpServers
+        }
+        mcpServers[index] = sanitized
+        refreshMCPFeatureState()
+        return mcpServers
+    }
+
+    func addMCPServer(transport: MCPServerTransport) async -> MCPServerConfiguration {
+        let server = MCPServerConfiguration.newServer(transport: transport)
+        mcpServers.append(server)
+        refreshMCPFeatureState()
+        return server
+    }
+
+    func removeMCPServer(_ id: String) async -> [MCPServerConfiguration] {
+        mcpServers.removeAll { $0.id == id }
+        refreshMCPFeatureState()
+        return mcpServers
+    }
+
+    func connectMCPServer(_ id: String) async -> MCPServerConfiguration? {
+        guard let index = mcpServers.firstIndex(where: { $0.id == id }) else { return nil }
+        var server = mcpServers[index].sanitizedForSave
+        if let validationError = server.validationError() {
+            server.status = MCPServerConfiguration.failedStatus(validationError)
+        } else {
+            server.status = server.connectedStatus()
+        }
+        mcpServers[index] = server
+        refreshMCPFeatureState()
+        return server
+    }
+
+    func disconnectMCPServer(_ id: String) async -> MCPServerConfiguration? {
+        guard let index = mcpServers.firstIndex(where: { $0.id == id }) else { return nil }
+        var server = mcpServers[index]
+        server.status = server.enabled ? MCPServerConfiguration.disconnectedStatus() : .disabled
+        mcpServers[index] = server
+        refreshMCPFeatureState()
+        return server
+    }
+
     @discardableResult
     func startDownload(_ url: URL, autoStart: Bool = true) async -> DownloadBridgeItem {
         let item = DownloadBridgeItem(
@@ -860,7 +924,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         configuration: RuntimeBridgeConfiguration,
         afmSnapshot: AFMServiceSnapshot,
         llmRouterSnapshot: LLMRouterServiceSnapshot,
-        chainTrustSnapshot: ChainTrustRegistry
+        chainTrustSnapshot: ChainTrustRegistry,
+        mcpServers: [MCPServerConfiguration]
     ) -> [RuntimeFeatureState] {
         let copilotStatus: String
         let copilotMode: RuntimeBridgeMode
@@ -888,6 +953,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         }()
         let chainTrustAvailable = chainTrustSnapshot.strongestState != .unavailable
             && chainTrustSnapshot.strongestState != .failed
+        let mcpInventory = MCPServerInventory(servers: mcpServers)
+        let mcpMode: RuntimeBridgeMode = mcpInventory.connectedCount > 0 ? .service : .local
 
         return [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
@@ -909,6 +976,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 mode: chainTrustMode,
                 isAvailable: chainTrustAvailable,
                 status: chainTrustSnapshot.runtimeStatusText
+            ),
+            RuntimeFeatureState(
+                feature: .mcpServers,
+                mode: mcpMode,
+                isAvailable: true,
+                status: mcpInventory.summary
             ),
             RuntimeFeatureState(
                 feature: .afmServices,
@@ -933,7 +1006,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
-            chainTrustSnapshot: chainTrustSnapshot
+            chainTrustSnapshot: chainTrustSnapshot,
+            mcpServers: mcpServers
         )
         return update
     }
@@ -1064,6 +1138,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ? "\(walletPortfolio.activeNetwork?.displayName ?? "Wallet") policy receipt"
             : "Local policy bridge"
         featureStates[index].mode = .local
+        featureStates[index].isAvailable = true
+    }
+
+    private func refreshMCPFeatureState() {
+        guard let index = featureStates.firstIndex(where: { $0.feature == .mcpServers }) else { return }
+        let inventory = MCPServerInventory(servers: mcpServers)
+        featureStates[index].status = inventory.summary
+        featureStates[index].mode = inventory.connectedCount > 0 ? .service : .local
         featureStates[index].isAvailable = true
     }
 

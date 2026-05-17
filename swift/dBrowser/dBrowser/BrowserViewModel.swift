@@ -21,6 +21,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var afmServiceSnapshot: AFMServiceSnapshot
     @Published var llmRouterServiceSnapshot: LLMRouterServiceSnapshot
     @Published var walletPortfolio: WalletPortfolioSnapshot
+    @Published var mcpServers: [MCPServerConfiguration]
     @Published var selectedAFMPackID: String?
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
     @Published var openMindContinuityState: OpenMindContinuityState
@@ -75,6 +76,7 @@ final class BrowserViewModel: ObservableObject {
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         self.walletPortfolio = runtimeBridge.walletPortfolio
+        self.mcpServers = runtimeBridge.mcpServers
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
@@ -236,6 +238,7 @@ final class BrowserViewModel: ObservableObject {
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         walletPortfolio = runtimeBridge.walletPortfolio
+        mcpServers = runtimeBridge.mcpServers
         llmModelOptions = LLMModelRegistry.models(
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot
@@ -279,6 +282,46 @@ final class BrowserViewModel: ObservableObject {
         let receipt = await runtimeBridge.signWalletTransfer(request)
         walletPortfolio = runtimeBridge.walletPortfolio
         return receipt
+    }
+
+    @discardableResult
+    func updateMCPServer(_ server: MCPServerConfiguration) async -> [MCPServerConfiguration] {
+        let servers = await runtimeBridge.updateMCPServer(server)
+        mcpServers = servers
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return servers
+    }
+
+    @discardableResult
+    func addMCPServer(transport: MCPServerTransport) async -> MCPServerConfiguration {
+        let server = await runtimeBridge.addMCPServer(transport: transport)
+        mcpServers = runtimeBridge.mcpServers
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return server
+    }
+
+    @discardableResult
+    func removeMCPServer(_ id: String) async -> [MCPServerConfiguration] {
+        let servers = await runtimeBridge.removeMCPServer(id)
+        mcpServers = servers
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return servers
+    }
+
+    @discardableResult
+    func connectMCPServer(_ id: String) async -> MCPServerConfiguration? {
+        let server = await runtimeBridge.connectMCPServer(id)
+        mcpServers = runtimeBridge.mcpServers
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return server
+    }
+
+    @discardableResult
+    func disconnectMCPServer(_ id: String) async -> MCPServerConfiguration? {
+        let server = await runtimeBridge.disconnectMCPServer(id)
+        mcpServers = runtimeBridge.mcpServers
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return server
     }
 
     func selectAFMPack(_ id: String?) {

@@ -362,6 +362,8 @@ private struct BrowserPanelContentView: View {
                 BookmarksPanelView(browser: browser)
             case .wallet:
                 WalletPanelView(browser: browser)
+            case .mcp:
+                MCPServersPanelView(browser: browser)
             case .copilot:
                 CopilotPanelView(browser: browser)
             case .runtime:
@@ -1126,6 +1128,289 @@ private struct LLMConversationMessageRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isUser ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct MCPServersPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    private var inventory: MCPServerInventory {
+        MCPServerInventory(servers: browser.mcpServers)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "MCP Servers",
+                    systemImage: BrowserPanel.mcp.systemImage,
+                    subtitle: "Connect tool, resource, and prompt servers for Copilot and agent workflows."
+                )
+
+                HStack(alignment: .firstTextBaseline) {
+                    Label(inventory.summary, systemImage: "network")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                }
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 8)], alignment: .leading, spacing: 8) {
+                    MCPAddServerButton(title: "Add HTTP", systemImage: "globe", transport: .http, browser: browser)
+                    MCPAddServerButton(title: "Add WebSocket", systemImage: "point.3.connected.trianglepath.dotted", transport: .websocket, browser: browser)
+                    MCPAddServerButton(title: "Add STDIO", systemImage: "terminal", transport: .stdio, browser: browser)
+                }
+
+                if browser.mcpServers.isEmpty {
+                    EmptyPanelView(
+                        title: "No MCP servers",
+                        message: "Add an MCP server profile before connecting tools to the runtime."
+                    )
+                } else {
+                    ForEach(browser.mcpServers) { server in
+                        MCPServerCardView(browser: browser, server: server)
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-mcp")
+    }
+}
+
+private struct MCPAddServerButton: View {
+    let title: String
+    let systemImage: String
+    let transport: MCPServerTransport
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        Button {
+            Task {
+                await browser.addMCPServer(transport: transport)
+            }
+        } label: {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("mcp-add-\(transport.id)")
+    }
+}
+
+private struct MCPServerCardView: View {
+    @ObservedObject var browser: BrowserViewModel
+    let server: MCPServerConfiguration
+    @State private var draft: MCPServerConfiguration
+    @State private var isWorking = false
+
+    init(browser: BrowserViewModel, server: MCPServerConfiguration) {
+        self.browser = browser
+        self.server = server
+        _draft = State(initialValue: server)
+    }
+
+    private var statusColor: Color {
+        switch draft.status.state {
+        case .connected: Color.green
+        case .failed: Color.red
+        case .disabled, .disconnected: Color.secondary
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(draft.name.isEmpty ? "Unnamed MCP server" : draft.name)
+                        .font(.headline)
+                    Text(draft.id)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Label(draft.status.state.title, systemImage: draft.status.state == .connected ? "checkmark.circle" : "circle")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(statusColor)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Name")
+                        .font(.caption.weight(.semibold))
+                    TextField("Name", text: $draft.name)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Transport")
+                        .font(.caption.weight(.semibold))
+                    Picker("Transport", selection: $draft.transport) {
+                        ForEach(MCPServerTransport.allCases) { transport in
+                            Text(transport.title).tag(transport)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Capability")
+                        .font(.caption.weight(.semibold))
+                    TextField("Default capability", text: capabilityBinding)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Timeout")
+                        .font(.caption.weight(.semibold))
+                    Stepper(value: $draft.timeoutMS, in: 500...120_000, step: 500) {
+                        Text("\(draft.timeoutMS) ms")
+                            .font(.caption.monospaced())
+                    }
+                }
+            }
+
+            if draft.transport.requiresEndpoint {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Endpoint")
+                        .font(.caption.weight(.semibold))
+                    TextField(draft.transport == .websocket ? "wss://example.com/mcp" : "https://example.com/mcp", text: $draft.endpoint)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+            }
+
+            if draft.transport.requiresProgram {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Program")
+                            .font(.caption.weight(.semibold))
+                        TextField("./bin/mcp-server", text: $draft.program)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Arguments")
+                            .font(.caption.weight(.semibold))
+                        TextField("--stdio", text: $draft.argumentsText)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                    }
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Headers")
+                        .font(.caption.weight(.semibold))
+                    TextField("Authorization=Bearer token", text: $draft.headersText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Environment")
+                        .font(.caption.weight(.semibold))
+                    TextField("API_KEY=value", text: $draft.environmentText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                }
+            }
+
+            Toggle(isOn: $draft.enabled) {
+                Text("Enabled")
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(draft.status.message)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+                if !draft.status.discoveredTools.isEmpty {
+                    Text(draft.status.discoveredTools.joined(separator: ", "))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], alignment: .leading, spacing: 8) {
+                Button {
+                    Task { await saveDraft() }
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    Task { await connectDraft() }
+                } label: {
+                    Label("Connect", systemImage: "link")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    Task { await disconnectDraft() }
+                } label: {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Button(role: .destructive) {
+                    Task {
+                        await browser.removeMCPServer(server.id)
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
+            .disabled(isWorking)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onChange(of: server) { updated in
+            draft = updated
+        }
+        .accessibilityIdentifier("mcp-server-\(server.id)")
+    }
+
+    private var capabilityBinding: Binding<String> {
+        Binding(
+            get: { draft.defaultCapability ?? "" },
+            set: { draft.defaultCapability = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        )
+    }
+
+    private func saveDraft() async {
+        isWorking = true
+        let servers = await browser.updateMCPServer(draft)
+        if let updated = servers.first(where: { $0.id == draft.id }) {
+            draft = updated
+        }
+        isWorking = false
+    }
+
+    private func connectDraft() async {
+        isWorking = true
+        let servers = await browser.updateMCPServer(draft)
+        if let updated = servers.first(where: { $0.id == draft.id }) {
+            draft = updated
+        }
+        if let connected = await browser.connectMCPServer(draft.id) {
+            draft = connected
+        }
+        isWorking = false
+    }
+
+    private func disconnectDraft() async {
+        isWorking = true
+        if let disconnected = await browser.disconnectMCPServer(draft.id) {
+            draft = disconnected
+        }
+        isWorking = false
     }
 }
 
