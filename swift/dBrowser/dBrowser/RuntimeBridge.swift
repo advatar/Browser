@@ -96,6 +96,7 @@ enum RuntimeResolutionSource: String, Equatable {
     case ipfsGateway
     case ipnsGateway
     case ensGateway
+    case decentralizedStorageGateway
     case remoteRuntime
     case unsupported
 }
@@ -523,11 +524,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             case "ens":
                 return ensResolution(url: url, originalInput: input)
             default:
+                if let profile = DecentralizedStorageNetwork.profile(forScheme: scheme) {
+                    return decentralizedStorageResolution(profile: profile, url: url, originalInput: input)
+                }
+
                 return RuntimeBridgeResolution(
                     originalInput: input,
                     resolvedURLString: nil,
                     source: .unsupported,
-                    message: "No iOS runtime bridge is registered for \(scheme):// addresses."
+                    message: "No iOS runtime bridge is registered for \(scheme): URI addresses."
                 )
             }
         }
@@ -545,7 +550,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             originalInput: input,
             resolvedURLString: nil,
             source: .unsupported,
-            message: "The runtime bridge only handles web, IPFS, IPNS, ENS, Copilot, wallet, and download actions."
+            message: "The runtime bridge handles web, IPFS, IPNS, ENS, decentralized storage URIs, Copilot, wallet, and download actions."
         )
     }
 
@@ -1193,7 +1198,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 feature: .decentralizedProtocols,
                 mode: configuration.remoteRuntimeBaseURL == nil ? .gateway : .remote,
                 isAvailable: true,
-                status: configuration.remoteRuntimeBaseURL == nil ? "IPFS/IPNS/ENS gateway bridge" : "Remote runtime bridge"
+                status: configuration.remoteRuntimeBaseURL == nil ? "Universal URI gateway bridge" : "Remote runtime bridge"
             ),
             RuntimeFeatureState(
                 feature: .architectureOverview,
@@ -1279,6 +1284,28 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             resolvedURLString: resolvedURL.absoluteString,
             source: namespace == "ipfs" ? .ipfsGateway : .ipnsGateway,
             message: "Resolved \(namespace.uppercased()) through the iOS gateway bridge."
+        )
+    }
+
+    private func decentralizedStorageResolution(
+        profile: DecentralizedStorageNetwork,
+        url: URL,
+        originalInput: String
+    ) -> RuntimeBridgeResolution {
+        guard let resolvedURL = profile.gatewayURL(for: url) else {
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: nil,
+                source: .unsupported,
+                message: "Recognized \(profile.title) URI for \(profile.distributionRole) A native or remote resolver is required before this mobile build can retrieve it."
+            )
+        }
+
+        return RuntimeBridgeResolution(
+            originalInput: originalInput,
+            resolvedURLString: resolvedURL.absoluteString,
+            source: .decentralizedStorageGateway,
+            message: "Resolved \(profile.title) through the decentralized storage gateway bridge."
         )
     }
 

@@ -22,6 +22,15 @@
 
 ## Active Task
 
+## Universal Decentralized URI Resolution
+
+- [x] Inspect current Swift URL resolver, runtime bridge, and decentralized protocol tests.
+- [x] Add a decentralized storage URI registry for app/data distribution networks.
+- [x] Delegate all recognized storage URIs to the runtime bridge instead of search fallback.
+- [x] Add focused unit tests for known and unknown URI schemes.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Web A2UI Logos Aztec Deployment Copy
 
 - [x] Inspect existing website A2UI/App Store messaging and current Swift catalog support.

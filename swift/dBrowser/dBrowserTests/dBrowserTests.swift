@@ -45,6 +45,73 @@ struct dBrowserTests {
         #expect(message.contains("runtime bridge"))
     }
 
+    @Test func decentralizedStorageRegistryCoversAppDistributionNetworks() {
+        let schemes = DecentralizedStorageNetwork.supportedSchemes
+        let requiredSchemes = [
+            "ipfs",
+            "ipns",
+            "bzz",
+            "swarm",
+            "ar",
+            "arweave",
+            "filecoin",
+            "walrus",
+            "iroh",
+            "hypercore",
+            "sia",
+            "storj",
+            "tahoe",
+            "autonomi",
+            "magnet",
+            "ceramic",
+            "orbitdb",
+            "radicle"
+        ]
+
+        for scheme in requiredSchemes {
+            #expect(schemes.contains(scheme))
+        }
+
+        let swarm = DecentralizedStorageNetwork.profile(forScheme: "bzz")
+        let arweave = DecentralizedStorageNetwork.profile(forScheme: "ar")
+
+        #expect(swarm?.distributionRole.contains("dapp") == true)
+        #expect(swarm?.gatewayURL(for: URL(string: "bzz://abcdef/app.json")!)?.absoluteString == "https://gateway.ethswarm.org/bzz/abcdef/app.json")
+        #expect(arweave?.gatewayURL(for: URL(string: "ar://abc123/app.json?download=1#v1")!)?.absoluteString == "https://arweave.net/abc123/app.json?download=1#v1")
+    }
+
+    @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
+        let examples = [
+            ("bzz://abcdef/app.json", "Swarm"),
+            ("ar://abc123/app.json", "Arweave"),
+            ("walrus://blob-id", "Walrus"),
+            ("magnet:?xt=urn:btih:abcdef", "BitTorrent / WebTorrent")
+        ]
+
+        for (input, label) in examples {
+            let resolved = BrowserURLResolver.resolve(input)
+            guard case .unsupported(let raw, let message) = resolved else {
+                Issue.record("Expected runtime bridge delegation for \(input)")
+                continue
+            }
+
+            #expect(raw == input)
+            #expect(message.contains(label))
+            #expect(message.contains("runtime bridge"))
+        }
+    }
+
+    @Test func unknownURIsArePreservedInsteadOfSearched() {
+        let resolved = BrowserURLResolver.resolve("mailto:team@example.com")
+        guard case .unsupported(let raw, let message) = resolved else {
+            Issue.record("Expected unknown URI preservation")
+            return
+        }
+
+        #expect(raw == "mailto:team@example.com")
+        #expect(message.contains("preserving this mailto"))
+    }
+
     @Test func ensNamesDelegateToRuntimeBridgeBeforeHTTPSFallback() {
         let resolved = BrowserURLResolver.resolve("vitalik.eth")
         guard case .unsupported(let raw, let message) = resolved else {
@@ -378,6 +445,9 @@ struct dBrowserTests {
             .joined(separator: " ")
 
         #expect(searchableText.contains("embedded light-client contract"))
+        #expect(searchableText.contains("Swarm"))
+        #expect(searchableText.contains("Arweave"))
+        #expect(searchableText.contains("recognized storage schemes") || searchableText.contains("Recognized storage schemes"))
         #expect(searchableText.contains("Ethereum"))
         #expect(searchableText.contains("Substrate/Polkadot"))
         #expect(searchableText.contains("centralized RPC"))
@@ -932,6 +1002,19 @@ struct dBrowserTests {
         let ens = await bridge.resolve("vitalik.eth")
         #expect(ens.source == .ensGateway)
         #expect(ens.resolvedURLString == "https://vitalik.eth.limo")
+
+        let swarm = await bridge.resolve("bzz://abcdef/app.json")
+        #expect(swarm.source == .decentralizedStorageGateway)
+        #expect(swarm.resolvedURLString == "https://gateway.ethswarm.org/bzz/abcdef/app.json")
+
+        let arweave = await bridge.resolve("ar://abc123/app.json")
+        #expect(arweave.source == .decentralizedStorageGateway)
+        #expect(arweave.resolvedURLString == "https://arweave.net/abc123/app.json")
+
+        let walrus = await bridge.resolve("walrus://blob-id")
+        #expect(walrus.source == .unsupported)
+        #expect(walrus.resolvedURLString == nil)
+        #expect(walrus.message?.contains("Recognized Walrus URI") == true)
     }
 
     @MainActor

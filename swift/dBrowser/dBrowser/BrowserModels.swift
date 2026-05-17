@@ -240,6 +240,190 @@ struct DecentralizedStartingPoint: Identifiable, Equatable {
     ]
 }
 
+enum DecentralizedStorageGatewayStrategy: Equatable {
+    case pathGateway(host: String, namespace: String)
+    case rootGateway(host: String)
+    case none
+}
+
+struct DecentralizedStorageNetwork: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let schemes: [String]
+    let distributionRole: String
+    let gatewayStrategy: DecentralizedStorageGatewayStrategy
+
+    var primaryScheme: String {
+        schemes.first ?? id
+    }
+
+    static let supported: [DecentralizedStorageNetwork] = [
+        DecentralizedStorageNetwork(
+            id: "ipfs",
+            title: "IPFS",
+            schemes: ["ipfs"],
+            distributionRole: "Content-addressed app bundles, decentralized websites, and immutable asset trees.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "ipns",
+            title: "IPNS",
+            schemes: ["ipns"],
+            distributionRole: "Mutable names for IPFS app catalogs, release channels, and live decentralized web pages.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "swarm",
+            title: "Swarm",
+            schemes: ["bzz", "bzzr", "swarm"],
+            distributionRole: "Ethereum-native decentralized storage for dapp assets, manifests, and distribution.",
+            gatewayStrategy: .pathGateway(host: "gateway.ethswarm.org", namespace: "bzz")
+        ),
+        DecentralizedStorageNetwork(
+            id: "arweave",
+            title: "Arweave",
+            schemes: ["ar", "arweave"],
+            distributionRole: "Permanent app release manifests, audit snapshots, and public assets.",
+            gatewayStrategy: .rootGateway(host: "arweave.net")
+        ),
+        DecentralizedStorageNetwork(
+            id: "filecoin",
+            title: "Filecoin",
+            schemes: ["filecoin", "piececid", "fil"],
+            distributionRole: "Large app bundles, model weights, data archives, and storage-deal receipts.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "walrus",
+            title: "Walrus",
+            schemes: ["walrus"],
+            distributionRole: "Programmable blob availability for Sui and Walrus app deployments.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "iroh",
+            title: "Iroh blobs",
+            schemes: ["iroh", "iroh-blob"],
+            distributionRole: "BLAKE3-addressed peer distribution and local-first install sync.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "hypercore",
+            title: "Hypercore",
+            schemes: ["hyper", "hypercore", "hyperdrive", "pear", "dat"],
+            distributionRole: "Signed mutable catalogs, append-only update feeds, and peer-synced app data.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "sia",
+            title: "Sia",
+            schemes: ["sia"],
+            distributionRole: "Encrypted private app data and decentralized backup storage.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "storj",
+            title: "Storj",
+            schemes: ["storj"],
+            distributionRole: "Encrypted object storage fallback for app data and backups.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "tahoe-lafs",
+            title: "Tahoe-LAFS",
+            schemes: ["tahoe", "lafs"],
+            distributionRole: "Least-authority private app data replicated across storage grids.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "autonomi",
+            title: "Autonomi",
+            schemes: ["autonomi", "safe"],
+            distributionRole: "Encrypted autonomous storage for app data, app publishing, and private distribution.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "bittorrent",
+            title: "BitTorrent / WebTorrent",
+            schemes: ["magnet", "bittorrent", "webtorrent"],
+            distributionRole: "Hot public release distribution with signed manifests as the trust root.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "ceramic",
+            title: "Ceramic",
+            schemes: ["ceramic", "ceramic-stream"],
+            distributionRole: "Mutable app metadata, profiles, ratings, and install records.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "orbitdb",
+            title: "OrbitDB",
+            schemes: ["orbitdb"],
+            distributionRole: "Peer-synced app databases and local-first collaboration state.",
+            gatewayStrategy: .none
+        ),
+        DecentralizedStorageNetwork(
+            id: "radicle",
+            title: "Radicle",
+            schemes: ["rad", "radicle"],
+            distributionRole: "Peer-to-peer source distribution, recipes, and code provenance.",
+            gatewayStrategy: .none
+        )
+    ]
+
+    static var supportedSchemes: Set<String> {
+        Set(supported.flatMap(\.schemes))
+    }
+
+    static func profile(forScheme scheme: String) -> DecentralizedStorageNetwork? {
+        let normalizedScheme = scheme.lowercased()
+        return supported.first { network in
+            network.schemes.contains(normalizedScheme)
+        }
+    }
+
+    func gatewayURL(for url: URL) -> URL? {
+        guard let locator = Self.locatorAndPath(from: url) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        switch gatewayStrategy {
+        case .pathGateway(let host, let namespace):
+            components.host = host
+            components.path = "/\(namespace)/\(locator.root)\(locator.path)"
+        case .rootGateway(let host):
+            components.host = host
+            components.path = "/\(locator.root)\(locator.path)"
+        case .none:
+            return nil
+        }
+        components.query = url.query
+        components.fragment = url.fragment
+        return components.url
+    }
+
+    private static func locatorAndPath(from url: URL) -> (root: String, path: String)? {
+        var root = url.host ?? ""
+        var path = url.path
+
+        if root.isEmpty {
+            let trimmedPath = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let parts = trimmedPath.split(separator: "/", maxSplits: 1).map(String.init)
+            root = parts.first ?? ""
+            path = parts.count > 1 ? "/\(parts[1])" : ""
+        }
+
+        guard !root.isEmpty else {
+            return nil
+        }
+
+        return (root: root, path: path)
+    }
+}
+
 struct RuntimeFeatureExplanation: Equatable {
     let overview: String
     let bridgeBehavior: String
@@ -267,7 +451,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         switch self {
         case .webBrowsing: "Web browsing"
         case .tabs: "Tabs and history"
-        case .decentralizedProtocols: "IPFS, IPNS, ENS"
+        case .decentralizedProtocols: "DWeb URI resolution"
         case .architectureOverview: "Architecture"
         case .chainTrust: "Chain trust"
         case .mcpServers: "MCP servers"
@@ -345,10 +529,12 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
             )
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
-                overview: "Resolves IPFS, IPNS, ENS, and compatible wallet-style names into loadable mobile web URLs while preserving the embedded light-client contract for chain-backed state.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback through dweb.link and .limo; parity with the desktop decentralized runtime means bridging to embedded Ethereum and Substrate/Polkadot light clients instead of trusting centralized RPC endpoints.",
+                overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net while preserving the embedded light-client contract for chain-backed state; parity with the desktop decentralized runtime means bridging the remaining schemes to native or remote resolvers plus embedded Ethereum and Substrate/Polkadot light clients instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
+                    "bzz://, swarm://, ar://, and arweave:// inputs can resolve through safe HTTPS gateway adapters while keeping their original decentralized source label.",
+                    "Recognized storage schemes without a safe mobile gateway are preserved as original URIs and show a native or remote resolver requirement instead of being converted into a search query.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
                     "External RPC endpoints should remain development or fallback transports; they should not become the trust root for decentralized browsing.",
@@ -503,15 +689,22 @@ enum BrowserURLResolver {
             switch scheme {
             case "http", "https":
                 return .web(url)
-            case "ipfs", "ipns", "ens":
+            case "ens":
                 return .unsupported(
                     raw: input,
-                    message: "The iOS runtime bridge could not resolve this \(scheme):// address."
+                    message: "The iOS runtime bridge will resolve this decentralized name."
                 )
             default:
+                if let profile = DecentralizedStorageNetwork.profile(forScheme: scheme) {
+                    return .unsupported(
+                        raw: input,
+                        message: "The iOS runtime bridge will resolve this \(profile.title) URI."
+                    )
+                }
+
                 return .unsupported(
                     raw: input,
-                    message: "The iOS shell blocks unsupported URL schemes until a native handler is registered."
+                    message: "The iOS runtime bridge is preserving this \(scheme): URI until a native handler is registered."
                 )
             }
         }
