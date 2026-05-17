@@ -21,6 +21,14 @@
 
 ## Active Task
 
+## Swift Wallet Top-Level Navigation
+
+- [x] Inspect current Swift panel/sidebar and wallet explorer surfaces.
+- [x] Promote Wallet to a top-level browser panel and sidebar section.
+- [x] Add focused tests for wallet panel navigation.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Swift Wallet And Blockchain Explorer Parity
 
 - [x] Triage missing Swift blockchain explorer and wallet parity from #102.

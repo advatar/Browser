@@ -360,6 +360,8 @@ private struct BrowserPanelContentView: View {
                 HistoryPanelView(browser: browser)
             case .bookmarks:
                 BookmarksPanelView(browser: browser)
+            case .wallet:
+                WalletPanelView(browser: browser)
             case .copilot:
                 CopilotPanelView(browser: browser)
             case .runtime:
@@ -1143,7 +1145,6 @@ private struct RuntimePanelView: View {
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
 
                 ChainTrustPanelView(registry: browser.chainTrustSnapshot)
-                WalletExplorerPanelView(browser: browser)
                 AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
                 OpenMindMemoryPanelView(
                     state: browser.openMindCapabilityState,
@@ -1157,6 +1158,29 @@ private struct RuntimePanelView: View {
         }
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-runtime")
+    }
+}
+
+private struct WalletPanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PanelHeaderView(
+                    title: "Wallet",
+                    systemImage: BrowserPanel.wallet.systemImage,
+                    subtitle: "Accounts, chain trust, explorers, and approval-gated transfer receipts."
+                )
+
+                WalletExplorerPanelView(browser: browser)
+                ChainTrustPanelView(registry: browser.chainTrustSnapshot)
+            }
+            .padding(24)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-wallet")
     }
 }
 
@@ -1923,7 +1947,7 @@ private struct BrowserSidebar: View {
                 }
                 .fontWeight(browser.selectedPanel == nil ? .semibold : .regular)
 
-                ForEach(BrowserPanel.allCases) { panel in
+                ForEach(BrowserPanel.browserSidebarPanels) { panel in
                     Button {
                         browser.selectPanel(panel)
                     } label: {
@@ -1931,6 +1955,16 @@ private struct BrowserSidebar: View {
                     }
                     .fontWeight(browser.selectedPanel == panel ? .semibold : .regular)
                 }
+            }
+
+            Section("Wallet") {
+                Button {
+                    browser.selectPanel(.wallet)
+                } label: {
+                    Label(BrowserPanel.wallet.title, systemImage: BrowserPanel.wallet.systemImage)
+                }
+                .fontWeight(browser.selectedPanel == .wallet ? .semibold : .regular)
+                .accessibilityIdentifier("sidebar-wallet")
             }
 
             Section("Bookmarks") {

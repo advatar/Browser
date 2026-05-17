@@ -3,15 +3,24 @@ import Foundation
 enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case history
     case bookmarks
+    case wallet
     case copilot
     case runtime
 
     var id: String { rawValue }
 
+    static let browserSidebarPanels: [BrowserPanel] = [
+        .history,
+        .bookmarks,
+        .copilot,
+        .runtime
+    ]
+
     var title: String {
         switch self {
         case .history: "History"
         case .bookmarks: "Bookmarks"
+        case .wallet: "Wallet"
         case .copilot: "Copilot"
         case .runtime: "Runtime"
         }
@@ -21,6 +30,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .history: "clock.arrow.circlepath"
         case .bookmarks: "bookmark"
+        case .wallet: "wallet.pass"
         case .copilot: "sparkles"
         case .runtime: "server.rack"
         }

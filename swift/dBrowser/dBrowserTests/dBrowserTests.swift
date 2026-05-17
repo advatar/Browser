@@ -4956,6 +4956,9 @@ struct dBrowserTests {
         model.selectPanel(.bookmarks)
         #expect(model.selectedPanel == .bookmarks)
 
+        model.selectPanel(.wallet)
+        #expect(model.selectedPanel == .wallet)
+
         model.navigate("example.com")
         #expect(model.selectedPanel == nil)
 
@@ -4963,6 +4966,14 @@ struct dBrowserTests {
         model.newTab()
         #expect(model.selectedPanel == nil)
         #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
+    }
+
+    @Test func walletPanelIsTopLevelNavigationAndSeparateSidebarSection() {
+        #expect(BrowserPanel.allCases.contains(.wallet))
+        #expect(BrowserPanel.wallet.title == "Wallet")
+        #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
+        #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
+        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .copilot, .runtime])
     }
 
     @MainActor

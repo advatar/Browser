@@ -63,7 +63,7 @@ final class dBrowserUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let panels = ["history", "bookmarks", "copilot", "runtime"]
+        let panels = ["history", "bookmarks", "wallet", "copilot", "runtime"]
         for panel in panels {
             let button = app.buttons["panel-\(panel)"]
             XCTAssertTrue(button.waitForExistence(timeout: 5), "Missing \(panel) panel button")
