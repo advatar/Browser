@@ -154,6 +154,42 @@ enum WalletBroadcastMode: String, Codable, Equatable {
     }
 }
 
+enum WalletConnectionKind: String, Codable, Equatable {
+    case disconnected
+    case nativeEmbedded
+    case externalPlanned
+
+    var title: String {
+        switch self {
+        case .disconnected: "No wallet"
+        case .nativeEmbedded: "Native embedded wallet"
+        case .externalPlanned: "External wallet planned"
+        }
+    }
+}
+
+struct EmbeddedWalletProfile: Codable, Equatable, Identifiable {
+    var id: UUID
+    var displayName: String
+    var createdAt: Date
+    var seedFingerprint: String
+    var custodyLabel: String
+
+    init(
+        id: UUID = UUID(),
+        displayName: String,
+        createdAt: Date = Date(),
+        seedFingerprint: String,
+        custodyLabel: String = "Generated and retained inside this dBrowser profile. Raw private keys are never exposed to apps or MCP servers."
+    ) {
+        self.id = id
+        self.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Embedded browser wallet" : displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.createdAt = createdAt
+        self.seedFingerprint = seedFingerprint
+        self.custodyLabel = custodyLabel
+    }
+}
+
 struct WalletNetwork: Codable, Equatable, Identifiable {
     var id: String { chainRef }
 
@@ -325,6 +361,8 @@ struct WalletTransferReceipt: Codable, Equatable, Identifiable {
 
 struct WalletPortfolioSnapshot: Codable, Equatable {
     var isConnected: Bool
+    var connectionKind: WalletConnectionKind
+    var embeddedWallet: EmbeddedWalletProfile?
     var activeChainRef: String
     var networks: [WalletNetwork]
     var accounts: [WalletAccount]
@@ -335,11 +373,13 @@ struct WalletPortfolioSnapshot: Codable, Equatable {
     static var disconnected: WalletPortfolioSnapshot {
         WalletPortfolioSnapshot(
             isConnected: false,
+            connectionKind: .disconnected,
+            embeddedWallet: nil,
             activeChainRef: "ethereum-mainnet",
             networks: WalletNetwork.defaultNetworks(),
             accounts: [],
             recentReceipts: [],
-            policySummary: "Connect a wallet before signing or spending.",
+            policySummary: "Create an embedded wallet or connect an external wallet before signing or spending.",
             productionSigningStatus: "Production signing adapters are not configured."
         )
     }

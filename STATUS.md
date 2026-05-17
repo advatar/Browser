@@ -24,12 +24,12 @@
 ## Swift Wallet Capability Contracts
 
 - [x] Create tracker issue for wallet and chain capability contracts (#111).
-- [ ] Inspect Swift A2UI, MCP, runtime bridge, wallet/explorer, and chain-trust surfaces.
-- [ ] Add typed wallet and chain capability contracts for local apps and MCP servers.
-- [ ] Add native embedded wallet creation as an alternative to external wallet connection.
-- [ ] Render install/runtime permission and transaction approval surfaces in Swift UI.
-- [ ] Add focused tests for capability defaults, permission enforcement, transaction requests, policy receipts, and embedded wallet creation.
-- [ ] Verify the Swift build/test lane locally.
+- [x] Inspect Swift A2UI, MCP, runtime bridge, wallet/explorer, and chain-trust surfaces.
+- [x] Add typed wallet and chain capability contracts for local apps and MCP servers.
+- [x] Add native embedded wallet creation as an alternative to external wallet connection.
+- [x] Render install/runtime permission and transaction approval surfaces in Swift UI.
+- [x] Add focused tests for capability defaults, permission enforcement, transaction requests, policy receipts, and embedded wallet creation.
+- [x] Verify the Swift build/test lane locally.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #111.
 

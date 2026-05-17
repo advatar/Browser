@@ -1501,6 +1501,45 @@ private struct MCPServerCardView: View {
                     .font(.subheadline.weight(.semibold))
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Blockchain Access", systemImage: "link.badge.plus")
+                    .font(.subheadline.weight(.semibold))
+                Text(draft.blockchainAccess.installSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 8)], alignment: .leading, spacing: 8) {
+                    Toggle("Read chains", isOn: $draft.blockchainAccess.readChainData)
+                    Toggle("Read wallet", isOn: $draft.blockchainAccess.readWalletState)
+                    Toggle("Prepare", isOn: $draft.blockchainAccess.prepareTransactions)
+                    Toggle("Simulate", isOn: $draft.blockchainAccess.simulateTransactions)
+                    Toggle("Request signing", isOn: $draft.blockchainAccess.requestSigning)
+                    Toggle("Request broadcast", isOn: $draft.blockchainAccess.requestBroadcast)
+                }
+                .font(.caption)
+
+                Picker("Account scope", selection: $draft.blockchainAccess.accountScope) {
+                    ForEach(WalletAccountScope.allCases, id: \.self) { scope in
+                        Text(scope.title).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Allowed chains")
+                        .font(.caption.weight(.semibold))
+                    TextField("ethereum-mainnet, base-mainnet, solana-mainnet", text: allowedChainRefsBinding)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    Text(draft.blockchainAccess.hostTools.joined(separator: ", "))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(draft.status.message)
                     .font(.caption)
@@ -1564,6 +1603,18 @@ private struct MCPServerCardView: View {
         Binding(
             get: { draft.defaultCapability ?? "" },
             set: { draft.defaultCapability = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        )
+    }
+
+    private var allowedChainRefsBinding: Binding<String> {
+        Binding(
+            get: { draft.blockchainAccess.allowedChainRefs.joined(separator: ", ") },
+            set: { value in
+                draft.blockchainAccess.allowedChainRefs = value
+                    .split(separator: ",")
+                    .map { ChainTrustStatus.normalized(String($0)) }
+                    .filter { !$0.isEmpty }
+            }
         )
     }
 
@@ -1720,11 +1771,11 @@ private struct WalletExplorerPanelView: View {
                             preview = nil
                             receipt = nil
                         } else {
-                            await browser.connectWallet()
+                            await browser.createEmbeddedWallet()
                         }
                     }
                 } label: {
-                    Label(portfolio.isConnected ? "Disconnect" : "Connect", systemImage: portfolio.isConnected ? "xmark.circle" : "link")
+                    Label(portfolio.isConnected ? "Disconnect" : "Create Embedded Wallet", systemImage: portfolio.isConnected ? "xmark.circle" : "plus.circle")
                 }
                 .buttonStyle(.bordered)
             }
@@ -1737,6 +1788,23 @@ private struct WalletExplorerPanelView: View {
                 .foregroundStyle(.secondary)
 
             if portfolio.isConnected, let activeNetwork = portfolio.activeNetwork, let activeAccount = portfolio.activeAccount {
+                if let embeddedWallet = portfolio.embeddedWallet {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(embeddedWallet.displayName, systemImage: "lock.shield")
+                            .font(.subheadline.weight(.semibold))
+                        Text(embeddedWallet.custodyLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Fingerprint \(embeddedWallet.seedFingerprint)")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(activeNetwork.displayName)
@@ -1829,7 +1897,7 @@ private struct WalletExplorerPanelView: View {
                     WalletReceiptSummaryView(receipt: receipt)
                 }
             } else {
-                Text("No wallet is connected.")
+                Text("No embedded wallet has been created yet. Create one to give local A2UI apps and MCP servers brokered access to accounts, chain trust, transaction previews, and approval-gated signing requests.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

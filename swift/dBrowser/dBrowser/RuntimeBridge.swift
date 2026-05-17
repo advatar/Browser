@@ -194,7 +194,7 @@ struct WalletBridgeInfo: Equatable {
         isConnected: false,
         address: nil,
         network: "iOS local policy",
-        policy: "Connect a wallet before signing or spending.",
+        policy: "Create an embedded wallet or connect an external wallet before signing or spending.",
         activeChainRef: "ethereum-mainnet",
         explorerURLString: nil,
         productionSigningStatus: "Production signing adapters are not configured."
@@ -266,12 +266,18 @@ protocol RuntimeBridge: AnyObject {
     func refreshStatus() async -> [RuntimeFeatureState]
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
+    func createEmbeddedWallet(label: String) async -> WalletBridgeInfo
     func connectWallet() async -> WalletBridgeInfo
     func disconnectWallet() async -> WalletBridgeInfo
     func switchWalletNetwork(_ chainRef: String) async -> WalletBridgeInfo
     func evaluateSpend(_ request: WalletSpendRequest) async -> WalletSpendDecision
     func previewWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferPreview
     func signWalletTransfer(_ request: WalletTransferRequest) async -> WalletTransferReceipt
+    func blockchainHostContract(for principal: LocalCapabilityPrincipal, grant: BlockchainCapabilityGrant) -> BlockchainHostContract
+    func prepareWalletTransaction(_ request: WalletTransferRequest, principal: LocalCapabilityPrincipal, grant: BlockchainCapabilityGrant) async -> WalletPreparedTransaction
+    func simulateWalletTransaction(_ prepared: WalletPreparedTransaction) async -> WalletTransactionSimulation
+    func requestWalletSignature(_ prepared: WalletPreparedTransaction, grant: BlockchainCapabilityGrant) async -> WalletTransferReceipt
+    func requestWalletBroadcast(_ receipt: WalletTransferReceipt, principal: LocalCapabilityPrincipal, grant: BlockchainCapabilityGrant) async -> WalletBroadcastResult
     func explorerURL(for target: BlockchainExplorerTarget) -> URL?
     func updateMCPServer(_ server: MCPServerConfiguration) async -> [MCPServerConfiguration]
     func addMCPServer(transport: MCPServerTransport) async -> MCPServerConfiguration
@@ -348,6 +354,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
     private var retainedWalletSeed: String?
+    private var retainedEmbeddedWalletProfile: EmbeddedWalletProfile?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
     convenience init() {
@@ -745,24 +752,35 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         )
     }
 
-    func connectWallet() async -> WalletBridgeInfo {
+    func createEmbeddedWallet(label: String = "Embedded browser wallet") async -> WalletBridgeInfo {
         let seed = retainedWalletSeed ?? UUID().uuidString
         retainedWalletSeed = seed
+        let profile = retainedEmbeddedWalletProfile ?? EmbeddedWalletProfile(
+            displayName: label,
+            seedFingerprint: String(WalletPolicyEngine.sha256Hex(seed).prefix(16))
+        )
+        retainedEmbeddedWalletProfile = profile
         let activeChainRef = walletPortfolio.activeChainRef
         let networks = WalletNetwork.defaultNetworks(catalog: explorerCatalog)
         let accounts = WalletPolicyEngine.makeAccounts(seed: seed, networks: networks)
         walletPortfolio = WalletPortfolioSnapshot(
             isConnected: true,
+            connectionKind: .nativeEmbedded,
+            embeddedWallet: profile,
             activeChainRef: activeChainRef,
             networks: networks,
             accounts: accounts,
             recentReceipts: walletPortfolio.recentReceipts,
-            policySummary: "Auto-approve transfer previews up to 25 native units; require approval above the local policy limit.",
-            productionSigningStatus: "Local policy receipts only. Secure Enclave, WalletConnect, and chain adapters are not configured."
+            policySummary: "Native embedded wallet active. Apps and MCP servers receive only brokered wallet capabilities; signing and broadcast stay approval-gated.",
+            productionSigningStatus: "Embedded wallet can create local policy receipts. Production chain signing and broadcast adapters are not configured."
         ).withChainTrust(chainTrustSnapshot)
         walletInfo = walletInfo(from: walletPortfolio)
         refreshWalletFeatureState()
         return walletInfo
+    }
+
+    func connectWallet() async -> WalletBridgeInfo {
+        await createEmbeddedWallet(label: "Embedded browser wallet")
     }
 
     func disconnectWallet() async -> WalletBridgeInfo {
@@ -823,6 +841,157 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         }
         walletInfo = walletInfo(from: walletPortfolio)
         return receipt
+    }
+
+    func blockchainHostContract(
+        for principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) -> BlockchainHostContract {
+        BlockchainHostContract(
+            principal: principal,
+            grant: grant,
+            chainTrust: chainTrustSnapshot,
+            walletPortfolio: walletPortfolio
+        )
+    }
+
+    func prepareWalletTransaction(
+        _ request: WalletTransferRequest,
+        principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletPreparedTransaction {
+        let chainRef = request.chainRef ?? walletPortfolio.activeChainRef
+        if let denial = grant.denialReason(
+            for: .prepareTransactions,
+            chainRef: chainRef,
+            amount: request.amount
+        ) {
+            let preview = WalletPolicyEngine.preview(
+                request: request,
+                portfolio: walletPortfolio,
+                chainTrust: chainTrustSnapshot
+            )
+            return WalletPreparedTransaction(
+                principal: principal,
+                request: request,
+                preview: preview,
+                status: .rejected,
+                message: denial
+            )
+        }
+
+        let preview = await previewWalletTransfer(request)
+        let status: WalletPreparedTransaction.Status
+        switch preview.status {
+        case .ready: status = .ready
+        case .needsApproval: status = .needsApproval
+        case .rejected: status = .rejected
+        }
+        return WalletPreparedTransaction(
+            principal: principal,
+            request: request,
+            preview: preview,
+            status: status,
+            message: preview.reason
+        )
+    }
+
+    func simulateWalletTransaction(_ prepared: WalletPreparedTransaction) async -> WalletTransactionSimulation {
+        let status: WalletTransactionSimulation.Status
+        switch prepared.status {
+        case .ready: status = .success
+        case .needsApproval: status = .needsApproval
+        case .rejected: status = .rejected
+        }
+        return WalletTransactionSimulation(
+            id: UUID(),
+            preparedTransactionID: prepared.id,
+            status: status,
+            message: prepared.preview.status == .ready
+                ? "Simulation contract accepted the prepared transaction. Production simulation adapter is not configured."
+                : prepared.message,
+            feeEstimate: prepared.preview.feeEstimate,
+            chainTrustSummary: prepared.preview.chainTrustSummary
+        )
+    }
+
+    func requestWalletSignature(
+        _ prepared: WalletPreparedTransaction,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletTransferReceipt {
+        let chainRef = prepared.request.chainRef ?? walletPortfolio.activeChainRef
+        if let denial = grant.denialReason(
+            for: .requestSigning,
+            chainRef: chainRef,
+            amount: prepared.request.amount
+        ) {
+            return deniedReceipt(
+                request: prepared.request,
+                preview: prepared.preview,
+                message: denial
+            )
+        }
+        return await signWalletTransfer(prepared.request)
+    }
+
+    func requestWalletBroadcast(
+        _ receipt: WalletTransferReceipt,
+        principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletBroadcastResult {
+        if let denial = grant.denialReason(
+            for: .requestBroadcast,
+            chainRef: receipt.chainRef,
+            amount: Decimal(string: receipt.amountText)
+        ) {
+            return WalletBroadcastResult(
+                id: UUID(),
+                principal: principal,
+                receiptID: receipt.id,
+                chainRef: receipt.chainRef,
+                status: .denied,
+                transactionHash: nil,
+                explorerURL: receipt.explorerURL,
+                message: denial
+            )
+        }
+
+        guard receipt.status == .policySigned else {
+            return WalletBroadcastResult(
+                id: UUID(),
+                principal: principal,
+                receiptID: receipt.id,
+                chainRef: receipt.chainRef,
+                status: .needsApproval,
+                transactionHash: nil,
+                explorerURL: receipt.explorerURL,
+                message: "Only policy-signed receipts can request broadcast."
+            )
+        }
+
+        guard receipt.broadcastMode != .unavailable else {
+            return WalletBroadcastResult(
+                id: UUID(),
+                principal: principal,
+                receiptID: receipt.id,
+                chainRef: receipt.chainRef,
+                status: .unavailable,
+                transactionHash: nil,
+                explorerURL: receipt.explorerURL,
+                message: "Broadcast adapter for \(receipt.chainRef) is unavailable; no transaction was submitted."
+            )
+        }
+
+        return WalletBroadcastResult(
+            id: UUID(),
+            principal: principal,
+            receiptID: receipt.id,
+            chainRef: receipt.chainRef,
+            status: .unavailable,
+            transactionHash: nil,
+            explorerURL: receipt.explorerURL,
+            message: "Broadcast contract is defined, but production broadcast submission is not enabled."
+        )
     }
 
     func explorerURL(for target: BlockchainExplorerTarget) -> URL? {
@@ -1138,11 +1307,40 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         )
     }
 
+    private func deniedReceipt(
+        request: WalletTransferRequest,
+        preview: WalletTransferPreview,
+        message: String
+    ) -> WalletTransferReceipt {
+        let chainRef = preview.network?.chainRef ?? request.chainRef ?? walletPortfolio.activeChainRef
+        let account = preview.account ?? walletPortfolio.account(forChainRef: chainRef)
+        let asset = request.asset?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? request.asset!
+            : preview.network?.nativeAsset ?? walletPortfolio.network(forChainRef: chainRef)?.nativeAsset ?? "asset"
+        return WalletTransferReceipt(
+            id: UUID(),
+            request: request,
+            chainRef: chainRef,
+            fromAddress: account?.address ?? "",
+            destination: request.destination,
+            amountText: NSDecimalNumber(decimal: request.amount).stringValue,
+            asset: asset,
+            status: .rejected,
+            signatureDigest: nil,
+            transactionHash: nil,
+            explorerURL: preview.explorerURL,
+            broadcastMode: preview.broadcastMode,
+            chainTrustSummary: preview.chainTrustSummary,
+            message: message,
+            createdAt: Date()
+        )
+    }
+
     private func refreshWalletFeatureState() {
         guard let index = featureStates.firstIndex(where: { $0.feature == .wallet }) else { return }
         featureStates[index].status = walletPortfolio.isConnected
-            ? "\(walletPortfolio.activeNetwork?.displayName ?? "Wallet") policy receipt"
-            : "Local policy bridge"
+            ? "\(walletPortfolio.connectionKind.title): \(walletPortfolio.activeNetwork?.displayName ?? "Wallet")"
+            : "Embedded wallet available"
         featureStates[index].mode = .local
         featureStates[index].isAvailable = true
     }

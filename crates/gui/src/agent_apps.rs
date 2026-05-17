@@ -9,6 +9,33 @@ const DEFAULT_APPS_PATH: &str = "configs/agent_apps.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BlockchainAccessContract {
+    #[serde(default)]
+    pub read_chain_data: bool,
+    #[serde(default)]
+    pub read_wallet_state: bool,
+    #[serde(default)]
+    pub prepare_transactions: bool,
+    #[serde(default)]
+    pub simulate_transactions: bool,
+    #[serde(default)]
+    pub request_signing: bool,
+    #[serde(default)]
+    pub request_broadcast: bool,
+    #[serde(default)]
+    pub account_scope: Option<String>,
+    #[serde(default)]
+    pub allowed_chain_refs: Vec<String>,
+    #[serde(default)]
+    pub spend_limit: Option<String>,
+    #[serde(default)]
+    pub approval_gates: Vec<String>,
+    #[serde(default)]
+    pub host_tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentAppDefinition {
     pub id: String,
     pub name: String,
@@ -30,6 +57,8 @@ pub struct AgentAppDefinition {
     pub required_tools: Vec<String>,
     #[serde(default)]
     pub approval_gates: Vec<String>,
+    #[serde(default)]
+    pub blockchain_access: Option<BlockchainAccessContract>,
     #[serde(default)]
     pub skill_id: Option<String>,
     #[serde(default)]
@@ -54,6 +83,7 @@ pub struct AgentAppSummary {
     pub communication_surface: Option<String>,
     pub required_tools: Vec<String>,
     pub approval_gates: Vec<String>,
+    pub blockchain_access: Option<BlockchainAccessContract>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -76,6 +106,7 @@ impl AgentAppDefinition {
             communication_surface: self.communication_surface.clone(),
             required_tools: self.required_tools.clone(),
             approval_gates: self.approval_gates.clone(),
+            blockchain_access: self.blockchain_access.clone(),
         }
     }
 
@@ -122,6 +153,18 @@ mod tests {
             .approval_gates
             .iter()
             .any(|gate| gate.contains("booking")));
+        let blockchain_access = summary.blockchain_access.expect("blockchain access");
+        assert!(blockchain_access.read_chain_data);
+        assert!(blockchain_access.read_wallet_state);
+        assert!(blockchain_access.prepare_transactions);
+        assert!(blockchain_access.simulate_transactions);
+        assert!(blockchain_access.request_signing);
+        assert!(blockchain_access.request_broadcast);
+        assert_eq!(blockchain_access.account_scope.as_deref(), Some("selectedAccount"));
+        assert!(blockchain_access
+            .host_tools
+            .iter()
+            .any(|tool| tool == "dbrowser.tx.request_signature"));
     }
 
     #[test]
@@ -147,6 +190,17 @@ mod tests {
                 .approval_gates
                 .iter()
                 .any(|gate| gate.contains(approval_fragment)));
+            let blockchain_access = summary
+                .blockchain_access
+                .unwrap_or_else(|| panic!("{id} blockchain access"));
+            assert!(blockchain_access.read_chain_data);
+            assert!(blockchain_access.read_wallet_state);
+            assert!(blockchain_access.prepare_transactions);
+            assert!(blockchain_access.request_signing);
+            assert!(blockchain_access
+                .approval_gates
+                .iter()
+                .any(|gate| gate.contains("broadcast")));
 
             let rendered = app.render_task(Some("Demo request with a current page."));
             assert!(rendered.contains("Demo request"));

@@ -76,7 +76,24 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
     var enabled: Bool
     var timeoutMS: Int
     var defaultCapability: String?
+    var blockchainAccess: BlockchainCapabilityGrant
     var status: MCPServerStatus
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case transport
+        case endpoint
+        case program
+        case argumentsText
+        case headersText
+        case environmentText
+        case enabled
+        case timeoutMS
+        case defaultCapability
+        case blockchainAccess
+        case status
+    }
 
     init(
         id: String,
@@ -90,6 +107,7 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         enabled: Bool = false,
         timeoutMS: Int = 20_000,
         defaultCapability: String? = nil,
+        blockchainAccess: BlockchainCapabilityGrant = .defaultForMCPServer(),
         status: MCPServerStatus? = nil
     ) {
         self.id = id
@@ -103,7 +121,29 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         self.enabled = enabled
         self.timeoutMS = timeoutMS
         self.defaultCapability = defaultCapability
+        self.blockchainAccess = blockchainAccess
         self.status = status ?? (enabled ? MCPServerStatus(state: .disconnected, message: "Ready to connect.", checkedAt: nil, discoveredTools: []) : .disabled)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        let status = try container.decodeIfPresent(MCPServerStatus.self, forKey: .status)
+        self.init(
+            id: try container.decode(String.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            transport: try container.decode(MCPServerTransport.self, forKey: .transport),
+            endpoint: try container.decodeIfPresent(String.self, forKey: .endpoint) ?? "",
+            program: try container.decodeIfPresent(String.self, forKey: .program) ?? "",
+            argumentsText: try container.decodeIfPresent(String.self, forKey: .argumentsText) ?? "",
+            headersText: try container.decodeIfPresent(String.self, forKey: .headersText) ?? "",
+            environmentText: try container.decodeIfPresent(String.self, forKey: .environmentText) ?? "",
+            enabled: enabled,
+            timeoutMS: try container.decodeIfPresent(Int.self, forKey: .timeoutMS) ?? 20_000,
+            defaultCapability: try container.decodeIfPresent(String.self, forKey: .defaultCapability),
+            blockchainAccess: try container.decodeIfPresent(BlockchainCapabilityGrant.self, forKey: .blockchainAccess) ?? .defaultForMCPServer(),
+            status: status
+        )
     }
 
     var connectionTarget: String {
@@ -128,6 +168,7 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         copy.argumentsText = copy.argumentsText.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.headersText = copy.headersText.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.environmentText = copy.environmentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        copy.blockchainAccess = copy.blockchainAccess.sanitized()
         if !copy.enabled {
             copy.status = .disabled
         } else if copy.status.state == .disabled {
@@ -172,10 +213,11 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
     }
 
     func connectedStatus(now: Date = Date()) -> MCPServerStatus {
-        let tools = defaultCapability.map { [$0] } ?? Self.defaultTools(for: transport)
+        let baseTools = defaultCapability.map { [$0] } ?? Self.defaultTools(for: transport)
+        let tools = Array(Set(baseTools + blockchainAccess.hostTools)).sorted()
         return MCPServerStatus(
             state: .connected,
-            message: "Connected to \(name) over \(transport.title). Capability negotiation is ready.",
+            message: "Connected to \(name) over \(transport.title). Capability negotiation is ready. \(blockchainAccess.installSummary)",
             checkedAt: now,
             discoveredTools: tools
         )

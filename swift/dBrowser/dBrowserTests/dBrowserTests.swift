@@ -785,6 +785,41 @@ struct dBrowserTests {
         #expect(disconnected?.status.state == .disconnected)
     }
 
+    @Test func blockchainCapabilityGrantDefaultsExposeBrokeredHostTools() {
+        let appGrant = BlockchainCapabilityGrant.defaultForA2UIApp()
+        let mcpGrant = BlockchainCapabilityGrant.defaultForMCPServer()
+
+        #expect(appGrant.requestSigning)
+        #expect(appGrant.requestBroadcast)
+        #expect(appGrant.hostTools.contains("dbrowser.tx.request_signature"))
+        #expect(appGrant.hostTools.contains("dbrowser.tx.request_broadcast"))
+        #expect(mcpGrant.readChainData)
+        #expect(mcpGrant.prepareTransactions)
+        #expect(!mcpGrant.requestSigning)
+        #expect(!mcpGrant.requestBroadcast)
+        #expect(mcpGrant.hostTools.contains("dbrowser.chain.get_status"))
+        #expect(!mcpGrant.hostTools.contains("dbrowser.tx.request_signature"))
+        #expect(mcpGrant.installSummary.contains("Selected account"))
+    }
+
+    @MainActor
+    @Test func mcpServerBlockchainGrantAddsInjectedHostTools() async {
+        let bridge = MobileRuntimeBridge()
+        var server = bridge.mcpServers.first { $0.id == "demo-weather" }!
+        server.enabled = true
+        server.blockchainAccess = .defaultForMCPServer()
+
+        _ = await bridge.updateMCPServer(server)
+        let connected = await bridge.connectMCPServer(server.id)
+
+        #expect(connected?.status.state == .connected)
+        #expect(connected?.status.discoveredTools.contains("dbrowser.chain.get_status") == true)
+        #expect(connected?.status.discoveredTools.contains("dbrowser.wallet.get_portfolio") == true)
+        #expect(connected?.status.discoveredTools.contains("dbrowser.tx.prepare") == true)
+        #expect(connected?.status.discoveredTools.contains("dbrowser.tx.request_signature") == false)
+        #expect(connected?.status.message.contains("Read chain data") == true)
+    }
+
     @Test func blockchainExplorerCatalogBuildsChainSpecificURLs() {
         let catalog = BlockchainExplorerCatalog.default
 
@@ -837,10 +872,12 @@ struct dBrowserTests {
     @Test func runtimeBridgeWalletExplorerPreviewsAndRecordsPolicyReceipts() async {
         let bridge = MobileRuntimeBridge()
 
-        let connected = await bridge.connectWallet()
+        let connected = await bridge.createEmbeddedWallet(label: "Test embedded wallet")
         #expect(connected.isConnected)
         #expect(connected.address?.hasPrefix("0x") == true)
         #expect(connected.explorerURLString?.contains("etherscan.io/address") == true)
+        #expect(bridge.walletPortfolio.connectionKind == .nativeEmbedded)
+        #expect(bridge.walletPortfolio.embeddedWallet?.displayName == "Test embedded wallet")
         #expect(bridge.walletPortfolio.accounts.count == bridge.walletPortfolio.networks.count)
 
         let switched = await bridge.switchWalletNetwork("base-sepolia")
@@ -893,6 +930,44 @@ struct dBrowserTests {
         )
         #expect(receipt.status == .needsApproval)
         #expect(receipt.signatureDigest == nil)
+    }
+
+    @MainActor
+    @Test func brokeredWalletTransactionContractsEnforceSigningAndBroadcastPermissions() async {
+        let bridge = MobileRuntimeBridge()
+        _ = await bridge.createEmbeddedWallet(label: "Contract wallet")
+        let principal = LocalCapabilityPrincipal(id: "travel-booker", name: "Travel Booker", kind: .a2uiApp)
+        let destination = bridge.walletPortfolio.activeAccount?.address ?? "0x1111111111111111111111111111111111111111"
+        let request = WalletTransferRequest(
+            amount: Decimal(10),
+            destination: destination,
+            reason: "Booking deposit"
+        )
+
+        let mcpGrant = BlockchainCapabilityGrant.defaultForMCPServer()
+        let mcpPrepared = await bridge.prepareWalletTransaction(request, principal: principal, grant: mcpGrant)
+        let simulation = await bridge.simulateWalletTransaction(mcpPrepared)
+        let mcpSignature = await bridge.requestWalletSignature(mcpPrepared, grant: mcpGrant)
+        let mcpBroadcast = await bridge.requestWalletBroadcast(mcpSignature, principal: principal, grant: mcpGrant)
+
+        #expect(mcpPrepared.status == .ready)
+        #expect(simulation.status == .success)
+        #expect(mcpSignature.status == .rejected)
+        #expect(mcpSignature.message.contains("Request signing"))
+        #expect(mcpBroadcast.status == .denied)
+
+        let appGrant = BlockchainCapabilityGrant.defaultForA2UIApp()
+        let contract = bridge.blockchainHostContract(for: principal, grant: appGrant)
+        let appPrepared = await bridge.prepareWalletTransaction(request, principal: principal, grant: appGrant)
+        let appSignature = await bridge.requestWalletSignature(appPrepared, grant: appGrant)
+        let appBroadcast = await bridge.requestWalletBroadcast(appSignature, principal: principal, grant: appGrant)
+
+        #expect(contract.hostTools.contains("dbrowser.tx.request_signature"))
+        #expect(!contract.chains.isEmpty)
+        #expect(appPrepared.status == .ready)
+        #expect(appSignature.status == .policySigned)
+        #expect(appBroadcast.status == .unavailable)
+        #expect(appBroadcast.message.contains("unavailable"))
     }
 
     @MainActor
@@ -5089,7 +5164,22 @@ struct dBrowserTests {
 
         #expect(connected?.status.state == .connected)
         #expect(model.mcpServers.first { $0.id == server.id }?.status.state == .connected)
+        #expect(model.mcpServers.first { $0.id == server.id }?.status.discoveredTools.contains("dbrowser.wallet.get_portfolio") == true)
         #expect(model.runtimeFeatureStates.first { $0.feature == .mcpServers }?.status.contains("1 connected") == true)
+    }
+
+    @MainActor
+    @Test func browserViewModelCreatesEmbeddedWallet() async {
+        let model = BrowserViewModel()
+
+        #expect(model.walletPortfolio.isConnected == false)
+        await model.createEmbeddedWallet(label: "Swift native wallet")
+
+        #expect(model.walletPortfolio.isConnected)
+        #expect(model.walletPortfolio.connectionKind == .nativeEmbedded)
+        #expect(model.walletPortfolio.embeddedWallet?.displayName == "Swift native wallet")
+        #expect(model.walletPortfolio.policySummary.contains("Native embedded wallet"))
+        #expect(model.runtimeFeatureStates.first { $0.feature == .wallet }?.status.contains("Native embedded wallet") == true)
     }
 
     @MainActor

@@ -211,6 +211,21 @@ interface AgentAppSummary {
   communicationSurface?: string | null;
   requiredTools?: string[];
   approvalGates?: string[];
+  blockchainAccess?: BlockchainAccessContract | null;
+}
+
+interface BlockchainAccessContract {
+  readChainData?: boolean;
+  readWalletState?: boolean;
+  prepareTransactions?: boolean;
+  simulateTransactions?: boolean;
+  requestSigning?: boolean;
+  requestBroadcast?: boolean;
+  accountScope?: string | null;
+  allowedChainRefs?: string[];
+  spendLimit?: string | null;
+  approvalGates?: string[];
+  hostTools?: string[];
 }
 
 type AgentPlanStep = Record<string, unknown>;
@@ -1754,6 +1769,17 @@ class AppLauncher {
       .filter((value): value is string => Boolean(value))
       .map((value) => `<span class="mcp-status-pill">${this.htmlEscape(value)}</span>`)
       .join('');
+    const blockchainAccess = app.blockchainAccess
+      ? [
+          'Wallet + light clients',
+          app.blockchainAccess.allowedChainRefs?.length ? `${app.blockchainAccess.allowedChainRefs.length} chains` : 'all chains',
+          app.blockchainAccess.requestSigning ? 'signing requests' : null,
+          app.blockchainAccess.requestBroadcast ? 'broadcast requests' : null,
+        ]
+          .filter((value): value is string => Boolean(value))
+          .map((value) => `<span class="mcp-status-pill">${this.htmlEscape(value)}</span>`)
+          .join('')
+      : '';
     const placeholder = app.inputHint || 'Describe what you need';
     const defaultValue = app.defaultInput || '';
     const installState = installed ? '<span class="mcp-status-pill">Installed</span>' : '';
@@ -1784,6 +1810,7 @@ class AppLauncher {
         <p>${this.htmlEscape(app.description)}</p>
         <div class="app-tags">${installState}${chips}</div>
         ${metadataChips ? `<div class="app-tags">${metadataChips}</div>` : ''}
+        ${blockchainAccess ? `<div class="app-tags">${blockchainAccess}</div>` : ''}
         ${runner}
       </article>
     `;

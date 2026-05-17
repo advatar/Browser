@@ -16,6 +16,19 @@
         "booking confirmation",
         "cancellation or change submission"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "Find flights and hotels for SFO to Tokyo, May 20-27, under $1500",
         "Compare refundable weekend trips from Stockholm to Lisbon",
@@ -44,6 +57,19 @@
         "rebook or book replacement travel",
         "payment or wallet spend"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "My flight was canceled. Find the fastest same-day replacement.",
         "Compare refund, rebooking, and overnight options from the current airline page.",
@@ -72,6 +98,19 @@
         "account sign-in",
         "payment or wallet spend"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "Use this conference URL and build a travel plan.",
         "Find venue, hotel block, registration deadline, and airport options from the current page.",
@@ -100,6 +139,19 @@
         "send email or messages",
         "payment or wallet spend"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "Inspect the current form and list what information is missing.",
         "Draft this refund claim but stop before submission.",
@@ -128,6 +180,19 @@
         "contact seller support",
         "payment or wallet spend"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "Compare carry-on luggage under $250 with good returns.",
         "Inspect this return portal and tell me the safest next step.",
@@ -156,6 +221,19 @@
         "pay deposit or booking fee",
         "sign agreement"
       ],
+      "blockchainAccess": {
+        "readChainData": true,
+        "readWalletState": true,
+        "prepareTransactions": true,
+        "simulateTransactions": true,
+        "requestSigning": true,
+        "requestBroadcast": true,
+        "accountScope": "selectedAccount",
+        "allowedChainRefs": ["bitcoin-mainnet", "ethereum-mainnet", "base-mainnet", "base-sepolia", "solana-mainnet", "polygon-mainnet"],
+        "spendLimit": "25",
+        "approvalGates": ["wallet account read", "transaction signing request", "transaction broadcast request"],
+        "hostTools": ["dbrowser.chain.get_status", "dbrowser.wallet.get_portfolio", "dbrowser.tx.prepare", "dbrowser.tx.simulate", "dbrowser.tx.request_signature", "dbrowser.tx.request_broadcast"]
+      },
       "quickPrompts": [
         "Find pet-friendly stays in Lisbon for two weeks under $1800.",
         "Compare apartments near this office with commute and total monthly cost.",

@@ -262,6 +262,12 @@ final class BrowserViewModel: ObservableObject {
         runtimeFeatureStates = runtimeBridge.featureStates
     }
 
+    func createEmbeddedWallet(label: String = "Embedded browser wallet") async {
+        _ = await runtimeBridge.createEmbeddedWallet(label: label)
+        walletPortfolio = runtimeBridge.walletPortfolio
+        runtimeFeatureStates = runtimeBridge.featureStates
+    }
+
     func disconnectWallet() async {
         _ = await runtimeBridge.disconnectWallet()
         walletPortfolio = runtimeBridge.walletPortfolio
@@ -282,6 +288,42 @@ final class BrowserViewModel: ObservableObject {
         let receipt = await runtimeBridge.signWalletTransfer(request)
         walletPortfolio = runtimeBridge.walletPortfolio
         return receipt
+    }
+
+    func blockchainHostContract(
+        for principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) -> BlockchainHostContract {
+        runtimeBridge.blockchainHostContract(for: principal, grant: grant)
+    }
+
+    func prepareWalletTransaction(
+        _ request: WalletTransferRequest,
+        principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletPreparedTransaction {
+        await runtimeBridge.prepareWalletTransaction(request, principal: principal, grant: grant)
+    }
+
+    func simulateWalletTransaction(_ prepared: WalletPreparedTransaction) async -> WalletTransactionSimulation {
+        await runtimeBridge.simulateWalletTransaction(prepared)
+    }
+
+    func requestWalletSignature(
+        _ prepared: WalletPreparedTransaction,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletTransferReceipt {
+        let receipt = await runtimeBridge.requestWalletSignature(prepared, grant: grant)
+        walletPortfolio = runtimeBridge.walletPortfolio
+        return receipt
+    }
+
+    func requestWalletBroadcast(
+        _ receipt: WalletTransferReceipt,
+        principal: LocalCapabilityPrincipal,
+        grant: BlockchainCapabilityGrant
+    ) async -> WalletBroadcastResult {
+        await runtimeBridge.requestWalletBroadcast(receipt, principal: principal, grant: grant)
     }
 
     @discardableResult
