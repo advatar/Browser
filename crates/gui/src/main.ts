@@ -1624,8 +1624,12 @@ class AppLauncher {
   private toggleButton: HTMLButtonElement | null = null;
   private closeButton: HTMLButtonElement | null = null;
   private apps: AgentAppSummary[] = [];
+  private installedAppIds = new Set<string>();
+  private openAppId: string | null = null;
+  private readonly installedAppsKey = 'dbrowser.installedAgentApps.v1';
 
   async initialize(): Promise<void> {
+    this.installedAppIds = this.loadInstalledApps();
     this.cacheDom();
     this.bindEvents();
     await this.loadApps();
@@ -1648,6 +1652,13 @@ class AppLauncher {
   private async loadApps(): Promise<void> {
     try {
       this.apps = (await invoke('list_agent_apps')) as AgentAppSummary[];
+      this.installedAppIds = new Set(
+        [...this.installedAppIds].filter((appId) => this.apps.some((app) => app.id === appId)),
+      );
+      if (this.openAppId && !this.apps.some((app) => app.id === this.openAppId)) {
+        this.openAppId = null;
+      }
+      this.persistInstalledApps();
       this.renderList();
     } catch (error) {
       console.error('Failed to load agent apps', error);
@@ -1675,13 +1686,27 @@ class AppLauncher {
     const app = this.apps.find((item) => item.id === appId);
     if (!app) return;
 
-    if (action === 'launch-app') {
+    if (action === 'install-app') {
+      this.installedAppIds.add(app.id);
+      this.openAppId = app.id;
+      this.persistInstalledApps();
+      this.renderList();
+    } else if (action === 'open-app') {
+      if (!this.installedAppIds.has(app.id)) {
+        this.installedAppIds.add(app.id);
+        this.persistInstalledApps();
+      }
+      this.openAppId = app.id;
+      this.renderList();
+    } else if (action === 'close-app') {
+      this.openAppId = null;
+      this.renderList();
+    } else if (action === 'launch-app') {
       const prompt = this.getInputValue(appId);
       void this.launchApp(app, prompt);
     } else if (action === 'quick-prompt') {
       const prompt = target.getAttribute('data-prompt') || '';
       this.setInputValue(appId, prompt);
-      void this.launchApp(app, prompt);
     }
   }
 
@@ -1694,12 +1719,21 @@ class AppLauncher {
       this.listEl.replaceChildren(empty);
       return;
     }
-    renderTrustedHtml(this.listEl, trustedTemplate(this.apps.map((app) => this.renderCard(app)).join('')));
+    const header = `
+      <section class="app-card" style="border-top: 3px solid #0f172a">
+        <h4>Agent App Store</h4>
+        <small>Install A2UI apps, then open an installed app to run it.</small>
+        <p>${this.installedAppIds.size} installed • ${this.apps.length} available</p>
+      </section>
+    `;
+    renderTrustedHtml(this.listEl, trustedTemplate(header + this.apps.map((app) => this.renderCard(app)).join('')));
   }
 
   private renderCard(app: AgentAppSummary): string {
     const appId = this.htmlEscape(app.id);
     const heroColor = this.safeAccentColor(app.heroColor);
+    const installed = this.installedAppIds.has(app.id);
+    const isOpen = this.openAppId === app.id && installed;
     const quickPrompts = app.quickPrompts
       .map(
         (prompt) => `
@@ -1722,23 +1756,51 @@ class AppLauncher {
       .join('');
     const placeholder = app.inputHint || 'Describe what you need';
     const defaultValue = app.defaultInput || '';
+    const installState = installed ? '<span class="mcp-status-pill">Installed</span>' : '';
+    const runner = isOpen
+      ? `
+        <textarea data-app-input="${appId}" placeholder="${this.htmlEscape(placeholder)}">${this.htmlEscape(defaultValue)}</textarea>
+        <div class="app-quick-prompts">
+          ${quickPrompts}
+        </div>
+        <footer>
+          <button type="button" data-action="launch-app" data-app-id="${appId}">Run ${this.htmlEscape(app.name)}</button>
+          <button type="button" data-action="close-app" data-app-id="${appId}">Close</button>
+        </footer>
+      `
+      : `
+        <p>${app.quickPrompts[0] ? `Example: ${this.htmlEscape(app.quickPrompts[0])}` : ''}</p>
+        <footer>
+          <button type="button" data-action="${installed ? 'open-app' : 'install-app'}" data-app-id="${appId}">
+            ${installed ? 'Open / Run' : 'Install'}
+          </button>
+        </footer>
+      `;
 
     return `
       <article class="app-card" data-app-id="${appId}" style="border-top: 3px solid ${heroColor}">
         <h4>${this.htmlEscape(app.name)}</h4>
         <small>${this.htmlEscape(app.tagline)}</small>
         <p>${this.htmlEscape(app.description)}</p>
-        <div class="app-tags">${chips}</div>
+        <div class="app-tags">${installState}${chips}</div>
         ${metadataChips ? `<div class="app-tags">${metadataChips}</div>` : ''}
-        <textarea data-app-input="${appId}" placeholder="${this.htmlEscape(placeholder)}">${this.htmlEscape(defaultValue)}</textarea>
-        <div class="app-quick-prompts">
-          ${quickPrompts}
-        </div>
-        <footer>
-          <button type="button" data-action="launch-app" data-app-id="${appId}">Launch</button>
-        </footer>
+        ${runner}
       </article>
     `;
+  }
+
+  private loadInstalledApps(): Set<string> {
+    try {
+      const raw = window.localStorage.getItem(this.installedAppsKey);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  private persistInstalledApps(): void {
+    window.localStorage.setItem(this.installedAppsKey, JSON.stringify([...this.installedAppIds]));
   }
 
   private getInputValue(appId: string): string {

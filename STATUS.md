@@ -24,10 +24,10 @@
 ## A2UI Agent App Store UI
 
 - [x] Create tracker issue for app-store style A2UI agent app UI (#109).
-- [ ] Replace the raw app runner list with store cards, install state, and open/run flow.
-- [ ] Keep A2UI, DOM traversal, and approval-gate metadata visible on app cards.
-- [ ] Add focused frontend tests for install, open, quick prompt, launch, and schedule behavior.
-- [ ] Verify relevant frontend tests and build.
+- [x] Replace the raw app runner list with store cards, install state, and open/run flow.
+- [x] Keep A2UI, DOM traversal, and approval-gate metadata visible on app cards.
+- [x] Add focused frontend tests for install, open, quick prompt, launch, and schedule behavior.
+- [x] Verify relevant frontend tests and build.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #109.
 
