@@ -46,8 +46,8 @@
 - [x] Add Travel Disruption Rebooker, Conference Trip Agent, Form-Filling Concierge, Shopping and Returns Agent, and Apartment and Stay Finder to the agent app manifest.
 - [x] Add focused registry tests for the complete A2UI app catalog.
 - [x] Verify relevant Rust/frontend tests and build.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issues #103, #104, #105, #106, and #108.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issues #103, #104, #105, #106, and #108.
 
 ## Swift Build Warning Cleanup
 
