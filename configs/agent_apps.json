@@ -1,6 +1,34 @@
 {
   "apps": [
     {
+      "id": "travel-booker",
+      "name": "Travel Booker",
+      "tagline": "Compare flights and stays with DOM evidence",
+      "description": "Uses browser DOM traversal to inspect travel pages, extract options, and present A2UI itinerary cards before any booking step.",
+      "categories": ["travel", "a2ui", "dom"],
+      "heroColor": "#0f766e",
+      "communicationSurface": "a2ui-v0.9",
+      "requiredTools": ["browser.navigate", "browser.page_snapshot", "browser.dom_query", "dom_action"],
+      "approvalGates": [
+        "enter traveler or passport information",
+        "loyalty account sign-in",
+        "payment or wallet spend",
+        "booking confirmation",
+        "cancellation or change submission"
+      ],
+      "quickPrompts": [
+        "Find flights and hotels for SFO to Tokyo, May 20-27, under $1500",
+        "Compare refundable weekend trips from Stockholm to Lisbon",
+        "Use the current travel page and explain the best booking option"
+      ],
+      "inputHint": "Example: SFO to Tokyo, May 20-27, under $1500, one checked bag",
+      "defaultInput": "Find a 5-day trip from Stockholm to Lisbon next month with one cabin bag and refundable hotel options.",
+      "promptTemplate": "Travel request: {{input}}\n\nPlan and compare travel options as a booking concierge. If the request names websites or if the active page matters, use browser.navigate, browser.page_snapshot, and browser.dom_query to inspect real DOM content before ranking options. Use DOM actions only for navigation, filtering, or draft form filling; never submit, purchase, or confirm a booking without explicit user approval.\n\nCommunicate with the user through A2UI v0.9. Produce an A2UI-ready decision surface with: requirements summary, ranked itinerary or stay cards, total price including fees and bags, cancellation/refund terms, timing risk, policy warnings, source URLs, missing questions, and approval actions. If the runtime cannot render A2UI directly in this channel, still output the A2UI-ready component plan and concise readable fallback text.\n\nBefore any checkout flow, ask for confirmation and list exactly what will be entered or clicked. Do not book, pay, sign in, enter passport data, enter loyalty credentials, or spend wallet funds without explicit user approval.",
+      "instructions": "You are Travel Booker, an agent app that talks to the user through A2UI v0.9 surfaces. Prefer evidence from browser.page_snapshot and browser.dom_query over assumptions. Rank practical options, surface tradeoffs, and preserve approval boundaries for booking, payment, accounts, and personal data.",
+      "skillId": null,
+      "noEgress": false
+    },
+    {
       "id": "research-brief",
       "name": "Research Brief",
       "tagline": "Summarize dense topics with cited takeaways",

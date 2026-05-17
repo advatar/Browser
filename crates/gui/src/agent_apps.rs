@@ -25,6 +25,12 @@ pub struct AgentAppDefinition {
     #[serde(default)]
     pub default_input: Option<String>,
     #[serde(default)]
+    pub communication_surface: Option<String>,
+    #[serde(default)]
+    pub required_tools: Vec<String>,
+    #[serde(default)]
+    pub approval_gates: Vec<String>,
+    #[serde(default)]
     pub skill_id: Option<String>,
     #[serde(default)]
     pub no_egress: Option<bool>,
@@ -45,6 +51,9 @@ pub struct AgentAppSummary {
     pub quick_prompts: Vec<String>,
     pub input_hint: Option<String>,
     pub default_input: Option<String>,
+    pub communication_surface: Option<String>,
+    pub required_tools: Vec<String>,
+    pub approval_gates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +73,9 @@ impl AgentAppDefinition {
             quick_prompts: self.quick_prompts.clone(),
             input_hint: self.input_hint.clone(),
             default_input: self.default_input.clone(),
+            communication_surface: self.communication_surface.clone(),
+            required_tools: self.required_tools.clone(),
+            approval_gates: self.approval_gates.clone(),
         }
     }
 
@@ -83,6 +95,50 @@ impl AgentAppDefinition {
         } else {
             prompt
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn default_manifest_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/agent_apps.json")
+    }
+
+    #[test]
+    fn default_manifest_includes_travel_booker_a2ui_metadata() {
+        let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
+        let app = registry.find("travel-booker").expect("travel-booker app");
+        let summary = app.summary();
+
+        assert_eq!(summary.name, "Travel Booker");
+        assert_eq!(summary.communication_surface.as_deref(), Some("a2ui-v0.9"));
+        assert!(summary.categories.iter().any(|category| category == "travel"));
+        assert!(summary.required_tools.iter().any(|tool| tool == "browser.page_snapshot"));
+        assert!(summary.required_tools.iter().any(|tool| tool == "browser.dom_query"));
+        assert!(summary
+            .approval_gates
+            .iter()
+            .any(|gate| gate.contains("booking")));
+    }
+
+    #[test]
+    fn travel_booker_rendered_task_preserves_dom_a2ui_and_approval_requirements() {
+        let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
+        let app = registry.find("travel-booker").expect("travel-booker app");
+
+        let task = app.render_task(Some(
+            "Find flights from SFO to Tokyo for May 20-27 under $1500 with one checked bag.",
+        ));
+
+        assert!(task.contains("SFO to Tokyo"));
+        assert!(task.contains("A2UI v0.9"));
+        assert!(task.contains("browser.page_snapshot"));
+        assert!(task.contains("browser.dom_query"));
+        assert!(task.contains("Do not book"));
+        assert!(task.contains("explicit user approval"));
     }
 }
 

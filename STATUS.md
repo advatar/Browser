@@ -34,9 +34,9 @@
 
 - [x] Triage existing agent app registry, A2UI surface, and DOM traversal tools.
 - [x] Create tracker issue for Travel Booker (#107).
-- [ ] Add Travel Booker to the agent app manifest with A2UI and DOM traversal instructions.
-- [ ] Add focused tests for Travel Booker metadata and rendered task instructions.
-- [ ] Verify relevant Rust/frontend tests.
+- [x] Add Travel Booker to the agent app manifest with A2UI and DOM traversal instructions.
+- [x] Add focused tests for Travel Booker metadata and rendered task instructions.
+- [x] Verify relevant Rust/frontend tests.
 - [ ] Commit and push only scoped files.
 - [ ] Update and close GitHub issue #107.
 

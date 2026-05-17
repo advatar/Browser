@@ -208,6 +208,9 @@ interface AgentAppSummary {
   quickPrompts: string[];
   inputHint?: string | null;
   defaultInput?: string | null;
+  communicationSurface?: string | null;
+  requiredTools?: string[];
+  approvalGates?: string[];
 }
 
 type AgentPlanStep = Record<string, unknown>;
@@ -1709,6 +1712,14 @@ class AppLauncher {
     const chips = app.categories
       .map((category) => `<span class="mcp-status-pill">${this.htmlEscape(category)}</span>`)
       .join('');
+    const metadataChips = [
+      app.communicationSurface ? this.formatSurfaceLabel(app.communicationSurface) : null,
+      ...(app.requiredTools || []).slice(0, 3),
+      app.approvalGates?.length ? `${app.approvalGates.length} approval gates` : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => `<span class="mcp-status-pill">${this.htmlEscape(value)}</span>`)
+      .join('');
     const placeholder = app.inputHint || 'Describe what you need';
     const defaultValue = app.defaultInput || '';
 
@@ -1718,6 +1729,7 @@ class AppLauncher {
         <small>${this.htmlEscape(app.tagline)}</small>
         <p>${this.htmlEscape(app.description)}</p>
         <div class="app-tags">${chips}</div>
+        ${metadataChips ? `<div class="app-tags">${metadataChips}</div>` : ''}
         <textarea data-app-input="${appId}" placeholder="${this.htmlEscape(placeholder)}">${this.htmlEscape(defaultValue)}</textarea>
         <div class="app-quick-prompts">
           ${quickPrompts}
@@ -1796,6 +1808,13 @@ class AppLauncher {
   private safeAccentColor(value?: string | null): string {
     if (!value) return '#0f172a';
     return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(value) ? value : '#0f172a';
+  }
+
+  private formatSurfaceLabel(value: string): string {
+    if (value.toLowerCase().startsWith('a2ui-v')) {
+      return value.replace(/^a2ui-v/i, 'A2UI v');
+    }
+    return value.replace(/-/g, ' ');
   }
 
   private cssEscape(value: string): string {
