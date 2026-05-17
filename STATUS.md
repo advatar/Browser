@@ -30,8 +30,8 @@
 - [x] Render install/runtime permission and transaction approval surfaces in Swift UI.
 - [x] Add focused tests for capability defaults, permission enforcement, transaction requests, policy receipts, and embedded wallet creation.
 - [x] Verify the Swift build/test lane locally.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #111.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #111.
 
 ## Web Landing Page Refresh
 
