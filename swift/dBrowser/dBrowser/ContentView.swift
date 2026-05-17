@@ -1554,7 +1554,7 @@ private struct MCPServerCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onChange(of: server) { updated in
+        .onChange(of: server) { _, updated in
             draft = updated
         }
         .accessibilityIdentifier("mcp-server-\(server.id)")

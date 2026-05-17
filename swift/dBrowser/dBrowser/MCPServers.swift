@@ -189,7 +189,7 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         MCPServerStatus(state: .disconnected, message: "Disconnected by user.", checkedAt: now, discoveredTools: [])
     }
 
-    static let defaultServers: [MCPServerConfiguration] = [
+    nonisolated static let defaultServers: [MCPServerConfiguration] = [
         MCPServerConfiguration(
             id: "demo-weather",
             name: "Local Demo MCP",

@@ -21,6 +21,15 @@
 
 ## Active Task
 
+## Swift Build Warning Cleanup
+
+- [x] Inspect reported app category, SwiftUI `onChange`, and MCP default-server diagnostics.
+- [x] Add an app category to the Swift Info.plist.
+- [x] Update deprecated SwiftUI `onChange` usage.
+- [x] Make MCP default server seeds usable from nonisolated runtime configuration.
+- [x] Verify the Swift/Xcode build locally.
+- [x] Commit and push only scoped files.
+
 ## Swift A2UI Token Rendering
 
 - [x] Inspect `a2ui-swift` package shape and current Swift package setup.
