@@ -125,6 +125,38 @@ mod tests {
     }
 
     #[test]
+    fn default_manifest_includes_remaining_a2ui_demo_apps() {
+        let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
+        let expected_apps = [
+            ("travel-disruption-rebooker", "Travel Disruption Rebooker", "recovery", "rebook"),
+            ("conference-trip-agent", "Conference Trip Agent", "events", "registration"),
+            ("form-filling-concierge", "Form-Filling Concierge", "forms", "submit"),
+            ("shopping-returns-agent", "Shopping and Returns Agent", "returns", "purchase"),
+            ("apartment-stay-finder", "Apartment and Stay Finder", "housing", "application"),
+        ];
+
+        for (id, name, category, approval_fragment) in expected_apps {
+            let app = registry.find(id).unwrap_or_else(|| panic!("{id} app"));
+            let summary = app.summary();
+            assert_eq!(summary.name, name);
+            assert_eq!(summary.communication_surface.as_deref(), Some("a2ui-v0.9"));
+            assert!(summary.categories.iter().any(|item| item == category));
+            assert!(summary.required_tools.iter().any(|tool| tool == "browser.page_snapshot"));
+            assert!(summary.required_tools.iter().any(|tool| tool == "browser.dom_query"));
+            assert!(summary
+                .approval_gates
+                .iter()
+                .any(|gate| gate.contains(approval_fragment)));
+
+            let rendered = app.render_task(Some("Demo request with a current page."));
+            assert!(rendered.contains("Demo request"));
+            assert!(rendered.contains("A2UI v0.9"));
+            assert!(rendered.contains("browser.page_snapshot"));
+            assert!(rendered.contains("explicit user approval"));
+        }
+    }
+
+    #[test]
     fn travel_booker_rendered_task_preserves_dom_a2ui_and_approval_requirements() {
         let registry = AgentAppRegistry::from_path(default_manifest_path()).expect("registry");
         let app = registry.find("travel-booker").expect("travel-booker app");
