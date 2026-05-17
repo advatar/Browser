@@ -22,6 +22,16 @@
 
 ## Active Task
 
+## Swift A2UI Logos Runtime
+
+- [x] Inspect Logos Basecamp and Logos docs for current runtime/module wording.
+- [x] Add a Logos Basecamp runtime profile for A2UI apps.
+- [x] Surface Logos as a selectable A2UI app runtime in the Swift panel.
+- [x] Add Logos runtime status and explanations to the runtime grid.
+- [x] Add focused unit tests for the Logos A2UI runtime offering.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## AFMarket A2A Expert Training
 
 - [x] Create tracker issue for AFMarket A2A expert marketplace and embedded expert training (#113).

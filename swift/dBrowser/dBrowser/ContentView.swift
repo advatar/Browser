@@ -1185,6 +1185,7 @@ private struct A2UITokenPanelView: View {
     @State private var tokenText = A2UITokenRenderer.sampleTokens
     @State private var isRendering = false
     @State private var didRenderInitialSample = false
+    @State private var selectedRuntimeID = A2UIRuntimeProfile.logosBasecamp.id
 
     private var statusColor: Color {
         if !renderer.errors.isEmpty {
@@ -1193,19 +1194,37 @@ private struct A2UITokenPanelView: View {
         return renderer.hasSurface ? .green : .secondary
     }
 
+    private var selectedRuntime: A2UIRuntimeProfile {
+        A2UIRuntimeProfile.available.first { $0.id == selectedRuntimeID } ?? .logosBasecamp
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 PanelHeaderView(
                     title: "A2UI Tokens",
                     systemImage: BrowserPanel.a2ui.systemImage,
-                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets with the a2ui-swift catalog."
+                    subtitle: "Render A2UI v0.9 token streams into native SwiftUI widgets or target a local-first Logos Basecamp runtime."
                 )
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
                     A2UIMetricTile(title: "Library", value: "a2ui-swift 0.2.8", systemImage: "shippingbox")
                     A2UIMetricTile(title: "Parser", value: "\(renderer.renderSummary.messageCount) messages", systemImage: "curlybraces")
                     A2UIMetricTile(title: "Surface", value: renderer.hasSurface ? "Rendered" : "Empty", systemImage: renderer.hasSurface ? "checkmark.circle" : "circle")
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Runtime")
+                        .font(.headline)
+                    Picker("Runtime", selection: $selectedRuntimeID) {
+                        ForEach(A2UIRuntimeProfile.available) { runtime in
+                            Text(runtime.title).tag(runtime.id)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("a2ui-runtime-picker")
+
+                    A2UIRuntimeProfileView(profile: selectedRuntime)
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -1330,6 +1349,97 @@ private struct A2UITokenPanelView: View {
         isRendering = true
         await renderer.render(rawTokens: tokenText)
         isRendering = false
+    }
+}
+
+private struct A2UIRuntimeProfileView: View {
+    let profile: A2UIRuntimeProfile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(profile.title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(profile.status)
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
+                }
+                Spacer()
+                HStack(spacing: 8) {
+                    if let repositoryURL = profile.repositoryURL {
+                        Link(destination: repositoryURL) {
+                            Label("Repo", systemImage: "chevron.left.forwardslash.chevron.right")
+                        }
+                        .font(.caption)
+                    }
+                    if let documentationURL = profile.documentationURL {
+                        Link(destination: documentationURL) {
+                            Label("Docs", systemImage: "book")
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Text(profile.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(profile.capabilities) { capability in
+                    A2UIRuntimeCapabilityView(capability: capability)
+                }
+            }
+
+            if !profile.setupCommands.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Setup", systemImage: "terminal")
+                        .font(.caption.weight(.semibold))
+                    ForEach(profile.setupCommands, id: \.self) { command in
+                        Text(command)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            ForEach(profile.runtimeNotes, id: \.self) { note in
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("a2ui-runtime-profile-\(profile.id)")
+    }
+}
+
+private struct A2UIRuntimeCapabilityView: View {
+    let capability: A2UIRuntimeCapability
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: capability.systemImage)
+                .frame(width: 20)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(capability.title)
+                    .font(.caption.weight(.semibold))
+                Text(capability.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

@@ -96,6 +96,35 @@ struct dBrowserTests {
         #expect(renderer.errors.isEmpty)
     }
 
+    @Test func a2uiRuntimeProfilesOfferLogosBasecamp() {
+        let logos = A2UIRuntimeProfile.logosBasecamp
+        let searchableText = (
+            [
+                logos.title,
+                logos.status,
+                logos.description
+            ] + logos.setupCommands + logos.runtimeNotes + logos.capabilities.flatMap { [$0.title, $0.detail] }
+        ).joined(separator: " ")
+
+        #expect(A2UIRuntimeProfile.available.contains(where: { $0.id == logos.id }))
+        #expect(logos.repositoryURL?.absoluteString == "https://github.com/logos-co/logos-basecamp")
+        #expect(logos.documentationURL?.absoluteString == "https://github.com/logos-co/logos-docs")
+        #expect(searchableText.contains("Logos Basecamp"))
+        #expect(searchableText.contains("local-first"))
+        #expect(searchableText.contains("decentralised"))
+        #expect(searchableText.contains("nix build '.#bin-macos-app'"))
+        #expect(searchableText.contains("--user-dir"))
+        #expect(searchableText.contains("LOGOS_USER_DIR"))
+        #expect(searchableText.contains("Discovery"))
+        #expect(searchableText.contains("peering"))
+        #expect(searchableText.contains("mixnet"))
+        #expect(searchableText.contains("Blockchain / Execution Zone"))
+        #expect(searchableText.contains("Storage"))
+        #expect(searchableText.contains("Messaging"))
+        #expect(searchableText.contains("LEZ Wallet"))
+        #expect(searchableText.contains("MCP/QML Inspector"))
+    }
+
     @MainActor
     @Test func a2uiRenderingIsTopLevelPanelAndRuntimeFeature() {
         #expect(BrowserPanel.allCases.contains(.a2ui))
@@ -103,7 +132,9 @@ struct dBrowserTests {
 
         let bridge = MobileRuntimeBridge()
         let state = bridge.featureStates.first { $0.feature == .a2uiRendering }
+        let logosState = bridge.featureStates.first { $0.feature == .logosRuntime }
         let explanation = MobileRuntimeFeature.a2uiRendering.explanation
+        let logosExplanation = MobileRuntimeFeature.logosRuntime.explanation
         let searchableText = (
             [
                 MobileRuntimeFeature.a2uiRendering.title,
@@ -112,17 +143,41 @@ struct dBrowserTests {
                 explanation.bridgeBehavior
             ] + explanation.detailPoints
         ).joined(separator: " ")
+        let logosSearchableText = (
+            [
+                MobileRuntimeFeature.logosRuntime.title,
+                MobileRuntimeFeature.logosRuntime.status,
+                logosExplanation.overview,
+                logosExplanation.bridgeBehavior
+            ] + logosExplanation.detailPoints
+        ).joined(separator: " ")
 
         #expect(state?.mode == .native)
         #expect(state?.isAvailable == true)
         #expect(state?.status.contains("A2UISwiftUI") == true)
+        #expect(logosState?.mode == .local)
+        #expect(logosState?.isAvailable == true)
+        #expect(logosState?.status.contains("Logos Basecamp") == true)
         #expect(searchableText.contains("A2UIStreamParser"))
         #expect(searchableText.contains("SurfaceViewModel"))
         #expect(searchableText.contains("A2UISurfaceView"))
         #expect(searchableText.contains("A2UISwiftCore"))
         #expect(searchableText.contains("A2UISwiftUI"))
+        #expect(searchableText.contains("Logos Basecamp"))
         #expect(searchableText.contains("https://zerok.cloud"))
         #expect(searchableText.contains("https://llmos.showntell.dev"))
+        #expect(logosSearchableText.contains("Logos Basecamp"))
+        #expect(logosSearchableText.contains("https://github.com/logos-co/logos-basecamp"))
+        #expect(logosSearchableText.contains("https://github.com/logos-co/logos-docs"))
+        #expect(logosSearchableText.contains("local-first"))
+        #expect(logosSearchableText.contains("decentralised"))
+        #expect(logosSearchableText.contains("mixnet"))
+        #expect(logosSearchableText.contains("Storage"))
+        #expect(logosSearchableText.contains("Messaging"))
+        #expect(logosSearchableText.contains("Blockchain / Execution Zone"))
+        #expect(logosSearchableText.contains("LEZ Wallet"))
+        #expect(logosSearchableText.contains("--user-dir"))
+        #expect(logosSearchableText.contains("MCP/QML Inspector"))
     }
 
     @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {

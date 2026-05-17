@@ -1220,6 +1220,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: "A2UISwiftUI renderer"
             ),
             RuntimeFeatureState(
+                feature: .logosRuntime,
+                mode: .local,
+                isAvailable: true,
+                status: "Logos Basecamp profile ready"
+            ),
+            RuntimeFeatureState(
                 feature: .afmServices,
                 mode: afmSnapshot.allServicesAvailable ? .service : .unavailable,
                 isAvailable: afmSnapshot.allServicesAvailable,

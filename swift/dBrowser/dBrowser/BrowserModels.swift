@@ -254,6 +254,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case chainTrust
     case mcpServers
     case a2uiRendering
+    case logosRuntime
     case afmServices
     case copilot
     case wallet
@@ -270,6 +271,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .chainTrust: "Chain trust"
         case .mcpServers: "MCP servers"
         case .a2uiRendering: "A2UI rendering"
+        case .logosRuntime: "Logos runtime"
         case .afmServices: "AFM services"
         case .copilot: "AI Copilot"
         case .wallet: "Wallet policies"
@@ -286,6 +288,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .chainTrust: "Gateway/RPC fallback"
         case .mcpServers: "HTTP, WebSocket, STDIO"
         case .a2uiRendering: "Native SwiftUI widgets"
+        case .logosRuntime: "Basecamp modules"
         case .afmServices: "Router, registry, pipelines"
         case .copilot: "Local command bridge"
         case .wallet: "Local policy bridge"
@@ -302,6 +305,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .chainTrust: "checkmark.shield"
         case .mcpServers: "network"
         case .a2uiRendering: "square.grid.2x2"
+        case .logosRuntime: "shippingbox"
         case .afmServices: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .wallet: "wallet.pass"
@@ -387,13 +391,27 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
             )
         case .a2uiRendering:
             RuntimeFeatureExplanation(
-                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer.",
-                bridgeBehavior: "The A2UI panel feeds raw LLM or gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, and renders the result through A2UISurfaceView.",
+                overview: "Renders A2UI v0.9 token streams as native SwiftUI widgets through the imported a2ui-swift renderer, while letting app authors choose a runtime profile such as Logos Basecamp.",
+                bridgeBehavior: "The A2UI panel feeds raw LLM or gateway output into A2UIStreamParser, processes decoded A2uiMessage values with SurfaceViewModel, renders the result through A2UISurfaceView, and keeps the selected runtime profile available for action routing.",
                 detailPoints: [
                     "The app links A2UISwiftCore for token parsing, schema decoding, and surface state.",
                     "The app links A2UISwiftUI for the native widget catalog including text, cards, rows, columns, text fields, and buttons.",
                     "Resolved button actions are logged locally today and can be routed through the same approval boundaries used by Copilot, wallet, MCP, ZeroK, and LLM Gateway flows.",
+                    "A2UI apps can stay in the native SwiftUI profile or target Logos Basecamp when they need decentralized storage, messaging, blockchain, wallet, or AI-inspection modules.",
                     "The renderer is isolated behind a Swift wrapper so future tokens from https://zerok.cloud and https://llmos.showntell.dev can use the same surface contract."
+                ]
+            )
+        case .logosRuntime:
+            RuntimeFeatureExplanation(
+                overview: "Offers Logos Basecamp as the local-first, decentralised runtime profile for A2UI apps that need modular storage, messaging, blockchain, wallet, and AI-inspection capabilities.",
+                bridgeBehavior: "The Swift app currently exposes the Logos runtime as a selectable A2UI profile with Basecamp launch and isolation guidance; the next bridge layer should start or attach to Logos modules instead of treating it as an external web page.",
+                detailPoints: [
+                    "Logos Basecamp lives at https://github.com/logos-co/logos-basecamp and the full docs live at https://github.com/logos-co/logos-docs.",
+                    "Basecamp starts the Logos core runtime and loads configured module profiles for decentralized apps.",
+                    "The Logos networking layer covers discovery, peering, and mixnet routing so capability discovery is not pinned to a centralized registry.",
+                    "Important modules for dBrowser A2UI apps are Storage, Messaging / Logos Delivery, Blockchain / Execution Zone, and LEZ Wallet flows for private and public state.",
+                    "Use nix build '.#bin-macos-app' and open result/LogosBasecamp.app for the macOS bundle, or use LogosBasecamp --user-dir <path> / LOGOS_USER_DIR=<path> for isolated app profiles.",
+                    "Basecamp also exposes MCP/QML Inspector support, which lines up with the app's MCP server UI and AI assistant control surface."
                 ]
             )
         case .afmServices:
