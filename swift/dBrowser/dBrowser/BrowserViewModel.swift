@@ -23,6 +23,8 @@ final class BrowserViewModel: ObservableObject {
     @Published var walletPortfolio: WalletPortfolioSnapshot
     @Published var mcpServers: [MCPServerConfiguration]
     @Published var selectedAFMPackID: String?
+    @Published var afmTrainingJobs: [AFMExpertTrainingJob]
+    @Published var latestAFMA2ACallResult: AFMA2ACallResult?
     @Published var openMindCapabilityState: OpenMindMemoryCapabilityState
     @Published var openMindContinuityState: OpenMindContinuityState
     @Published var openMindPostureState: OpenMindPostureState
@@ -77,6 +79,8 @@ final class BrowserViewModel: ObservableObject {
         self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         self.walletPortfolio = runtimeBridge.walletPortfolio
         self.mcpServers = runtimeBridge.mcpServers
+        self.afmTrainingJobs = runtimeBridge.afmTrainingJobs
+        self.latestAFMA2ACallResult = runtimeBridge.latestAFMA2ACallResult
         self.openMindCapabilityState = .disabled
         self.openMindContinuityState = .disabled
         self.openMindPostureState = .disabled
@@ -121,6 +125,11 @@ final class BrowserViewModel: ObservableObject {
 
     var availableAFMPacks: [AFMPackSummary] {
         afmServiceSnapshot.availablePacks
+    }
+
+    var afmPeerExperts: [AFMA2APeerExpert] {
+        (afmServiceSnapshot.peerExperts + afmTrainingJobs.map(\.peerExpert))
+            .sorted { $0.displayName < $1.displayName }
     }
 
     var activeLLMModel: LLMModelProfile {
@@ -239,6 +248,8 @@ final class BrowserViewModel: ObservableObject {
         llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
         walletPortfolio = runtimeBridge.walletPortfolio
         mcpServers = runtimeBridge.mcpServers
+        afmTrainingJobs = runtimeBridge.afmTrainingJobs
+        latestAFMA2ACallResult = runtimeBridge.latestAFMA2ACallResult
         llmModelOptions = LLMModelRegistry.models(
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot
@@ -373,6 +384,26 @@ final class BrowserViewModel: ObservableObject {
         }
         guard afmServiceSnapshot.availablePacks.contains(where: { $0.id == id }) else { return }
         selectedAFMPackID = id
+    }
+
+    @discardableResult
+    func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob {
+        let job = await runtimeBridge.createAFMExpertTrainingJob(request)
+        afmTrainingJobs = runtimeBridge.afmTrainingJobs
+        runtimeFeatureStates = runtimeBridge.featureStates
+        return job
+    }
+
+    @discardableResult
+    func createDemoAFMExpertTrainingJob() async -> AFMExpertTrainingJob {
+        await createAFMExpertTrainingJob(.demo)
+    }
+
+    @discardableResult
+    func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult {
+        let result = await runtimeBridge.callAFMPeerExpert(request)
+        latestAFMA2ACallResult = runtimeBridge.latestAFMA2ACallResult
+        return result
     }
 
     func selectLLMModel(_ id: String) {

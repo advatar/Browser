@@ -262,10 +262,14 @@ protocol RuntimeBridge: AnyObject {
     var walletPortfolio: WalletPortfolioSnapshot { get }
     var downloadItems: [DownloadBridgeItem] { get }
     var mcpServers: [MCPServerConfiguration] { get }
+    var afmTrainingJobs: [AFMExpertTrainingJob] { get }
+    var latestAFMA2ACallResult: AFMA2ACallResult? { get }
 
     func refreshStatus() async -> [RuntimeFeatureState]
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
+    func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob
+    func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult
     func createEmbeddedWallet(label: String) async -> WalletBridgeInfo
     func connectWallet() async -> WalletBridgeInfo
     func disconnectWallet() async -> WalletBridgeInfo
@@ -295,6 +299,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var walletPortfolio: WalletPortfolioSnapshot = .disconnected
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
     @Published private(set) var mcpServers: [MCPServerConfiguration]
+    @Published private(set) var afmTrainingJobs: [AFMExpertTrainingJob] = []
+    @Published private(set) var latestAFMA2ACallResult: AFMA2ACallResult?
 
     private let configuration: RuntimeBridgeConfiguration
     private let explorerCatalog: BlockchainExplorerCatalog = .default
@@ -486,6 +492,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             chainTrustSnapshot: chainTrustSnapshot,
             mcpServers: mcpServers
         )
+        refreshAFMTrainingFeatureState()
         return featureStates
     }
 
@@ -750,6 +757,60 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ].compactMap { $0 },
             mode: .local
         )
+    }
+
+    func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob {
+        let job = AFMExpertTrainingJob(request: request)
+        afmTrainingJobs.insert(job, at: 0)
+        refreshAFMTrainingFeatureState()
+        return job
+    }
+
+    func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult {
+        let experts = afmServiceSnapshot.peerExperts + afmTrainingJobs.map(\.peerExpert)
+        guard let expert = experts.first(where: { $0.id == request.expertID }) else {
+            let result = AFMA2ACallResult(
+                request: request,
+                expert: nil,
+                status: .unavailable,
+                summary: "AFMarket expert \(request.expertID) is not installed locally and was not reported by the registry.",
+                transportSummary: "No A2A route available."
+            )
+            latestAFMA2ACallResult = result
+            return result
+        }
+
+        guard request.userApproved else {
+            let result = AFMA2ACallResult(
+                request: request,
+                expert: expert,
+                status: .requiresApproval,
+                summary: "A2A call to \(expert.displayName) requires explicit user approval before prompt or context is sent.",
+                transportSummary: expert.availabilitySummary
+            )
+            latestAFMA2ACallResult = result
+            return result
+        }
+
+        let status: AFMA2ACallResult.Status = expert.transport == .localEmbedded ? .localPreview : .prepared
+        let summary: String
+        switch expert.transport {
+        case .localEmbedded:
+            summary = "Prepared local embedded expert preview for \(expert.displayName). Production Apple Foundation Model fine-tune execution is not configured."
+        case .registryIngest:
+            summary = "Prepared A2A request envelope for \(expert.displayName). Production peer transport remains brokered by AFMarket routing."
+        case .unavailable:
+            summary = "\(expert.displayName) is registered, but no A2A ingest endpoint is available."
+        }
+        let result = AFMA2ACallResult(
+            request: request,
+            expert: expert,
+            status: expert.transport == .unavailable ? .unavailable : status,
+            summary: summary,
+            transportSummary: expert.availabilitySummary
+        )
+        latestAFMA2ACallResult = result
+        return result
     }
 
     func createEmbeddedWallet(label: String = "Embedded browser wallet") async -> WalletBridgeInfo {
@@ -1342,6 +1403,17 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ? "\(walletPortfolio.connectionKind.title): \(walletPortfolio.activeNetwork?.displayName ?? "Wallet")"
             : "Embedded wallet available"
         featureStates[index].mode = .local
+        featureStates[index].isAvailable = true
+    }
+
+    private func refreshAFMTrainingFeatureState() {
+        guard let index = featureStates.firstIndex(where: { $0.feature == .afmServices }) else { return }
+        let localExpertCount = afmTrainingJobs.count
+        guard localExpertCount > 0 else { return }
+        let suffix = "\(localExpertCount) local expert training job\(localExpertCount == 1 ? "" : "s")"
+        if !featureStates[index].status.contains("local expert training") {
+            featureStates[index].status += ", \(suffix)"
+        }
         featureStates[index].isAvailable = true
     }
 

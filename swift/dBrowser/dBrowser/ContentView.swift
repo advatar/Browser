@@ -1664,7 +1664,26 @@ private struct RuntimePanelView: View {
                 RuntimeFeatureGrid(features: browser.runtimeFeatureStates, onSelect: onSelectFeature)
 
                 ChainTrustPanelView(registry: browser.chainTrustSnapshot)
-                AFMServicesPanelView(snapshot: browser.afmServiceSnapshot)
+                AFMServicesPanelView(
+                    snapshot: browser.afmServiceSnapshot,
+                    trainingJobs: browser.afmTrainingJobs,
+                    latestA2ACall: browser.latestAFMA2ACallResult,
+                    onCreateTrainingJob: {
+                        Task { await browser.createDemoAFMExpertTrainingJob() }
+                    },
+                    onPrepareA2ACall: { expert in
+                        Task {
+                            _ = await browser.callAFMPeerExpert(
+                                AFMA2ACallRequest(
+                                    expertID: expert.id,
+                                    prompt: "Preview this peer expert before sending production A2A traffic.",
+                                    contextCommitment: "local-preview",
+                                    userApproved: false
+                                )
+                            )
+                        }
+                    }
+                )
                 OpenMindMemoryPanelView(
                     state: browser.openMindCapabilityState,
                     continuity: browser.openMindContinuityState,
@@ -2019,6 +2038,10 @@ private struct WalletReceiptSummaryView: View {
 
 private struct AFMServicesPanelView: View {
     let snapshot: AFMServiceSnapshot
+    let trainingJobs: [AFMExpertTrainingJob]
+    let latestA2ACall: AFMA2ACallResult?
+    let onCreateTrainingJob: () -> Void
+    let onPrepareA2ACall: (AFMA2APeerExpert) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2044,6 +2067,89 @@ private struct AFMServicesPanelView: View {
                 .font(.caption)
                 .foregroundStyle(marketplaceAvailable ? Color.green : Color.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("A2A Peer Experts", systemImage: "person.2.wave.2")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(peerExperts.count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                if peerExperts.isEmpty {
+                    Text("No peer-installed Foundation Model experts reported by AFMarket registry or local training jobs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(peerExperts.prefix(4)) { expert in
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(expert.displayName)
+                                    .font(.caption.weight(.semibold))
+                                Text(expert.availabilitySummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Button("Preview") {
+                                onPrepareA2ACall(expert)
+                            }
+                            .buttonStyle(.bordered)
+                            .font(.caption)
+                        }
+                    }
+                }
+                if let latestA2ACall {
+                    Text(latestA2ACall.summary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Embedded Expert Training", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button {
+                        onCreateTrainingJob()
+                    } label: {
+                        Label("Create Demo Expert", systemImage: "plus.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption)
+                }
+                Text("Local profile-adapter jobs prepare an expert persona and dataset contract. Production Apple Foundation Model fine-tune adapters are not configured yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if trainingJobs.isEmpty {
+                    Text("No embedded expert training jobs yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(trainingJobs.prefix(4)) { job in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(job.request.displayName)
+                                .font(.caption.weight(.semibold))
+                            Text(job.displaySummary)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text([job.outputRunnerID, job.request.policy.safetySummary].joined(separator: " / "))
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             if snapshot.availablePacks.isEmpty {
                 Text("No runner packs reported by router, registry, or marketplace.")
@@ -2081,6 +2187,11 @@ private struct AFMServicesPanelView: View {
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityIdentifier("runtime-afm-services")
+    }
+
+    private var peerExperts: [AFMA2APeerExpert] {
+        (snapshot.peerExperts + trainingJobs.map(\.peerExpert))
+            .sorted { $0.displayName < $1.displayName }
     }
 
     private func marketplacePackDetails(for pack: AFMPackSummary) -> [String] {

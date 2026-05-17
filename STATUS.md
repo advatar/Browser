@@ -18,20 +18,21 @@
 - Production hardening changes are implemented and validated with `cargo test -p gui`, `npm --prefix orbit-shell-ui run test`, and `npm --prefix orbit-shell-ui run build`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
 - All GitHub issues are closed as of May 17, 2026 after closing completed Swift chain-trust parent issues #59-#66.
+- AFMarket A2A peer expert and embedded training surfaces are implemented in Swift, tested locally, pushed, and #113 is closed.
 
 ## Active Task
 
 ## AFMarket A2A Expert Training
 
 - [x] Create tracker issue for AFMarket A2A expert marketplace and embedded expert training (#113).
-- [ ] Inspect Swift AFMarket service, router, registry, node, Copilot, and panel surfaces.
-- [ ] Add typed Swift models for peer AFM experts, A2A calls, embedded training jobs, fine-tune policy, and publish readiness.
-- [ ] Extend runtime bridge/view model with local training job creation and A2A peer expert call previews/results.
-- [ ] Surface AFMarket peer experts and embedded training jobs in the Swift AFM services panel.
-- [ ] Add focused Swift tests for contracts, lifecycle, and safe fallback labeling.
-- [ ] Verify the Swift test lane locally.
-- [ ] Commit and push only scoped files.
-- [ ] Update and close GitHub issue #113.
+- [x] Inspect Swift AFMarket service, router, registry, node, Copilot, and panel surfaces.
+- [x] Add typed Swift models for peer AFM experts, A2A calls, embedded training jobs, fine-tune policy, and publish readiness.
+- [x] Extend runtime bridge/view model with local training job creation and A2A peer expert call previews/results.
+- [x] Surface AFMarket peer experts and embedded training jobs in the Swift AFM services panel.
+- [x] Add focused Swift tests for contracts, lifecycle, and safe fallback labeling.
+- [x] Verify the Swift test lane locally.
+- [x] Commit and push only scoped files.
+- [x] Update and close GitHub issue #113.
 
 ## Swift Chain Trust Parent Issue Closure
 

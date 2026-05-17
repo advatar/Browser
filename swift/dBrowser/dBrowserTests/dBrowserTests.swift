@@ -1106,6 +1106,21 @@ struct dBrowserTests {
 
         model.selectAFMPack("afm://demo-writer")
         #expect(model.selectedAFMPackID == "afm://demo-writer")
+
+        let trainingJob = await model.createDemoAFMExpertTrainingJob()
+        #expect(model.afmTrainingJobs.first?.id == trainingJob.id)
+        #expect(model.afmPeerExperts.contains { $0.id == trainingJob.outputRunnerID })
+        #expect(model.runtimeFeatureStates.first { $0.feature == .afmServices }?.status.contains("local expert training") == true)
+
+        let a2aPreview = await model.callAFMPeerExpert(
+            AFMA2ACallRequest(
+                expertID: trainingJob.outputRunnerID,
+                prompt: "Preview a local trained expert.",
+                userApproved: false
+            )
+        )
+        #expect(a2aPreview.status == .requiresApproval)
+        #expect(model.latestAFMA2ACallResult?.id == a2aPreview.id)
     }
 
     @MainActor
@@ -1183,10 +1198,78 @@ struct dBrowserTests {
 
         #expect(snapshot.registryExperts.first?.id == "exp-001")
         #expect(snapshot.registryExperts.first?.pricePer1K == 2.5)
+        #expect(snapshot.peerExperts.first?.id == "exp-001")
+        #expect(snapshot.peerExperts.first?.transport == .registryIngest)
+        #expect(snapshot.peerExperts.first?.availabilitySummary.contains("apple.afm.demo") == true)
         #expect(snapshot.registryBundles.first?.runnerID == "afm://demo-writer")
         #expect(snapshot.registryBundles.first?.hashes.bundle == "sha256:bundle")
         #expect(bundlePack?.checksum == "sha256:bundle")
         #expect(bundlePack?.bundleURL == "https://example.com/demo-writer.tar")
+    }
+
+    @Test func afmExpertTrainingJobBuildsLocalPeerExpertContract() {
+        let request = AFMExpertTrainingRequest(
+            displayName: "Local Medical Policy Expert",
+            objective: "Answer questions from approved policy examples.",
+            datasetSummary: "Redacted Q&A examples and policy snippets.",
+            sampleCount: 18,
+            policy: AFMExpertTrainingPolicy(
+                baseModelID: "apple.foundation-model.local",
+                method: .profileAdapter,
+                privacyMode: .redactedA2A,
+                allowA2A: true,
+                publishToAFMarket: true,
+                domainTags: ["medical", "policy", "medical"]
+            )
+        )
+
+        let job = AFMExpertTrainingJob(request: request)
+        let peer = job.peerExpert
+
+        #expect(job.status == .readyForLocalUse)
+        #expect(job.publishReadiness == .needsAttestation)
+        #expect(job.localAdapterID.hasPrefix("afm-local-"))
+        #expect(job.outputRunnerID.hasSuffix("@draft"))
+        #expect(job.request.policy.domainTags == ["medical", "policy"])
+        #expect(peer.transport == .localEmbedded)
+        #expect(peer.baseModelID == "apple.foundation-model.local")
+        #expect(peer.publishReadiness == .needsAttestation)
+        #expect(peer.availabilitySummary.contains("Local embedded"))
+        #expect(job.adapterStatus.contains("Production Apple Foundation Model fine-tune"))
+    }
+
+    @MainActor
+    @Test func runtimeBridgeCreatesEmbeddedAFMTrainingJobAndA2APreview() async {
+        let bridge = MobileRuntimeBridge()
+        let job = await bridge.createAFMExpertTrainingJob(.demo)
+
+        #expect(bridge.afmTrainingJobs.count == 1)
+        #expect(bridge.afmTrainingJobs.first?.outputRunnerID == job.outputRunnerID)
+        #expect(bridge.featureStates.first { $0.feature == .afmServices }?.status.contains("local expert training") == true)
+
+        let approvalRequired = await bridge.callAFMPeerExpert(
+            AFMA2ACallRequest(
+                expertID: job.outputRunnerID,
+                prompt: "Ask the local expert.",
+                contextCommitment: "fnv1a64:test",
+                userApproved: false
+            )
+        )
+        #expect(approvalRequired.status == .requiresApproval)
+        #expect(approvalRequired.summary.contains("requires explicit user approval"))
+
+        let preview = await bridge.callAFMPeerExpert(
+            AFMA2ACallRequest(
+                expertID: job.outputRunnerID,
+                prompt: "Ask the local expert.",
+                contextCommitment: "fnv1a64:test",
+                userApproved: true
+            )
+        )
+        #expect(preview.status == .localPreview)
+        #expect(preview.expert?.transport == .localEmbedded)
+        #expect(preview.summary.contains("Production Apple Foundation Model fine-tune execution is not configured"))
+        #expect(bridge.latestAFMA2ACallResult?.id == preview.id)
     }
 
     @MainActor
