@@ -21,6 +21,25 @@
 
 ## Active Task
 
+## A2UI Agent App Concepts
+
+- [x] Create GitHub issue for Shopping and Returns Agent (#103).
+- [x] Create GitHub issue for Form-Filling Concierge (#104).
+- [x] Create GitHub issue for Conference Trip Agent (#105).
+- [x] Create GitHub issue for Travel Disruption Rebooker (#106).
+- [x] Create GitHub issue for Travel Booker (#107).
+- [x] Create GitHub issue for Apartment and Stay Finder (#108).
+
+## A2UI Travel Booker Agent App
+
+- [x] Triage existing agent app registry, A2UI surface, and DOM traversal tools.
+- [x] Create tracker issue for Travel Booker (#107).
+- [ ] Add Travel Booker to the agent app manifest with A2UI and DOM traversal instructions.
+- [ ] Add focused tests for Travel Booker metadata and rendered task instructions.
+- [ ] Verify relevant Rust/frontend tests.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issue #107.
+
 ## Swift Build Warning Cleanup
 
 - [x] Inspect reported app category, SwiftUI `onChange`, and MCP default-server diagnostics.
