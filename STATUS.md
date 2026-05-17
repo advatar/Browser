@@ -40,6 +40,15 @@
 - [x] Commit and push only scoped files.
 - [x] Update and close GitHub issue #107.
 
+## A2UI Agent App Catalog Completion
+
+- [x] Confirm remaining demo app issues are open and not blocked by product decisions (#103, #104, #105, #106, #108).
+- [ ] Add Travel Disruption Rebooker, Conference Trip Agent, Form-Filling Concierge, Shopping and Returns Agent, and Apartment and Stay Finder to the agent app manifest.
+- [ ] Add focused registry tests for the complete A2UI app catalog.
+- [ ] Verify relevant Rust/frontend tests and build.
+- [ ] Commit and push only scoped files.
+- [ ] Update and close GitHub issues #103, #104, #105, #106, and #108.
+
 ## Swift Build Warning Cleanup
 
 - [x] Inspect reported app category, SwiftUI `onChange`, and MCP default-server diagnostics.
