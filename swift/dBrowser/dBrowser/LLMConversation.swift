@@ -36,6 +36,76 @@ enum LLMModelAvailabilityStatus: String, Codable, Equatable {
     case unavailable
 }
 
+struct LLMContextMinimizationProfile: Codable, Equatable {
+    var packerID: String
+    var localRuntimeID: String
+    var disclosureBoundary: String
+    var maxPromptTokens: Int
+    var rules: [String]
+
+    nonisolated init(
+        packerID: String,
+        localRuntimeID: String,
+        disclosureBoundary: String,
+        maxPromptTokens: Int,
+        rules: [String]
+    ) {
+        self.packerID = packerID
+        self.localRuntimeID = localRuntimeID
+        self.disclosureBoundary = disclosureBoundary
+        self.maxPromptTokens = max(512, maxPromptTokens)
+        self.rules = rules
+    }
+
+    nonisolated static func profile(
+        providerKind: LLMModelProviderKind,
+        trustBoundary: LLMTrustBoundary,
+        contextWindowTokens: Int
+    ) -> LLMContextMinimizationProfile {
+        let localRuntime = "SwiftLM/MLX"
+        let baseRules = [
+            "Use Prune-style signatures-first context packing before raw transcript expansion.",
+            "Prefer SwiftLM local execution when the selected model can satisfy the request.",
+            "Attach only selected page snapshots and approved memory citations.",
+            "Keep browser history and hidden tab state out of prompt payloads."
+        ]
+
+        switch trustBoundary {
+        case .onDevice:
+            return LLMContextMinimizationProfile(
+                packerID: "prune.context-pack.signatures-first",
+                localRuntimeID: localRuntime,
+                disclosureBoundary: "On-device only; no external context egress.",
+                maxPromptTokens: min(contextWindowTokens, 8_192),
+                rules: baseRules + [
+                    "Compress older turns locally instead of calling a remote summarizer."
+                ]
+            )
+        case .serviceBacked:
+            return LLMContextMinimizationProfile(
+                packerID: "prune.context-pack.service-redacted",
+                localRuntimeID: localRuntime,
+                disclosureBoundary: "Service receives only rendered, redacted conversation context.",
+                maxPromptTokens: min(contextWindowTokens, 16_384),
+                rules: baseRules + [
+                    "Send context commitments and memory IDs rather than full stores where possible."
+                ]
+            )
+        case .remoteGateway:
+            return LLMContextMinimizationProfile(
+                packerID: providerKind == .llmGateway ? "prune.context-pack.gateway-minimal" : "prune.context-pack.remote-minimal",
+                localRuntimeID: localRuntime,
+                disclosureBoundary: "Remote gateway receives the smallest approved prompt envelope.",
+                maxPromptTokens: min(contextWindowTokens, 12_288),
+                rules: baseRules + [
+                    "Strip unrelated ledger turns before ZeroK or LLM Gateway routing.",
+                    "Use commitments for omitted context so follow-up retrieval remains auditable."
+                ]
+            )
+        }
+    }
+}
+
 struct LLMModelAvailability: Codable, Equatable {
     var status: LLMModelAvailabilityStatus
     var message: String
@@ -74,6 +144,7 @@ struct LLMModelProfile: Equatable, Identifiable {
     var runtimeMode: RuntimeBridgeMode
     var availability: LLMModelAvailability
     var detail: String
+    var contextMinimization: LLMContextMinimizationProfile
 
     var statusText: String {
         "\(trustBoundary.title) / \(availability.message)"
@@ -89,7 +160,8 @@ struct LLMModelProfile: Equatable, Identifiable {
         supportsMemoryCitations: Bool,
         runtimeMode: RuntimeBridgeMode,
         availability: LLMModelAvailability,
-        detail: String
+        detail: String,
+        contextMinimization: LLMContextMinimizationProfile? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -101,6 +173,11 @@ struct LLMModelProfile: Equatable, Identifiable {
         self.runtimeMode = runtimeMode
         self.availability = availability
         self.detail = detail
+        self.contextMinimization = contextMinimization ?? .profile(
+            providerKind: providerKind,
+            trustBoundary: trustBoundary,
+            contextWindowTokens: self.contextWindowTokens
+        )
     }
 }
 
@@ -481,6 +558,7 @@ struct LLMRenderedConversationContext: Codable, Equatable {
     var wasCompressed: Bool
     var snapshotCommitment: String?
     var memoryContextIDs: [String]
+    var contextMinimization: LLMContextMinimizationProfile
 
     nonisolated init(
         prompt: String,
@@ -489,7 +567,8 @@ struct LLMRenderedConversationContext: Codable, Equatable {
         estimatedPromptTokens: Int,
         wasCompressed: Bool,
         snapshotCommitment: String?,
-        memoryContextIDs: [String]
+        memoryContextIDs: [String],
+        contextMinimization: LLMContextMinimizationProfile
     ) {
         self.prompt = prompt
         self.includedMessageIDs = includedMessageIDs
@@ -498,6 +577,7 @@ struct LLMRenderedConversationContext: Codable, Equatable {
         self.wasCompressed = wasCompressed
         self.snapshotCommitment = snapshotCommitment
         self.memoryContextIDs = memoryContextIDs
+        self.contextMinimization = contextMinimization
     }
 }
 
@@ -518,7 +598,7 @@ enum LLMConversationContextRenderer {
             .joined(separator: "\n")
         var renderedMessages = conversation.messages.map(renderMessage)
         var compressedMessages: [(id: UUID, text: String)] = []
-        let tokenBudget = max(256, model.contextWindowTokens - 512)
+        let tokenBudget = max(256, min(model.contextWindowTokens - 512, model.contextMinimization.maxPromptTokens))
 
         while estimatedTokens(for: prompt(
             model: model,
@@ -547,7 +627,8 @@ enum LLMConversationContextRenderer {
             estimatedPromptTokens: estimatedTokens(for: renderedPrompt),
             wasCompressed: !compressedMessages.isEmpty,
             snapshotCommitment: snapshotAttachment?.commitment,
-            memoryContextIDs: memoryCitations.map(\.id)
+            memoryContextIDs: memoryCitations.map(\.id),
+            contextMinimization: model.contextMinimization
         )
     }
 
@@ -578,8 +659,10 @@ enum LLMConversationContextRenderer {
     ) -> String {
         var sections = [
             "Active model: \(model.displayName) (\(model.providerKind.title), \(model.trustBoundary.title)).",
-            "Use the canonical conversation ledger below. Do not assume hidden context."
+            "Use the canonical conversation ledger below. Do not assume hidden context.",
+            "Context minimization: \(model.contextMinimization.packerID) via \(model.contextMinimization.localRuntimeID). \(model.contextMinimization.disclosureBoundary) Budget \(model.contextMinimization.maxPromptTokens) tokens."
         ]
+        sections.append("Context rules:\n\(model.contextMinimization.rules.map { "- \($0)" }.joined(separator: "\n"))")
         if !switchEvents.isEmpty {
             sections.append("Model switch events:\n\(switchEvents)")
         }

@@ -251,12 +251,83 @@ enum DecentralizedStorageGatewayStrategy: Equatable {
     case none
 }
 
+enum DecentralizedStorageAdapterStage: String, Equatable {
+    case directGateway = "direct-gateway"
+    case remoteRuntimeHandoff = "remote-runtime-handoff"
+    case nativePlanned = "native-planned"
+}
+
+struct DecentralizedStorageAdapterSpec: Equatable {
+    let issueNumber: Int?
+    let handlerID: String
+    let stage: DecentralizedStorageAdapterStage
+    let locatorKind: String
+    let trustBoundary: String
+    let verificationRequirements: [String]
+
+    var issueReference: String? {
+        issueNumber.map { "#\($0)" }
+    }
+
+    var verificationSummary: String {
+        verificationRequirements.joined(separator: " ")
+    }
+
+    static func gateway(networkID: String, locatorKind: String = "content identifier") -> DecentralizedStorageAdapterSpec {
+        DecentralizedStorageAdapterSpec(
+            issueNumber: nil,
+            handlerID: "\(networkID).gateway",
+            stage: .directGateway,
+            locatorKind: locatorKind,
+            trustBoundary: "HTTPS gateway fetch with the decentralized URI preserved as source metadata.",
+            verificationRequirements: [
+                "Preserve the original URI and content identifier.",
+                "Treat the gateway as transport, not the content trust root."
+            ]
+        )
+    }
+
+    static func remote(
+        issueNumber: Int,
+        handlerID: String,
+        locatorKind: String,
+        trustBoundary: String,
+        verificationRequirements: [String]
+    ) -> DecentralizedStorageAdapterSpec {
+        DecentralizedStorageAdapterSpec(
+            issueNumber: issueNumber,
+            handlerID: handlerID,
+            stage: .remoteRuntimeHandoff,
+            locatorKind: locatorKind,
+            trustBoundary: trustBoundary,
+            verificationRequirements: verificationRequirements
+        )
+    }
+}
+
 struct DecentralizedStorageNetwork: Identifiable, Equatable {
     let id: String
     let title: String
     let schemes: [String]
     let distributionRole: String
     let gatewayStrategy: DecentralizedStorageGatewayStrategy
+    let adapter: DecentralizedStorageAdapterSpec
+
+    init(
+        id: String,
+        title: String,
+        schemes: [String],
+        distributionRole: String,
+        gatewayStrategy: DecentralizedStorageGatewayStrategy,
+        adapter: DecentralizedStorageAdapterSpec? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.schemes = schemes
+        self.distributionRole = distributionRole
+        self.gatewayStrategy = gatewayStrategy
+        self.adapter = adapter ?? .gateway(networkID: id)
+    }
 
     var primaryScheme: String {
         schemes.first ?? id
@@ -268,14 +339,16 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             title: "IPFS",
             schemes: ["ipfs"],
             distributionRole: "Content-addressed app bundles, decentralized websites, and immutable asset trees.",
-            gatewayStrategy: .none
+            gatewayStrategy: .none,
+            adapter: .gateway(networkID: "ipfs", locatorKind: "CID or IPFS path")
         ),
         DecentralizedStorageNetwork(
             id: "ipns",
             title: "IPNS",
             schemes: ["ipns"],
             distributionRole: "Mutable names for IPFS app catalogs, release channels, and live decentralized web pages.",
-            gatewayStrategy: .none
+            gatewayStrategy: .none,
+            adapter: .gateway(networkID: "ipns", locatorKind: "IPNS name or peer ID")
         ),
         DecentralizedStorageNetwork(
             id: "swarm",
@@ -296,84 +369,204 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             title: "Filecoin",
             schemes: ["filecoin", "piececid", "fil"],
             distributionRole: "Large app bundles, model weights, data archives, and storage-deal receipts.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/filecoin/resolve"),
+            adapter: .remote(
+                issueNumber: 119,
+                handlerID: "filecoin.piece-car",
+                locatorKind: "Filecoin CID, piece CID, or storage deal reference",
+                trustBoundary: "ZeroK retrieves CAR or payload data while the app keeps CID and deal verification as the local trust target.",
+                verificationRequirements: [
+                    "Preserve payload CID, piece CID, path, query, and fragment.",
+                    "Verify CAR block roots and piece inclusion before treating retrieved content as trusted."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "walrus",
             title: "Walrus",
             schemes: ["walrus"],
             distributionRole: "Programmable blob availability for Sui and Walrus app deployments.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/walrus/resolve"),
+            adapter: .remote(
+                issueNumber: 120,
+                handlerID: "walrus.blob",
+                locatorKind: "Walrus blob ID",
+                trustBoundary: "ZeroK locates the blob while the app keeps Sui/Walrus blob metadata and checksum validation explicit.",
+                verificationRequirements: [
+                    "Preserve blob ID and any epoch or object metadata.",
+                    "Validate blob digest and Sui/Walrus metadata before install or render."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "iroh",
             title: "Iroh blobs",
             schemes: ["iroh", "iroh-blob"],
             distributionRole: "BLAKE3-addressed peer distribution and local-first install sync.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/iroh/resolve"),
+            adapter: .remote(
+                issueNumber: 121,
+                handlerID: "iroh.blake3-blob",
+                locatorKind: "Iroh blob hash or ticket",
+                trustBoundary: "ZeroK or an Iroh peer fetches bytes while the app keeps BLAKE3 hash verification local.",
+                verificationRequirements: [
+                    "Preserve blob hash, ticket, peer hints, and path.",
+                    "Verify BLAKE3 content hash before exposing fetched bytes."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "hypercore",
             title: "Hypercore",
             schemes: ["hyper", "hypercore", "hyperdrive", "pear", "dat"],
             distributionRole: "Signed mutable catalogs, append-only update feeds, and peer-synced app data.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/hypercore/resolve"),
+            adapter: .remote(
+                issueNumber: 122,
+                handlerID: "hypercore.feed",
+                locatorKind: "Hypercore public key, Hyperdrive key, or Pear app key",
+                trustBoundary: "ZeroK resolves feed data while append-only signature verification remains the local trust target.",
+                verificationRequirements: [
+                    "Preserve feed key, drive path, version, and discovery key hints.",
+                    "Verify signed tree or feed blocks before trusting mutable catalog state."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "sia",
             title: "Sia",
             schemes: ["sia"],
             distributionRole: "Encrypted private app data and decentralized backup storage.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/sia/resolve"),
+            adapter: .remote(
+                issueNumber: 123,
+                handlerID: "sia.renterd-object",
+                locatorKind: "Sia object ID, Skylink, or renterd path",
+                trustBoundary: "ZeroK bridges renterd or host retrieval while encryption keys and object integrity stay app-owned.",
+                verificationRequirements: [
+                    "Preserve object path, bucket, skylink, and encryption metadata.",
+                    "Validate object checksum and decrypt locally when keys are user-held."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "storj",
             title: "Storj",
             schemes: ["storj"],
             distributionRole: "Encrypted object storage fallback for app data and backups.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/storj/resolve"),
+            adapter: .remote(
+                issueNumber: 124,
+                handlerID: "storj.uplink-object",
+                locatorKind: "Storj bucket and object path",
+                trustBoundary: "ZeroK bridges uplink access while encryption passphrases, grants, and object validation remain separate from browsing state.",
+                verificationRequirements: [
+                    "Preserve bucket, object key, grant scope, version, and path.",
+                    "Validate object checksum and avoid leaking encryption grants to generic page context."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "tahoe-lafs",
             title: "Tahoe-LAFS",
             schemes: ["tahoe", "lafs"],
             distributionRole: "Least-authority private app data replicated across storage grids.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/tahoe-lafs/resolve"),
+            adapter: .remote(
+                issueNumber: 125,
+                handlerID: "tahoe.capability",
+                locatorKind: "Tahoe-LAFS capability URI",
+                trustBoundary: "ZeroK relays grid access while the app treats Tahoe capabilities as secrets and least-authority access tokens.",
+                verificationRequirements: [
+                    "Preserve read/write capability type without promoting it into visible page text.",
+                    "Verify immutable directory or file hashes when capabilities include them."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "autonomi",
             title: "Autonomi",
             schemes: ["autonomi", "safe"],
             distributionRole: "Encrypted autonomous storage for app data, app publishing, and private distribution.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/autonomi/resolve"),
+            adapter: .remote(
+                issueNumber: 126,
+                handlerID: "autonomi.address",
+                locatorKind: "Autonomi address or SAFE URL",
+                trustBoundary: "ZeroK bridges network lookup while app-held keys and content address checks remain the trust boundary.",
+                verificationRequirements: [
+                    "Preserve address, data map, and private access metadata.",
+                    "Verify encrypted chunk map and content address before install or render."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "bittorrent",
             title: "BitTorrent / WebTorrent",
             schemes: ["magnet", "bittorrent", "webtorrent"],
             distributionRole: "Hot public release distribution with signed manifests as the trust root.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/bittorrent/resolve"),
+            adapter: .remote(
+                issueNumber: 127,
+                handlerID: "bittorrent.infohash",
+                locatorKind: "BTIH/BTMH infohash or torrent URI",
+                trustBoundary: "ZeroK can seed or fetch torrent data while signed manifests and infohash verification stay visible to the app.",
+                verificationRequirements: [
+                    "Preserve xt, dn, tr, ws, and exact magnet parameters.",
+                    "Verify infohash and signed release manifest before trusting downloaded app content."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "ceramic",
             title: "Ceramic",
             schemes: ["ceramic", "ceramic-stream"],
             distributionRole: "Mutable app metadata, profiles, ratings, and install records.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/ceramic/resolve"),
+            adapter: .remote(
+                issueNumber: 128,
+                handlerID: "ceramic.stream",
+                locatorKind: "Ceramic stream ID or commit ID",
+                trustBoundary: "ZeroK resolves stream state while DID signatures, anchors, and commit history remain explicit verification inputs.",
+                verificationRequirements: [
+                    "Preserve stream ID, commit ID, controller DID, and model hints.",
+                    "Verify signed commits and anchor proofs before trusting mutable metadata."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "orbitdb",
             title: "OrbitDB",
             schemes: ["orbitdb"],
             distributionRole: "Peer-synced app databases and local-first collaboration state.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/orbitdb/resolve"),
+            adapter: .remote(
+                issueNumber: 129,
+                handlerID: "orbitdb.address",
+                locatorKind: "OrbitDB address",
+                trustBoundary: "ZeroK can bridge replication while access-controller checks and signed log heads stay local verification targets.",
+                verificationRequirements: [
+                    "Preserve database address, store type, and access-controller metadata.",
+                    "Verify signed operation log entries before treating collaborative state as trusted."
+                ]
+            )
         ),
         DecentralizedStorageNetwork(
             id: "radicle",
             title: "Radicle",
             schemes: ["rad", "radicle"],
             distributionRole: "Peer-to-peer source distribution, recipes, and code provenance.",
-            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
+            gatewayStrategy: .remoteRuntime(path: "/dweb/radicle/resolve"),
+            adapter: .remote(
+                issueNumber: 130,
+                handlerID: "radicle.repository",
+                locatorKind: "Radicle repository ID, NID, or URN",
+                trustBoundary: "ZeroK bridges seed lookup while repository identity, signed refs, and code provenance stay app-visible.",
+                verificationRequirements: [
+                    "Preserve repository ID, revision, path, and seed hints.",
+                    "Verify signed refs and expected repository identity before installing code."
+                ]
+            )
         )
     ]
 
@@ -428,10 +621,39 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         var queryItems = components.queryItems ?? []
         queryItems.append(URLQueryItem(name: "network", value: id))
         queryItems.append(URLQueryItem(name: "scheme", value: url.scheme?.lowercased() ?? primaryScheme))
+        queryItems.append(URLQueryItem(name: "adapter", value: adapter.handlerID))
+        queryItems.append(URLQueryItem(name: "resolution_stage", value: adapter.stage.rawValue))
+        queryItems.append(URLQueryItem(name: "locator_kind", value: adapter.locatorKind))
+        queryItems.append(URLQueryItem(name: "locator", value: adapterLocator(for: url, originalInput: originalInput)))
+        if let issueNumber = adapter.issueNumber {
+            queryItems.append(URLQueryItem(name: "native_issue", value: "\(issueNumber)"))
+        }
         queryItems.append(URLQueryItem(name: "uri", value: originalInput))
         components.queryItems = queryItems
         components.fragment = nil
         return components.url
+    }
+
+    func adapterLocator(for url: URL, originalInput: String) -> String {
+        if id == "bittorrent",
+           let xt = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name.lowercased() == "xt" })?
+                .value,
+           !xt.isEmpty {
+            return xt
+        }
+
+        if let locator = Self.locatorAndPath(from: url) {
+            return locator.path.isEmpty ? locator.root : "\(locator.root)\(locator.path)"
+        }
+
+        let schemePrefix = "\(url.scheme ?? primaryScheme):"
+        let locator = originalInput.hasPrefix(schemePrefix)
+            ? String(originalInput.dropFirst(schemePrefix.count))
+            : originalInput
+        let trimmedLocator = locator.trimmingCharacters(in: CharacterSet(charactersIn: "/?#"))
+        return trimmedLocator.isEmpty ? originalInput : trimmedLocator
     }
 
     private static func locatorAndPath(from url: URL) -> (root: String, path: String)? {
@@ -559,11 +781,12 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle route through the configured remote decentralized storage resolver while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle each have protocol-specific adapter metadata and route through their own ZeroK remote resolver path while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "bzz://, swarm://, ar://, and arweave:// inputs can resolve through safe HTTPS gateway adapters while keeping their original decentralized source label.",
-                    "Protocols without a safe default mobile gateway are handed to the ZeroK remote runtime path with the original URI, network id, and scheme preserved for auditability.",
+                    "Protocols without a safe default mobile gateway are handed to a protocol-specific ZeroK remote runtime path with the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage preserved for auditability.",
+                    "Each adapter records the native verification target, such as CAR roots, blob hashes, signed feeds, encrypted object checksums, Tahoe capabilities, infohashes, DID commits, operation logs, or signed repository refs.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
                     "External RPC endpoints should remain development or fallback transports; they should not become the trust root for decentralized browsing.",

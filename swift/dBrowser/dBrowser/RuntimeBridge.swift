@@ -1310,7 +1310,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 originalInput: originalInput,
                 resolvedURLString: resolvedURL.absoluteString,
                 source: .remoteRuntime,
-                message: "Routed \(profile.title) URI through the remote decentralized storage resolver."
+                message: "Routed \(profile.title) URI through the \(profile.adapter.handlerID) adapter at the remote decentralized storage resolver. Trust boundary: \(profile.adapter.trustBoundary)"
             )
         }
 
@@ -1318,7 +1318,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             originalInput: originalInput,
             resolvedURLString: nil,
             source: .decentralizedStorageResolverRequired,
-            message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it."
+            message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it. Native adapter issue: \(profile.adapter.issueReference ?? "untracked")."
         )
     }
 

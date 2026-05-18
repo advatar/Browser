@@ -122,10 +122,56 @@ struct dBrowserTests {
         #expect(swarm?.gatewayURL(for: URL(string: "bzz://abcdef/app.json")!)?.absoluteString == "https://gateway.ethswarm.org/bzz/abcdef/app.json")
         #expect(arweave?.gatewayURL(for: URL(string: "ar://abc123/app.json?download=1#v1")!)?.absoluteString == "https://arweave.net/abc123/app.json?download=1#v1")
         #expect(filecoinRemoteURL?.host == "zerok.cloud")
-        #expect(filecoinRemoteURL?.path == "/dweb/resolve")
+        #expect(filecoinRemoteURL?.path == "/dweb/filecoin/resolve")
         #expect(filecoinRemoteQuery["network"] == "filecoin")
         #expect(filecoinRemoteQuery["scheme"] == "fil")
+        #expect(filecoinRemoteQuery["adapter"] == "filecoin.piece-car")
+        #expect(filecoinRemoteQuery["resolution_stage"] == DecentralizedStorageAdapterStage.remoteRuntimeHandoff.rawValue)
+        #expect(filecoinRemoteQuery["locator_kind"] == "Filecoin CID, piece CID, or storage deal reference")
+        #expect(filecoinRemoteQuery["locator"] == "f01234/app.car")
+        #expect(filecoinRemoteQuery["native_issue"] == "119")
         #expect(filecoinRemoteQuery["uri"] == filecoinInput)
+    }
+
+    @Test func decentralizedStorageAdaptersTrackNativeProtocolIssues() {
+        let expectedIssues = [
+            "filecoin": 119,
+            "walrus": 120,
+            "iroh": 121,
+            "hypercore": 122,
+            "sia": 123,
+            "storj": 124,
+            "tahoe-lafs": 125,
+            "autonomi": 126,
+            "bittorrent": 127,
+            "ceramic": 128,
+            "orbitdb": 129,
+            "radicle": 130
+        ]
+
+        for network in DecentralizedStorageNetwork.supported where expectedIssues.keys.contains(network.id) {
+            #expect(network.adapter.issueNumber == expectedIssues[network.id])
+            #expect(network.adapter.stage == .remoteRuntimeHandoff)
+            #expect(!network.adapter.handlerID.isEmpty)
+            #expect(!network.adapter.locatorKind.isEmpty)
+            #expect(!network.adapter.trustBoundary.isEmpty)
+            #expect(network.adapter.verificationRequirements.count >= 2)
+
+            let input = sampleDecentralizedStorageURI(forScheme: network.primaryScheme)
+            let url = URL(string: input)!
+            let remoteURL = network.remoteRuntimeURL(
+                for: input,
+                url: url,
+                baseURL: RuntimeBridgeConfiguration.defaultRemoteRuntimeBaseURL
+            )
+            let query = remoteResolverQueryItems(for: remoteURL?.absoluteString)
+
+            #expect(remoteURL?.path == expectedRemoteResolverPath(for: network))
+            #expect(query["adapter"] == network.adapter.handlerID)
+            #expect(query["native_issue"] == String(expectedIssues[network.id] ?? 0))
+            #expect(query["locator_kind"] == network.adapter.locatorKind)
+            #expect(query["locator"]?.isEmpty == false)
+        }
     }
 
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
@@ -710,6 +756,32 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func llmContextRendererCarriesPruneAndSwiftLMMinimizationState() {
+        var conversation = LLMConversation(activeModelID: LLMModelRegistry.localGemmaID)
+        conversation.appendMessage(
+            LLMConversationMessage(
+                role: .user,
+                text: "Summarize the active page with only the approved context.",
+                modelID: nil
+            )
+        )
+        let model = LLMModelRegistry.model(withID: LLMModelRegistry.localGemmaID)!
+
+        let rendered = LLMConversationContextRenderer.render(
+            conversation: conversation,
+            model: model,
+            latestPageSnapshot: nil
+        )
+
+        #expect(rendered.contextMinimization.packerID == "prune.context-pack.signatures-first")
+        #expect(rendered.contextMinimization.localRuntimeID == "SwiftLM/MLX")
+        #expect(rendered.contextMinimization.disclosureBoundary.contains("On-device"))
+        #expect(rendered.prompt.contains("Context minimization: prune.context-pack.signatures-first via SwiftLM/MLX"))
+        #expect(rendered.prompt.contains("Use Prune-style signatures-first context packing"))
+        #expect(rendered.estimatedPromptTokens <= rendered.contextMinimization.maxPromptTokens)
+    }
+
+    @MainActor
     @Test func runtimeBridgeForwardsRenderedConversationContextToAFMServices() async {
         let capturedRequests = JSONRequestCapture()
         let serviceHarness = Self.makeAFMServiceSession(key: "llmcontext") { request in
@@ -1152,11 +1224,15 @@ struct dBrowserTests {
         let walrusQuery = remoteResolverQueryItems(for: walrus.resolvedURLString)
         #expect(walrus.source == .remoteRuntime)
         #expect(URL(string: walrus.resolvedURLString ?? "")?.host == "zerok.cloud")
-        #expect(URL(string: walrus.resolvedURLString ?? "")?.path == "/dweb/resolve")
+        #expect(URL(string: walrus.resolvedURLString ?? "")?.path == "/dweb/walrus/resolve")
         #expect(walrusQuery["network"] == "walrus")
         #expect(walrusQuery["scheme"] == "walrus")
+        #expect(walrusQuery["adapter"] == "walrus.blob")
+        #expect(walrusQuery["native_issue"] == "120")
+        #expect(walrusQuery["locator"] == "blob-id")
         #expect(walrusQuery["uri"] == "walrus://blob-id")
         #expect(walrus.message?.contains("Walrus") == true)
+        #expect(walrus.message?.contains("walrus.blob") == true)
     }
 
     @MainActor
@@ -1187,9 +1263,14 @@ struct dBrowserTests {
                 let query = remoteResolverQueryItems(for: resolution.resolvedURLString)
                 #expect(resolution.source == .remoteRuntime)
                 #expect(URL(string: resolution.resolvedURLString ?? "")?.host == "zerok.cloud")
-                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == "/dweb/resolve")
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == expectedRemoteResolverPath(for: network))
                 #expect(query["network"] == network.id)
                 #expect(query["scheme"] == network.primaryScheme)
+                #expect(query["adapter"] == network.adapter.handlerID)
+                #expect(query["native_issue"] == network.adapter.issueNumber.map { String($0) })
+                #expect(query["resolution_stage"] == DecentralizedStorageAdapterStage.remoteRuntimeHandoff.rawValue)
+                #expect(query["locator_kind"] == network.adapter.locatorKind)
+                #expect(query["locator"]?.isEmpty == false)
                 #expect(query["uri"] == input)
             }
         }
@@ -1221,11 +1302,17 @@ struct dBrowserTests {
 
                 #expect(resolution.source == .remoteRuntime)
                 #expect(URL(string: resolution.resolvedURLString ?? "")?.host == "zerok.cloud")
-                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == "/dweb/resolve")
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == expectedRemoteResolverPath(for: network))
                 #expect(query["network"] == network.id)
                 #expect(query["scheme"] == scheme)
+                #expect(query["adapter"] == network.adapter.handlerID)
+                #expect(query["native_issue"] == network.adapter.issueNumber.map { String($0) })
+                #expect(query["resolution_stage"] == DecentralizedStorageAdapterStage.remoteRuntimeHandoff.rawValue)
+                #expect(query["locator_kind"] == network.adapter.locatorKind)
+                #expect(query["locator"]?.isEmpty == false)
                 #expect(query["uri"] == input)
                 #expect(resolution.message?.contains(network.title) == true)
+                #expect(resolution.message?.contains(network.adapter.handlerID) == true)
             }
         }
     }
@@ -1241,6 +1328,7 @@ struct dBrowserTests {
         #expect(resolution.source == .decentralizedStorageResolverRequired)
         #expect(resolution.resolvedURLString == nil)
         #expect(resolution.message?.contains("native or remote resolver") == true)
+        #expect(resolution.message?.contains("#119") == true)
     }
 
     @MainActor
@@ -5843,6 +5931,10 @@ struct dBrowserTests {
             guard let value = item.value else { return nil }
             return (item.name, value)
         })
+    }
+
+    private func expectedRemoteResolverPath(for network: DecentralizedStorageNetwork) -> String {
+        "/dweb/\(network.id)/resolve"
     }
 
     @MainActor
