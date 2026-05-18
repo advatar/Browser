@@ -20,6 +20,27 @@
 
 ## Active Task
 
+## Native Protocol Handler Service
+
+- [x] Inspect existing Swift native adapter endpoints and local service workspace.
+- [x] Add a repo-owned local storage adapter service that binds the Swift localhost adapter ports.
+- [x] Implement protocol-specific handler contracts for Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.
+- [x] Return verified handler metadata, redaction, backend requirements, and configured local-backend proxy targets per protocol.
+- [x] Add service tests covering every protocol handler, invalid input handling, and credential-scoped backends.
+- [x] Wire the service into workspace scripts and document local usage.
+- [x] Verify service tests plus the Swift/Xcode build locally.
+- [x] Commit and push only scoped files.
+
+Validation notes:
+
+- `pnpm --filter @browser/storage-adapters build` passed.
+- `pnpm --filter @browser/storage-adapters lint` passed.
+- `pnpm --filter @browser/storage-adapters test` passed.
+- HTTP smoke passed against `127.0.0.1:4883/health` and `/dweb/iroh/native?...format=json`.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
+
 ## Native Decentralized Storage Adapter Rollout
 
 - [x] Inspect existing content-capable resolver state, local services, and package surfaces for reusable protocol engines.

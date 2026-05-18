@@ -17,6 +17,7 @@
     "dev:pipelines": "pnpm --filter @browser/afm-pipelines dev",
     "dev:node": "pnpm --filter @browser/afm-node dev",
     "dev:chain-trust": "pnpm --filter @browser/chain-trust-service dev",
+    "dev:storage-adapters": "pnpm --filter @browser/storage-adapters dev",
     "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
     "prepare": "husky"
   },
@@ -35,6 +36,7 @@
     "services/pipelines",
     "services/node",
     "services/chain-trust",
+    "services/storage-adapters",
     "apps/afm-marketplace"
   ],
   "lint-staged": {

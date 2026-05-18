@@ -59,6 +59,7 @@ The current Swift app already has a usable shell:
 | Wallet | Local typed policy simulator for connect/disconnect/spend decision | Prototype |
 | Downloads | Native `URLSession` download tracking with queued/downloading/completed/cancelled/failed states | Current |
 | Bundled LLM | Gemma 4 E2B IT 4-bit MLX through `mlx-swift-lm` packages | Current selection, inference integration next |
+| Decentralized storage handlers | `services/storage-adapters` binds the Swift localhost adapter ports and validates/proxies protocol-specific native handler requests | Local service contract |
 
 Current limitations:
 
@@ -67,7 +68,7 @@ Current limitations:
 - Copilot run state is a single result, not a conversation-first streamed/cancellable run ledger.
 - No model registry or mid-conversation model switching yet.
 - History/bookmarks/workflows are in-memory.
-- Decentralized protocols use gateway fallback today.
+- Decentralized storage protocols use direct gateways where safe, then localhost native adapter handlers. Arbitrary bytes for heavy protocols still require the corresponding local daemon or backend to be configured behind `services/storage-adapters`.
 - Wallet and chain trust are policy simulators until Swift light clients and signing are integrated.
 
 ## Swift System Map
@@ -210,6 +211,24 @@ Implementation plan:
 - Use encrypted envelopes, token-class padding, usage tickets, replay protection, and user-visible provider boundary labels.
 - Keep browser history, personal memory, and tab state local unless the user explicitly shares context.
 - Label provider exposure honestly: upstream providers may correlate decrypted prompt content and timing unless confidential inference is added.
+
+### Decentralized Storage Adapter Service
+
+`services/storage-adapters` is the local runtime surface behind the Swift native adapter URLs. It binds `127.0.0.1:4881-4892`, exposes `/dweb/<network>/native`, and has explicit handlers for Filecoin, Walrus, Iroh, Hypercore/Hyperdrive, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.
+
+The handler service is not a hidden centralized resolver. It validates the Swift adapter metadata, keeps the original URI and locator metadata inside the local boundary, redacts secret capabilities in rendered responses, and proxies only configured local protocol backends. When a backend is missing, the handler returns a protocol-specific backend-required response rather than pretending bytes were resolved.
+
+Development command:
+
+```sh
+pnpm --filter @browser/storage-adapters dev
+```
+
+Important backend environment variables:
+
+- `DBROWSER_<PROTOCOL>_HANDLER_URL` for a protocol-specific local bridge that accepts the adapter query contract.
+- Protocol backend variables such as `FILECOIN_RETRIEVAL_BASE_URL`, `WALRUS_SITES_BASE_URL`, `IROH_BLOBS_GATEWAY_URL`, `HYPERDRIVE_GATEWAY_URL`, `SIA_RENTERD_BASE_URL`, `STORJ_LINKSHARING_BASE_URL`, `TAHOE_LAFS_GATEWAY_URL`, `AUTONOMI_CLIENT_GATEWAY_URL`, `BITTORRENT_ENGINE_URL`, `CERAMIC_NODE_URL`, `ORBITDB_GATEWAY_URL`, and `RADICLE_HTTPD_URL`.
+- Credential variables stay in the local service boundary, for example `SIA_RENTERD_AUTH_HEADER`, `SIA_RENTERD_API_TOKEN`, and protocol-specific handler credentials.
 
 ### Blockchain Light Clients
 

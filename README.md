@@ -33,3 +33,13 @@ The LLM target is a native desktop conversation surface similar in scope to Clau
 xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'
 xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests
 ```
+
+## Local Decentralized Storage Handlers
+
+The Swift app routes non-gateway decentralized storage URIs to localhost native adapter endpoints on ports `4881` through `4892`. Start the repo-owned handler service during local development with:
+
+```sh
+pnpm --filter @browser/storage-adapters dev
+```
+
+The service implements one handler contract for each registered storage protocol: Filecoin, Walrus, Iroh, Hypercore/Hyperdrive, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle. Each handler validates the Swift adapter metadata, preserves locator and verification metadata, proxies only configured local protocol backends, and otherwise renders a precise local-backend-required page.
