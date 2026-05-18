@@ -704,6 +704,46 @@ struct dBrowserTests {
         #expect(recommended.sourceRef == bundledProfile.localWorkspacePath || recommended.sourceRef == bundledProfile.huggingFaceID)
     }
 
+    @Test func dBrowserUsesVendoredSwiftLMPackageForLocalLLMRuntime() throws {
+        let repoRoot = Self.repositoryRootURL
+        let projectFile = repoRoot.appendingPathComponent("swift/dBrowser/dBrowser.xcodeproj/project.pbxproj")
+        let projectText = try String(contentsOf: projectFile, encoding: .utf8)
+
+        #expect(projectText.contains("relativePath = ../Packages/SwiftLM;"))
+        #expect(projectText.contains("../../../Packages/SwiftLM") == false)
+
+        let packageRoot = repoRoot.appendingPathComponent("swift/Packages/SwiftLM")
+        let packageManifest = packageRoot.appendingPathComponent("Package.swift")
+        let packageText = try String(contentsOf: packageManifest, encoding: .utf8)
+
+        #expect(packageText.contains("name: \"ControlPlane\""))
+        #expect(packageText.contains("name: \"Contracts\""))
+        #expect(packageText.contains("name: \"RuntimeAdapters\""))
+        #expect(packageText.contains("name: \"swiflm-control-plane\""))
+
+        let requiredPackageFiles = [
+            "Sources/Contracts/Models.swift",
+            "Sources/ControlPlane/ControlPlaneClient.swift",
+            "Sources/ControlPlane/ControlPlaneService.swift",
+            "Sources/ControlPlane/HuggingFaceModelCatalog.swift",
+            "Sources/ControlPlane/RuntimeInstaller.swift",
+            "Sources/ControlPlane/EngineRuntime.swift",
+            "Sources/Storage/Resources/Migrations/001_initial.sql"
+        ]
+
+        for relativePath in requiredPackageFiles {
+            #expect(FileManager.default.fileExists(atPath: packageRoot.appendingPathComponent(relativePath).path))
+        }
+
+        let clientText = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/ControlPlane/ControlPlaneClient.swift"),
+            encoding: .utf8
+        )
+        #expect(clientText.contains("func searchModels(query: String"))
+        #expect(clientText.contains("func importModel(_ payload: ImportModelRequest)"))
+        #expect(clientText.contains("func fetchChatCompletion(_ payload: OpenAIChatCompletionRequest)"))
+    }
+
     @MainActor
     @Test func browserViewModelRefreshesLocalLLMManagementThroughInjectedSwiftLMManager() async {
         let expectedState = Self.localLLMConnectedFixture(statusLine: "Connected from unit test.")
@@ -7670,6 +7710,14 @@ struct dBrowserTests {
             headerFields: [:]
         )!
         return (response, Data())
+    }
+
+    private static var repositoryRootURL: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 
     private static func jsonString(_ body: Any) -> String {
