@@ -421,13 +421,16 @@ struct A2UIAppStoreListing: Identifiable, Equatable {
 final class A2UIAppStore: ObservableObject {
     @Published private(set) var listings: [A2UIAppStoreListing]
     @Published private(set) var installedApps: [String: A2UIAppInstallState]
+    @Published private(set) var previewingListingID: String?
 
     init(
-        listings: [A2UIAppStoreListing] = A2UIAppStoreListing.featured,
-        installedApps: [String: A2UIAppInstallState] = [:]
+        listings: [A2UIAppStoreListing]? = nil,
+        installedApps: [String: A2UIAppInstallState] = [:],
+        previewingListingID: String? = nil
     ) {
-        self.listings = listings
+        self.listings = listings ?? A2UIAppStoreListing.featured
         self.installedApps = installedApps
+        self.previewingListingID = previewingListingID
     }
 
     var installedCount: Int {
@@ -443,6 +446,11 @@ final class A2UIAppStore: ObservableObject {
         }?.key
     }
 
+    var previewingListing: A2UIAppStoreListing? {
+        guard let previewingListingID else { return nil }
+        return listings.first { $0.id == previewingListingID }
+    }
+
     func state(for listing: A2UIAppStoreListing) -> A2UIAppInstallState {
         installedApps[listing.id] ?? .available
     }
@@ -451,15 +459,23 @@ final class A2UIAppStore: ObservableObject {
         installedApps[listing.id] = .installed(installedAt)
     }
 
+    func preview(_ listing: A2UIAppStoreListing) {
+        previewingListingID = listing.id
+    }
+
     func open(_ listing: A2UIAppStoreListing, openedAt: Date = Date()) {
         if !state(for: listing).isInstalled {
             install(listing, installedAt: openedAt)
         }
         installedApps[listing.id] = .running(openedAt)
+        preview(listing)
     }
 
     func uninstall(_ listing: A2UIAppStoreListing) {
         installedApps.removeValue(forKey: listing.id)
+        if previewingListingID == listing.id {
+            previewingListingID = nil
+        }
     }
 }
 

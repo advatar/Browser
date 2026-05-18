@@ -1184,10 +1184,12 @@ private struct A2UITokenPanelView: View {
     @StateObject private var appStore = A2UIAppStore()
     @StateObject private var renderer = A2UITokenRenderer()
     @State private var tokenText = A2UIAppStoreListing.travelBooker.tokenStream
+    @State private var pendingTokenText: String?
     @State private var isRendering = false
     @State private var didRenderInitialSample = false
     @State private var selectedStoreAppID = A2UIAppStoreListing.featured.first?.id ?? ""
     @State private var selectedRuntimeID = A2UIAppStoreListing.travelBooker.runtimeProfileID
+    @State private var previewFocusRequest = 0
 
     private var statusColor: Color {
         if !renderer.errors.isEmpty {
@@ -1204,9 +1206,14 @@ private struct A2UITokenPanelView: View {
         appStore.listings.first { $0.id == selectedStoreAppID } ?? appStore.listings.first ?? .travelBooker
     }
 
+    private var previewedStoreApp: A2UIAppStoreListing {
+        appStore.previewingListing ?? selectedStoreApp
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        ScrollViewReader { previewScrollProxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 PanelHeaderView(
                     title: "A2UI App Store",
                     systemImage: BrowserPanel.a2ui.systemImage,
@@ -1223,6 +1230,7 @@ private struct A2UITokenPanelView: View {
                 A2UIAppStoreSectionView(
                     appStore: appStore,
                     selectedAppID: $selectedStoreAppID,
+                    previewingAppID: appStore.previewingListingID,
                     onInstall: installStoreApp,
                     onOpen: openStoreApp,
                     onPreview: loadStoreAppPreview,
@@ -1272,7 +1280,7 @@ private struct A2UITokenPanelView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Developer token stream")
                         .font(.headline)
-                    Text("Loaded from \(selectedStoreApp.title) or the sample stream. Edit the stream to inspect how A2UI output becomes native widgets.")
+                    Text("Loaded from \(previewedStoreApp.title) or the sample stream. Edit the stream to inspect how A2UI output becomes native widgets.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     TextEditor(text: $tokenText)
@@ -1317,13 +1325,24 @@ private struct A2UITokenPanelView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("App preview")
-                        .font(.headline)
+                    HStack(alignment: .firstTextBaseline) {
+                        Label("Previewing \(previewedStoreApp.title)", systemImage: "eye")
+                            .font(.headline)
+                        Spacer()
+                        Text(previewedStoreApp.runtimeProfile.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(previewedStoreApp.summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     A2UITokenSurfacePreview(renderer: renderer)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.secondary.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
+                .id("a2ui-app-preview")
+                .accessibilityIdentifier("a2ui-app-preview")
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Action log")
@@ -1350,23 +1369,40 @@ private struct A2UITokenPanelView: View {
                     }
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 900, alignment: .leading)
-        }
-        .background(platformBackgroundColor)
-        .accessibilityIdentifier("panel-content-a2ui")
-        .task {
-            guard !didRenderInitialSample else { return }
-            didRenderInitialSample = true
-            await renderTokens()
+                .padding(24)
+                .frame(maxWidth: 900, alignment: .leading)
+            }
+            .background(platformBackgroundColor)
+            .accessibilityIdentifier("panel-content-a2ui")
+            .task {
+                guard !didRenderInitialSample else { return }
+                didRenderInitialSample = true
+                await renderTokens()
+            }
+            .onChange(of: previewFocusRequest) { _, _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    previewScrollProxy.scrollTo("a2ui-app-preview", anchor: .top)
+                }
+            }
         }
     }
 
     @MainActor
     private func renderTokens() async {
-        guard !isRendering else { return }
+        guard !isRendering else {
+            pendingTokenText = tokenText
+            return
+        }
+
         isRendering = true
-        await renderer.render(rawTokens: tokenText)
+        var tokenTextToRender: String? = tokenText
+
+        while let rawTokens = tokenTextToRender {
+            pendingTokenText = nil
+            await renderer.render(rawTokens: rawTokens)
+            tokenTextToRender = pendingTokenText
+        }
+
         isRendering = false
     }
 
@@ -1383,7 +1419,10 @@ private struct A2UITokenPanelView: View {
     private func loadStoreAppPreview(_ listing: A2UIAppStoreListing) {
         selectedStoreAppID = listing.id
         selectedRuntimeID = listing.runtimeProfileID
+        appStore.preview(listing)
         tokenText = listing.tokenStream
+        renderer.clearActionLog()
+        previewFocusRequest += 1
         Task { await renderTokens() }
     }
 
@@ -1395,6 +1434,7 @@ private struct A2UITokenPanelView: View {
 private struct A2UIAppStoreSectionView: View {
     @ObservedObject var appStore: A2UIAppStore
     @Binding var selectedAppID: String
+    let previewingAppID: String?
     let onInstall: (A2UIAppStoreListing) -> Void
     let onOpen: (A2UIAppStoreListing) -> Void
     let onPreview: (A2UIAppStoreListing) -> Void
@@ -1417,6 +1457,7 @@ private struct A2UIAppStoreSectionView: View {
                         listing: listing,
                         state: appStore.state(for: listing),
                         isSelected: selectedAppID == listing.id,
+                        isPreviewing: previewingAppID == listing.id,
                         onSelect: { selectedAppID = listing.id },
                         onInstall: { onInstall(listing) },
                         onOpen: { onOpen(listing) },
@@ -1433,6 +1474,7 @@ private struct A2UIAppStoreCardView: View {
     let listing: A2UIAppStoreListing
     let state: A2UIAppInstallState
     let isSelected: Bool
+    let isPreviewing: Bool
     let onSelect: () -> Void
     let onInstall: () -> Void
     let onOpen: () -> Void
@@ -1440,7 +1482,25 @@ private struct A2UIAppStoreCardView: View {
     let onUninstall: () -> Void
 
     private var borderColor: Color {
-        isSelected ? Color.accentColor : Color.secondary.opacity(0.2)
+        if isPreviewing {
+            return .green
+        }
+        return isSelected ? Color.accentColor : Color.secondary.opacity(0.2)
+    }
+
+    private var cardBackground: Color {
+        if isPreviewing {
+            return Color.green.opacity(0.10)
+        }
+        return isSelected ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08)
+    }
+
+    private var previewButtonTitle: String {
+        isPreviewing ? "Previewing" : "Preview"
+    }
+
+    private var previewButtonSymbol: String {
+        isPreviewing ? "eye.fill" : "rectangle.on.rectangle"
     }
 
     var body: some View {
@@ -1462,7 +1522,12 @@ private struct A2UIAppStoreCardView: View {
 
                 Spacer(minLength: 0)
 
-                A2UIInstallStateBadge(state: state)
+                VStack(alignment: .trailing, spacing: 4) {
+                    A2UIInstallStateBadge(state: state)
+                    if isPreviewing {
+                        A2UIPreviewStateBadge()
+                    }
+                }
             }
 
             Text(listing.summary)
@@ -1507,7 +1572,7 @@ private struct A2UIAppStoreCardView: View {
                     .buttonStyle(.borderedProminent)
 
                     Button(action: onPreview) {
-                        Label("Preview", systemImage: "rectangle.on.rectangle")
+                        Label(previewButtonTitle, systemImage: previewButtonSymbol)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -1525,7 +1590,7 @@ private struct A2UIAppStoreCardView: View {
                     .buttonStyle(.borderedProminent)
 
                     Button(action: onPreview) {
-                        Label("Preview", systemImage: "rectangle.on.rectangle")
+                        Label(previewButtonTitle, systemImage: previewButtonSymbol)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -1534,10 +1599,10 @@ private struct A2UIAppStoreCardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08))
+        .background(cardBackground)
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(borderColor, lineWidth: isSelected ? 1.5 : 1)
+                .stroke(borderColor, lineWidth: isPreviewing || isSelected ? 1.5 : 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -1555,6 +1620,18 @@ private struct A2UIInstallStateBadge: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(Color.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct A2UIPreviewStateBadge: View {
+    var body: some View {
+        Label("Previewing", systemImage: "eye.fill")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.green.opacity(0.16))
+            .foregroundStyle(.green)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }

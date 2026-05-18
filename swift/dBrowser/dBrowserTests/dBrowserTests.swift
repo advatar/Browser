@@ -235,6 +235,38 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func a2uiAppStorePreviewStateDoesNotRequireInstallAndFollowsOpen() {
+        let openDate = Date(timeIntervalSince1970: 30)
+        let store = A2UIAppStore()
+        let previewListing = A2UIAppStoreListing.formConcierge
+        let openedListing = A2UIAppStoreListing.walletPolicy
+
+        #expect(store.previewingListingID == nil)
+        #expect(store.previewingListing == nil)
+
+        store.preview(previewListing)
+
+        #expect(store.previewingListingID == previewListing.id)
+        #expect(store.previewingListing == previewListing)
+        #expect(store.state(for: previewListing) == .available)
+        #expect(store.installedCount == 0)
+
+        store.open(openedListing, openedAt: openDate)
+
+        #expect(store.previewingListingID == openedListing.id)
+        #expect(store.previewingListing == openedListing)
+        #expect(store.state(for: openedListing) == .running(openDate))
+        #expect(store.installedCount == 1)
+
+        store.uninstall(openedListing)
+
+        #expect(store.previewingListingID == nil)
+        #expect(store.previewingListing == nil)
+        #expect(store.state(for: openedListing) == .available)
+        #expect(store.runningListingID == nil)
+    }
+
+    @MainActor
     @Test func a2uiStoreListingsRenderA2UITokenPreviews() async {
         let renderer = A2UITokenRenderer()
 

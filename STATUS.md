@@ -20,6 +20,23 @@
 
 ## Active Task
 
+## A2UI App Store Preview Feedback
+
+- [x] Inspect the current Swift A2UI App Store preview button path.
+- [x] Create a GitHub issue with the bug details and implementation plan (#117).
+- [x] Add first-class preview state for App Store listings.
+- [x] Make Preview visibly select the listing and focus the rendered app preview.
+- [x] Add focused tests for preview state transitions.
+- [x] Verify the Swift/Xcode build and focused unit test lane locally.
+- [x] Commit and push only the scoped files.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowser/A2UITokenRenderer.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -only-testing:dBrowserTests` passed.
+- Full `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` is still blocked by existing `dBrowserUITests` failures around app termination, gateway text lookup, IPFS swipe hit point, and missing panel button accessibility; `dBrowserTests` passed within that run.
+
 ## External LLM Context Efficiency Plan
 
 - [x] Inspect `../Prune` context engine docs, Swift language-pack notes, MCP/CLI surfaces, and packing strategy features.
