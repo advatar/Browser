@@ -20,6 +20,24 @@
 
 ## Active Task
 
+## Issue Closure And Resolver Honesty
+
+- [x] Inspect open GitHub issues and current resolver implementation for work that is actually handleable in-app.
+- [x] Remove the hardcoded assumption that decentralized storage resolves through `https://zerok.cloud`.
+- [x] Keep ZeroK documented only as the zero-knowledge/LLM gateway surface, not as an unverified storage resolver.
+- [x] Reclassify storage protocols without native mobile implementations as explicit adapter-required states unless a real storage resolver is configured.
+- [x] Leave protocol issues that require real external stacks, backends, or product decisions open with explicit blockers.
+- [x] Verify the Swift/Xcode build and focused test lane locally.
+- [x] Commit and push only scoped files.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/LLMConversation.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests/decentralizedStorageRegistryCoversAppDistributionNetworks -only-testing:dBrowserTests/decentralizedStorageAdaptersTrackNativeProtocolIssues -only-testing:dBrowserTests/decentralizedProtocolExplanationKeepsLightClientsAsTrustRoot -only-testing:dBrowserTests/runtimeBridgeResolvesDecentralizedAddresses -only-testing:dBrowserTests/runtimeBridgeHandlesEveryDecentralizedStorageNetwork -only-testing:dBrowserTests/runtimeBridgeRemoteResolverHandlesEveryStorageSchemeAlias -only-testing:dBrowserTests/runtimeBridgeReportsAdapterRequiredWhenNoStorageResolverIsConfigured -only-testing:dBrowserTests/viewModelLoadsRemoteStorageResolverHandoffs -only-testing:dBrowserTests/llmContextRendererCarriesPruneAndSwiftLMMinimizationState` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
+
 ## Native Decentralized Protocol Adapter Rollout
 
 - [x] Reopen the decentralized storage and LLM context issues as active implementation work.

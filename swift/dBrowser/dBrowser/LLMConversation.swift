@@ -98,7 +98,7 @@ struct LLMContextMinimizationProfile: Codable, Equatable {
                 disclosureBoundary: "Remote gateway receives the smallest approved prompt envelope.",
                 maxPromptTokens: min(contextWindowTokens, 12_288),
                 rules: baseRules + [
-                    "Strip unrelated ledger turns before ZeroK or LLM Gateway routing.",
+                    "Strip unrelated ledger turns before remote gateway routing.",
                     "Use commitments for omitted context so follow-up retrieval remains auditable."
                 ]
             )

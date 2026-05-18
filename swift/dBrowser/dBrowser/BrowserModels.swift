@@ -374,7 +374,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 119,
                 handlerID: "filecoin.piece-car",
                 locatorKind: "Filecoin CID, piece CID, or storage deal reference",
-                trustBoundary: "ZeroK retrieves CAR or payload data while the app keeps CID and deal verification as the local trust target.",
+                trustBoundary: "A configured storage resolver retrieves CAR or payload data while the app keeps CID and deal verification as the local trust target.",
                 verificationRequirements: [
                     "Preserve payload CID, piece CID, path, query, and fragment.",
                     "Verify CAR block roots and piece inclusion before treating retrieved content as trusted."
@@ -391,7 +391,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 120,
                 handlerID: "walrus.blob",
                 locatorKind: "Walrus blob ID",
-                trustBoundary: "ZeroK locates the blob while the app keeps Sui/Walrus blob metadata and checksum validation explicit.",
+                trustBoundary: "A configured storage resolver locates the blob while the app keeps Sui/Walrus blob metadata and checksum validation explicit.",
                 verificationRequirements: [
                     "Preserve blob ID and any epoch or object metadata.",
                     "Validate blob digest and Sui/Walrus metadata before install or render."
@@ -408,7 +408,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 121,
                 handlerID: "iroh.blake3-blob",
                 locatorKind: "Iroh blob hash or ticket",
-                trustBoundary: "ZeroK or an Iroh peer fetches bytes while the app keeps BLAKE3 hash verification local.",
+                trustBoundary: "A configured storage resolver or Iroh peer fetches bytes while the app keeps BLAKE3 hash verification local.",
                 verificationRequirements: [
                     "Preserve blob hash, ticket, peer hints, and path.",
                     "Verify BLAKE3 content hash before exposing fetched bytes."
@@ -425,7 +425,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 122,
                 handlerID: "hypercore.feed",
                 locatorKind: "Hypercore public key, Hyperdrive key, or Pear app key",
-                trustBoundary: "ZeroK resolves feed data while append-only signature verification remains the local trust target.",
+                trustBoundary: "A configured storage resolver resolves feed data while append-only signature verification remains the local trust target.",
                 verificationRequirements: [
                     "Preserve feed key, drive path, version, and discovery key hints.",
                     "Verify signed tree or feed blocks before trusting mutable catalog state."
@@ -442,7 +442,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 123,
                 handlerID: "sia.renterd-object",
                 locatorKind: "Sia object ID, Skylink, or renterd path",
-                trustBoundary: "ZeroK bridges renterd or host retrieval while encryption keys and object integrity stay app-owned.",
+                trustBoundary: "A configured storage resolver bridges renterd or host retrieval while encryption keys and object integrity stay app-owned.",
                 verificationRequirements: [
                     "Preserve object path, bucket, skylink, and encryption metadata.",
                     "Validate object checksum and decrypt locally when keys are user-held."
@@ -459,7 +459,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 124,
                 handlerID: "storj.uplink-object",
                 locatorKind: "Storj bucket and object path",
-                trustBoundary: "ZeroK bridges uplink access while encryption passphrases, grants, and object validation remain separate from browsing state.",
+                trustBoundary: "A configured storage resolver bridges uplink access while encryption passphrases, grants, and object validation remain separate from browsing state.",
                 verificationRequirements: [
                     "Preserve bucket, object key, grant scope, version, and path.",
                     "Validate object checksum and avoid leaking encryption grants to generic page context."
@@ -476,7 +476,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 125,
                 handlerID: "tahoe.capability",
                 locatorKind: "Tahoe-LAFS capability URI",
-                trustBoundary: "ZeroK relays grid access while the app treats Tahoe capabilities as secrets and least-authority access tokens.",
+                trustBoundary: "A configured storage resolver relays grid access while the app treats Tahoe capabilities as secrets and least-authority access tokens.",
                 verificationRequirements: [
                     "Preserve read/write capability type without promoting it into visible page text.",
                     "Verify immutable directory or file hashes when capabilities include them."
@@ -493,7 +493,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 126,
                 handlerID: "autonomi.address",
                 locatorKind: "Autonomi address or SAFE URL",
-                trustBoundary: "ZeroK bridges network lookup while app-held keys and content address checks remain the trust boundary.",
+                trustBoundary: "A configured storage resolver bridges network lookup while app-held keys and content address checks remain the trust boundary.",
                 verificationRequirements: [
                     "Preserve address, data map, and private access metadata.",
                     "Verify encrypted chunk map and content address before install or render."
@@ -510,7 +510,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 127,
                 handlerID: "bittorrent.infohash",
                 locatorKind: "BTIH/BTMH infohash or torrent URI",
-                trustBoundary: "ZeroK can seed or fetch torrent data while signed manifests and infohash verification stay visible to the app.",
+                trustBoundary: "A configured storage resolver can seed or fetch torrent data while signed manifests and infohash verification stay visible to the app.",
                 verificationRequirements: [
                     "Preserve xt, dn, tr, ws, and exact magnet parameters.",
                     "Verify infohash and signed release manifest before trusting downloaded app content."
@@ -527,7 +527,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 128,
                 handlerID: "ceramic.stream",
                 locatorKind: "Ceramic stream ID or commit ID",
-                trustBoundary: "ZeroK resolves stream state while DID signatures, anchors, and commit history remain explicit verification inputs.",
+                trustBoundary: "A configured storage resolver resolves stream state while DID signatures, anchors, and commit history remain explicit verification inputs.",
                 verificationRequirements: [
                     "Preserve stream ID, commit ID, controller DID, and model hints.",
                     "Verify signed commits and anchor proofs before trusting mutable metadata."
@@ -544,7 +544,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 129,
                 handlerID: "orbitdb.address",
                 locatorKind: "OrbitDB address",
-                trustBoundary: "ZeroK can bridge replication while access-controller checks and signed log heads stay local verification targets.",
+                trustBoundary: "A configured storage resolver can bridge replication while access-controller checks and signed log heads stay local verification targets.",
                 verificationRequirements: [
                     "Preserve database address, store type, and access-controller metadata.",
                     "Verify signed operation log entries before treating collaborative state as trusted."
@@ -561,7 +561,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 130,
                 handlerID: "radicle.repository",
                 locatorKind: "Radicle repository ID, NID, or URN",
-                trustBoundary: "ZeroK bridges seed lookup while repository identity, signed refs, and code provenance stay app-visible.",
+                trustBoundary: "A configured storage resolver bridges seed lookup while repository identity, signed refs, and code provenance stay app-visible.",
                 verificationRequirements: [
                     "Preserve repository ID, revision, path, and seed hints.",
                     "Verify signed refs and expected repository identity before installing code."
@@ -781,11 +781,11 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle each have protocol-specific adapter metadata and route through their own ZeroK remote resolver path while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle each have protocol-specific adapter metadata and can route through an explicitly configured storage resolver while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "bzz://, swarm://, ar://, and arweave:// inputs can resolve through safe HTTPS gateway adapters while keeping their original decentralized source label.",
-                    "Protocols without a safe default mobile gateway are handed to a protocol-specific ZeroK remote runtime path with the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage preserved for auditability.",
+                    "Protocols without a safe default mobile gateway use a protocol-specific adapter contract; if a storage resolver base URL is configured, the handoff preserves the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage for auditability.",
                     "Each adapter records the native verification target, such as CAR roots, blob hashes, signed feeds, encrypted object checksums, Tahoe capabilities, infohashes, DID commits, operation logs, or signed repository refs.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",

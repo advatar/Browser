@@ -31,7 +31,7 @@ struct RuntimeFeatureState: Equatable, Identifiable {
 }
 
 struct RuntimeBridgeConfiguration: Equatable {
-    static let defaultRemoteRuntimeBaseURL = URL(string: "https://zerok.cloud")!
+    static let exampleRemoteRuntimeBaseURL = URL(string: "https://storage-resolver.example")!
 
     var decentralizedGatewayHost: String
     var ensGatewaySuffix: String
@@ -55,7 +55,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
-        remoteRuntimeBaseURL: URL? = RuntimeBridgeConfiguration.defaultRemoteRuntimeBaseURL,
+        remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
         llmRouter: LLMRouterEndpointConfiguration = .local,
@@ -99,7 +99,7 @@ enum RuntimeResolutionSource: String, Equatable {
     case ipnsGateway
     case ensGateway
     case decentralizedStorageGateway
-    case decentralizedStorageResolverRequired
+    case decentralizedStorageAdapterRequired
     case remoteRuntime
     case unsupported
 }
@@ -1317,8 +1317,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         return RuntimeBridgeResolution(
             originalInput: originalInput,
             resolvedURLString: nil,
-            source: .decentralizedStorageResolverRequired,
-            message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it. Native adapter issue: \(profile.adapter.issueReference ?? "untracked")."
+            source: .decentralizedStorageAdapterRequired,
+            message: "Recognized \(profile.title) URI for \(profile.distributionRole). Adapter \(profile.adapter.handlerID) is registered, but a native or configured remote storage resolver is required before this mobile build can retrieve it. Native adapter issue: \(profile.adapter.issueReference ?? "untracked")."
         )
     }
 
