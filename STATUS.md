@@ -20,6 +20,23 @@
 
 ## Active Task
 
+## Decentralized Storage Resolver Gap Closure
+
+- [x] Create GitHub issues for the overall resolver roadmap and each missing storage protocol.
+- [x] Add a protocol-specific resolver adapter contract for storage networks that lack direct mobile gateways.
+- [x] Implement remote resolver handoff URLs for Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.
+- [x] Update runtime explanations so the app no longer claims these protocols only stop at resolver-required placeholders.
+- [x] Add focused unit tests proving each protocol resolves to gateway or remote-runtime handoff behavior.
+- [x] Verify the Swift/Xcode build and focused test lane locally.
+- [x] Commit and push only scoped files.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
+
 ## SwiftLM Local LLM Management
 
 - [x] Inspect ../SwiftLM and ../Packages/SwiftLM integration points.

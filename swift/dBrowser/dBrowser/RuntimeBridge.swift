@@ -31,6 +31,8 @@ struct RuntimeFeatureState: Equatable, Identifiable {
 }
 
 struct RuntimeBridgeConfiguration: Equatable {
+    static let defaultRemoteRuntimeBaseURL = URL(string: "https://zerok.cloud")!
+
     var decentralizedGatewayHost: String
     var ensGatewaySuffix: String
     var remoteRuntimeBaseURL: URL?
@@ -53,7 +55,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
-        remoteRuntimeBaseURL: URL? = nil,
+        remoteRuntimeBaseURL: URL? = RuntimeBridgeConfiguration.defaultRemoteRuntimeBaseURL,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
         llmRouter: LLMRouterEndpointConfiguration = .local,
@@ -1293,20 +1295,30 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         url: URL,
         originalInput: String
     ) -> RuntimeBridgeResolution {
-        guard let resolvedURL = profile.gatewayURL(for: url) else {
+        if let resolvedURL = profile.gatewayURL(for: url) {
             return RuntimeBridgeResolution(
                 originalInput: originalInput,
-                resolvedURLString: nil,
-                source: .decentralizedStorageResolverRequired,
-                message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it."
+                resolvedURLString: resolvedURL.absoluteString,
+                source: .decentralizedStorageGateway,
+                message: "Resolved \(profile.title) through the decentralized storage gateway bridge."
+            )
+        }
+
+        if let remoteRuntimeBaseURL = configuration.remoteRuntimeBaseURL,
+           let resolvedURL = profile.remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: resolvedURL.absoluteString,
+                source: .remoteRuntime,
+                message: "Routed \(profile.title) URI through the remote decentralized storage resolver."
             )
         }
 
         return RuntimeBridgeResolution(
             originalInput: originalInput,
-            resolvedURLString: resolvedURL.absoluteString,
-            source: .decentralizedStorageGateway,
-            message: "Resolved \(profile.title) through the decentralized storage gateway bridge."
+            resolvedURLString: nil,
+            source: .decentralizedStorageResolverRequired,
+            message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it."
         )
     }
 

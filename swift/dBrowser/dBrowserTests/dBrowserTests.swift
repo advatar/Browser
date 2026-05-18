@@ -109,10 +109,23 @@ struct dBrowserTests {
 
         let swarm = DecentralizedStorageNetwork.profile(forScheme: "bzz")
         let arweave = DecentralizedStorageNetwork.profile(forScheme: "ar")
+        let filecoin = DecentralizedStorageNetwork.profile(forScheme: "fil")
+        let filecoinInput = "fil://f01234/app.car"
+        let filecoinRemoteURL = filecoin?.remoteRuntimeURL(
+            for: filecoinInput,
+            url: URL(string: filecoinInput)!,
+            baseURL: RuntimeBridgeConfiguration.defaultRemoteRuntimeBaseURL
+        )
+        let filecoinRemoteQuery = remoteResolverQueryItems(for: filecoinRemoteURL?.absoluteString)
 
         #expect(swarm?.distributionRole.contains("dapp") == true)
         #expect(swarm?.gatewayURL(for: URL(string: "bzz://abcdef/app.json")!)?.absoluteString == "https://gateway.ethswarm.org/bzz/abcdef/app.json")
         #expect(arweave?.gatewayURL(for: URL(string: "ar://abc123/app.json?download=1#v1")!)?.absoluteString == "https://arweave.net/abc123/app.json?download=1#v1")
+        #expect(filecoinRemoteURL?.host == "zerok.cloud")
+        #expect(filecoinRemoteURL?.path == "/dweb/resolve")
+        #expect(filecoinRemoteQuery["network"] == "filecoin")
+        #expect(filecoinRemoteQuery["scheme"] == "fil")
+        #expect(filecoinRemoteQuery["uri"] == filecoinInput)
     }
 
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
@@ -518,7 +531,8 @@ struct dBrowserTests {
         #expect(searchableText.contains("embedded light-client contract"))
         #expect(searchableText.contains("Swarm"))
         #expect(searchableText.contains("Arweave"))
-        #expect(searchableText.contains("recognized storage schemes") || searchableText.contains("Recognized storage schemes"))
+        #expect(searchableText.contains("ZeroK remote runtime"))
+        #expect(searchableText.contains("original URI"))
         #expect(searchableText.contains("Ethereum"))
         #expect(searchableText.contains("Substrate/Polkadot"))
         #expect(searchableText.contains("centralized RPC"))
@@ -1135,9 +1149,14 @@ struct dBrowserTests {
         #expect(arweave.resolvedURLString == "https://arweave.net/abc123/app.json")
 
         let walrus = await bridge.resolve("walrus://blob-id")
-        #expect(walrus.source == .decentralizedStorageResolverRequired)
-        #expect(walrus.resolvedURLString == nil)
-        #expect(walrus.message?.contains("Recognized Walrus URI") == true)
+        let walrusQuery = remoteResolverQueryItems(for: walrus.resolvedURLString)
+        #expect(walrus.source == .remoteRuntime)
+        #expect(URL(string: walrus.resolvedURLString ?? "")?.host == "zerok.cloud")
+        #expect(URL(string: walrus.resolvedURLString ?? "")?.path == "/dweb/resolve")
+        #expect(walrusQuery["network"] == "walrus")
+        #expect(walrusQuery["scheme"] == "walrus")
+        #expect(walrusQuery["uri"] == "walrus://blob-id")
+        #expect(walrus.message?.contains("Walrus") == true)
     }
 
     @MainActor
@@ -1165,11 +1184,63 @@ struct dBrowserTests {
                 #expect(resolution.source == .decentralizedStorageGateway)
                 #expect(resolution.resolvedURLString == "https://arweave.net/abc123/app.json")
             default:
-                #expect(resolution.source == .decentralizedStorageResolverRequired)
-                #expect(resolution.resolvedURLString == nil)
-                #expect(resolution.message?.contains("native or remote resolver") == true)
+                let query = remoteResolverQueryItems(for: resolution.resolvedURLString)
+                #expect(resolution.source == .remoteRuntime)
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.host == "zerok.cloud")
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == "/dweb/resolve")
+                #expect(query["network"] == network.id)
+                #expect(query["scheme"] == network.primaryScheme)
+                #expect(query["uri"] == input)
             }
         }
+    }
+
+    @MainActor
+    @Test func runtimeBridgeRemoteResolverHandlesEveryStorageSchemeAlias() async {
+        let bridge = MobileRuntimeBridge()
+        let remoteRuntimeNetworkIDs: Set<String> = [
+            "filecoin",
+            "walrus",
+            "iroh",
+            "hypercore",
+            "sia",
+            "storj",
+            "tahoe-lafs",
+            "autonomi",
+            "bittorrent",
+            "ceramic",
+            "orbitdb",
+            "radicle"
+        ]
+
+        for network in DecentralizedStorageNetwork.supported where remoteRuntimeNetworkIDs.contains(network.id) {
+            for scheme in network.schemes {
+                let input = sampleDecentralizedStorageURI(forScheme: scheme)
+                let resolution = await bridge.resolve(input)
+                let query = remoteResolverQueryItems(for: resolution.resolvedURLString)
+
+                #expect(resolution.source == .remoteRuntime)
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.host == "zerok.cloud")
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == "/dweb/resolve")
+                #expect(query["network"] == network.id)
+                #expect(query["scheme"] == scheme)
+                #expect(query["uri"] == input)
+                #expect(resolution.message?.contains(network.title) == true)
+            }
+        }
+    }
+
+    @MainActor
+    @Test func runtimeBridgeCanStillReportResolverRequiredWhenRemoteRuntimeIsDisabled() async {
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(remoteRuntimeBaseURL: nil)
+        )
+
+        let resolution = await bridge.resolve("filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car")
+
+        #expect(resolution.source == .decentralizedStorageResolverRequired)
+        #expect(resolution.resolvedURLString == nil)
+        #expect(resolution.message?.contains("native or remote resolver") == true)
     }
 
     @MainActor
@@ -4292,16 +4363,25 @@ struct dBrowserTests {
     }
 
     @MainActor
-    @Test func viewModelPreservesResolverRequiredStorageURIs() async {
+    @Test func viewModelLoadsRemoteStorageResolverHandoffs() async {
         let model = BrowserViewModel()
         let uri = "filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car"
+        let expectedURLString = await model.runtimeBridge.resolve(uri).resolvedURLString
 
         model.navigate(uri)
 
-        let resolved = await waitForMobileNotice(in: model, containing: "Recognized Filecoin URI")
+        let resolved = await waitForActiveURL(
+            in: model,
+            expectedURLString ?? ""
+        )
+        let query = remoteResolverQueryItems(for: model.activeTab?.urlString)
+
         #expect(resolved)
-        #expect(model.activeTab?.urlString == uri)
-        #expect(model.activeTab?.loadableURL == nil)
+        #expect(query["network"] == "filecoin")
+        #expect(query["scheme"] == "filecoin")
+        #expect(query["uri"] == uri)
+        #expect(model.activeTab?.loadableURL?.host == "zerok.cloud")
+        #expect(model.activeTab?.mobileNotice == nil)
     }
 
     @MainActor
@@ -5751,6 +5831,18 @@ struct dBrowserTests {
         default:
             return "\(scheme)://example-storage-root/app.json"
         }
+    }
+
+    private func remoteResolverQueryItems(for urlString: String?) -> [String: String] {
+        guard let urlString, let url = URL(string: urlString) else {
+            return [:]
+        }
+
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        return Dictionary(uniqueKeysWithValues: items.compactMap { item in
+            guard let value = item.value else { return nil }
+            return (item.name, value)
+        })
     }
 
     @MainActor

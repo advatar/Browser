@@ -247,6 +247,7 @@ struct DecentralizedStartingPoint: Identifiable, Equatable {
 enum DecentralizedStorageGatewayStrategy: Equatable {
     case pathGateway(host: String, namespace: String)
     case rootGateway(host: String)
+    case remoteRuntime(path: String)
     case none
 }
 
@@ -295,84 +296,84 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             title: "Filecoin",
             schemes: ["filecoin", "piececid", "fil"],
             distributionRole: "Large app bundles, model weights, data archives, and storage-deal receipts.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "walrus",
             title: "Walrus",
             schemes: ["walrus"],
             distributionRole: "Programmable blob availability for Sui and Walrus app deployments.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "iroh",
             title: "Iroh blobs",
             schemes: ["iroh", "iroh-blob"],
             distributionRole: "BLAKE3-addressed peer distribution and local-first install sync.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "hypercore",
             title: "Hypercore",
             schemes: ["hyper", "hypercore", "hyperdrive", "pear", "dat"],
             distributionRole: "Signed mutable catalogs, append-only update feeds, and peer-synced app data.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "sia",
             title: "Sia",
             schemes: ["sia"],
             distributionRole: "Encrypted private app data and decentralized backup storage.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "storj",
             title: "Storj",
             schemes: ["storj"],
             distributionRole: "Encrypted object storage fallback for app data and backups.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "tahoe-lafs",
             title: "Tahoe-LAFS",
             schemes: ["tahoe", "lafs"],
             distributionRole: "Least-authority private app data replicated across storage grids.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "autonomi",
             title: "Autonomi",
             schemes: ["autonomi", "safe"],
             distributionRole: "Encrypted autonomous storage for app data, app publishing, and private distribution.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "bittorrent",
             title: "BitTorrent / WebTorrent",
             schemes: ["magnet", "bittorrent", "webtorrent"],
             distributionRole: "Hot public release distribution with signed manifests as the trust root.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "ceramic",
             title: "Ceramic",
             schemes: ["ceramic", "ceramic-stream"],
             distributionRole: "Mutable app metadata, profiles, ratings, and install records.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "orbitdb",
             title: "OrbitDB",
             schemes: ["orbitdb"],
             distributionRole: "Peer-synced app databases and local-first collaboration state.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         ),
         DecentralizedStorageNetwork(
             id: "radicle",
             title: "Radicle",
             schemes: ["rad", "radicle"],
             distributionRole: "Peer-to-peer source distribution, recipes, and code provenance.",
-            gatewayStrategy: .none
+            gatewayStrategy: .remoteRuntime(path: "/dweb/resolve")
         )
     ]
 
@@ -401,11 +402,35 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         case .rootGateway(let host):
             components.host = host
             components.path = "/\(locator.root)\(locator.path)"
+        case .remoteRuntime:
+            return nil
         case .none:
             return nil
         }
         components.query = url.query
         components.fragment = url.fragment
+        return components.url
+    }
+
+    func remoteRuntimeURL(for originalInput: String, url: URL, baseURL: URL) -> URL? {
+        guard case .remoteRuntime(let routePath) = gatewayStrategy,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let resolverPath = routePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let joinedPath = [basePath, resolverPath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        components.path = joinedPath.isEmpty ? "" : "/\(joinedPath)"
+
+        var queryItems = components.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "network", value: id))
+        queryItems.append(URLQueryItem(name: "scheme", value: url.scheme?.lowercased() ?? primaryScheme))
+        queryItems.append(URLQueryItem(name: "uri", value: originalInput))
+        components.queryItems = queryItems
+        components.fragment = nil
         return components.url
     }
 
@@ -534,11 +559,11 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net while preserving the embedded light-client contract for chain-backed state; parity with the desktop decentralized runtime means bridging the remaining schemes to native or remote resolvers plus embedded Ethereum and Substrate/Polkadot light clients instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle route through the configured remote decentralized storage resolver while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "bzz://, swarm://, ar://, and arweave:// inputs can resolve through safe HTTPS gateway adapters while keeping their original decentralized source label.",
-                    "Recognized storage schemes without a safe mobile gateway are preserved as original URIs and show a native or remote resolver requirement instead of being converted into a search query.",
+                    "Protocols without a safe default mobile gateway are handed to the ZeroK remote runtime path with the original URI, network id, and scheme preserved for auditability.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
                     "External RPC endpoints should remain development or fallback transports; they should not become the trust root for decentralized browsing.",
