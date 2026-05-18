@@ -257,6 +257,36 @@ enum DecentralizedStorageAdapterStage: String, Equatable {
     case nativePlanned = "native-planned"
 }
 
+enum DecentralizedStorageContentAccessState: String, Equatable {
+    case loadableGateway = "loadable-gateway"
+    case remoteRuntime = "remote-runtime"
+    case localResolverRequired = "local-resolver-required"
+    case unsupportedLocator = "unsupported-locator"
+}
+
+struct DecentralizedStorageResolverRequirement: Equatable {
+    let resolverName: String
+    let reason: String
+    let configurationHint: String
+    let issueNumber: Int?
+
+    var issueReference: String? {
+        issueNumber.map { "#\($0)" }
+    }
+}
+
+struct DecentralizedStorageContentResolution: Equatable {
+    let state: DecentralizedStorageContentAccessState
+    let url: URL?
+    let locator: String
+    let message: String
+    let requirement: DecentralizedStorageResolverRequirement?
+
+    var isLoadable: Bool {
+        url != nil && (state == .loadableGateway || state == .remoteRuntime)
+    }
+}
+
 struct DecentralizedStorageAdapterSpec: Equatable {
     let issueNumber: Int?
     let handlerID: String
@@ -605,6 +635,60 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         return components.url
     }
 
+    func contentResolution(
+        for originalInput: String,
+        url: URL,
+        remoteRuntimeBaseURL: URL?,
+        decentralizedGatewayHost: String,
+        walrusAggregatorBaseURL: URL
+    ) -> DecentralizedStorageContentResolution {
+        let locator = adapterLocator(for: url, originalInput: originalInput)
+
+        if let resolvedURL = gatewayURL(for: url) {
+            return DecentralizedStorageContentResolution(
+                state: .loadableGateway,
+                url: resolvedURL,
+                locator: locator,
+                message: "Resolved \(title) through a content-loadable decentralized storage gateway.",
+                requirement: nil
+            )
+        }
+
+        if let remoteRuntimeBaseURL,
+           let resolvedURL = remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
+            return DecentralizedStorageContentResolution(
+                state: .remoteRuntime,
+                url: resolvedURL,
+                locator: locator,
+                message: "Routed \(title) URI through the \(adapter.handlerID) content resolver. Trust boundary: \(adapter.trustBoundary)",
+                requirement: nil
+            )
+        }
+
+        if let resolvedURL = opportunisticContentGatewayURL(
+            for: url,
+            decentralizedGatewayHost: decentralizedGatewayHost,
+            walrusAggregatorBaseURL: walrusAggregatorBaseURL
+        ) {
+            return DecentralizedStorageContentResolution(
+                state: .loadableGateway,
+                url: resolvedURL,
+                locator: locator,
+                message: "Resolved \(title) through a protocol-specific content gateway while preserving \(adapter.locatorKind).",
+                requirement: nil
+            )
+        }
+
+        let requirement = resolverRequirement(for: url)
+        return DecentralizedStorageContentResolution(
+            state: requirement.resolverName == "Unsupported locator" ? .unsupportedLocator : .localResolverRequired,
+            url: nil,
+            locator: locator,
+            message: "\(title) URI is recognized, but this locator is not content-loadable in the mobile build without \(requirement.resolverName). \(requirement.reason) Configure \(requirement.configurationHint). Native adapter issue: \(requirement.issueReference ?? "untracked").",
+            requirement: requirement
+        )
+    }
+
     func remoteRuntimeURL(for originalInput: String, url: URL, baseURL: URL) -> URL? {
         guard case .remoteRuntime(let routePath) = gatewayStrategy,
               var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
@@ -656,6 +740,180 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         return trimmedLocator.isEmpty ? originalInput : trimmedLocator
     }
 
+    private func opportunisticContentGatewayURL(
+        for url: URL,
+        decentralizedGatewayHost: String,
+        walrusAggregatorBaseURL: URL
+    ) -> URL? {
+        switch id {
+        case "filecoin":
+            return filecoinGatewayURL(for: url, host: decentralizedGatewayHost)
+        case "walrus":
+            return walrusBlobGatewayURL(for: url, baseURL: walrusAggregatorBaseURL)
+        case "bittorrent":
+            return bittorrentWebSeedURL(for: url)
+        default:
+            return nil
+        }
+    }
+
+    private func filecoinGatewayURL(for url: URL, host: String) -> URL? {
+        guard url.scheme?.lowercased() != "piececid",
+              let locator = Self.locatorAndPath(from: url),
+              Self.isIPFSDataCID(locator.root) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/ipfs/\(locator.root)\(locator.path)"
+        components.query = url.query
+        components.fragment = url.fragment
+        return components.url
+    }
+
+    private func walrusBlobGatewayURL(for url: URL, baseURL: URL) -> URL? {
+        guard let locator = Self.locatorAndPath(from: url),
+              !locator.root.isEmpty,
+              locator.path.isEmpty,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let resolverPath = "v1/blobs/\(locator.root)"
+        let joinedPath = [basePath, resolverPath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        components.path = "/\(joinedPath)"
+        components.query = url.query
+        components.fragment = url.fragment
+        return components.url
+    }
+
+    private func bittorrentWebSeedURL(for url: URL) -> URL? {
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let items = components?.queryItems ?? []
+        let seedNames = ["as", "xs", "ws"]
+        for seedName in seedNames {
+            if let seed = items.first(where: { $0.name.lowercased() == seedName })?.value,
+               let seedURL = URL(string: seed),
+               let scheme = seedURL.scheme?.lowercased(),
+               scheme == "http" || scheme == "https" {
+                return seedURL
+            }
+        }
+        return nil
+    }
+
+    private func resolverRequirement(for url: URL) -> DecentralizedStorageResolverRequirement {
+        let locator = adapterLocator(for: url, originalInput: url.absoluteString)
+        if id == "filecoin",
+           url.scheme?.lowercased() == "piececid" || locator.hasPrefix("baga") {
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Filecoin retrieval client or CAR/piece resolver",
+                reason: "Piece CIDs and deal references need Filecoin retrieval, CAR root validation, and piece inclusion checks; an IPFS gateway cannot safely infer the payload bytes.",
+                configurationHint: "a Filecoin-capable storage resolver or native Filecoin stack",
+                issueNumber: adapter.issueNumber
+            )
+        }
+
+        switch id {
+        case "filecoin":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Filecoin retrieval client",
+                reason: "Only IPFS-compatible data CIDs can use the bundled gateway bridge; provider, actor, and deal locators need Filecoin retrieval.",
+                configurationHint: "a Filecoin-capable storage resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "walrus":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "Unsupported locator",
+                reason: "The bundled Walrus HTTP path fetches one blob ID at a time; path-bearing Walrus site and quilt locators need a Walrus Sites portal or quilt-aware resolver.",
+                configurationHint: "a Walrus Sites portal, quilt resolver, or remote storage resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "iroh":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "an Iroh endpoint and iroh-blobs store",
+                reason: "Iroh blob tickets include peer dialing information and require the Iroh blobs protocol for verified BLAKE3 streaming.",
+                configurationHint: "a native Iroh blobs runtime or local resolver service",
+                issueNumber: adapter.issueNumber
+            )
+        case "hypercore":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Hypercore/Hyperdrive runtime",
+                reason: "Hypercore feeds require discovery, replication, and signed feed or Merkle tree verification before bytes can be trusted.",
+                configurationHint: "a native Hypercore stack or local Hyperdrive resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "sia":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Sia renterd or host retrieval gateway",
+                reason: "Sia object paths and Skylinks require renter credentials, host retrieval, or object metadata before the app can fetch bytes.",
+                configurationHint: "a renterd-backed storage resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "storj":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Storj access grant, S3 gateway, or linksharing URL",
+                reason: "Storj bucket/object URIs are encrypted and scoped by grants; the browser must not invent or expose credentials.",
+                configurationHint: "a Storj linkshare or grant-aware resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "tahoe-lafs":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Tahoe-LAFS gateway",
+                reason: "Tahoe capabilities are least-authority secrets and must be dereferenced through a user-selected grid gateway.",
+                configurationHint: "a Tahoe WebAPI endpoint",
+                issueNumber: adapter.issueNumber
+            )
+        case "autonomi":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "an Autonomi client",
+                reason: "Autonomi data maps and private access metadata require the Autonomi network client and local decryption path.",
+                configurationHint: "a native Autonomi client or local resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "bittorrent":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a BitTorrent/WebTorrent engine",
+                reason: "Magnet links without HTTP web seeds need tracker/DHT or WebRTC peer discovery plus infohash verification.",
+                configurationHint: "a native torrent engine, WebTorrent runtime, or remote storage resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "ceramic":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Ceramic node",
+                reason: "Ceramic streams need event loading, DID signature validation, and anchor proof checks.",
+                configurationHint: "a Ceramic HTTP/API node or native Ceramic client",
+                issueNumber: adapter.issueNumber
+            )
+        case "orbitdb":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "an OrbitDB/IPFS replication runtime",
+                reason: "OrbitDB addresses resolve through IPFS/libp2p replication and signed operation logs.",
+                configurationHint: "an OrbitDB-capable local or remote resolver",
+                issueNumber: adapter.issueNumber
+            )
+        case "radicle":
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a Radicle node",
+                reason: "Radicle repository URNs require seed discovery, Git object retrieval, and signed ref verification.",
+                configurationHint: "a Radicle node or repository resolver",
+                issueNumber: adapter.issueNumber
+            )
+        default:
+            return DecentralizedStorageResolverRequirement(
+                resolverName: "a protocol-specific resolver",
+                reason: "The URI is registered but this build has no content retrieval path for the locator.",
+                configurationHint: "a storage resolver for \(title)",
+                issueNumber: adapter.issueNumber
+            )
+        }
+    }
+
     private static func locatorAndPath(from url: URL) -> (root: String, path: String)? {
         var root = url.host ?? ""
         var path = url.path
@@ -672,6 +930,14 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         }
 
         return (root: root, path: path)
+    }
+
+    private static func isIPFSDataCID(_ value: String) -> Bool {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return false }
+        return normalized.hasPrefix("Qm")
+            || normalized.hasPrefix("bafy")
+            || normalized.hasPrefix("bafk")
     }
 }
 
@@ -781,11 +1047,11 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge uses gateway fallback for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, and Arweave through arweave.net; Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle each have protocol-specific adapter metadata and can route through an explicitly configured storage resolver while native adapters are built. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge resolves to content-loadable URLs for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, Arweave through arweave.net, Filecoin data CIDs through the IPFS-compatible gateway path, Walrus blob IDs through the configured Walrus aggregator, and magnet links that include HTTP web seeds. Other Filecoin locators plus Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, Ceramic, OrbitDB, and Radicle now report the exact native/local resolver they require instead of claiming adapter metadata is enough. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
-                    "bzz://, swarm://, ar://, and arweave:// inputs can resolve through safe HTTPS gateway adapters while keeping their original decentralized source label.",
-                    "Protocols without a safe default mobile gateway use a protocol-specific adapter contract; if a storage resolver base URL is configured, the handoff preserves the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage for auditability.",
+                    "bzz://, swarm://, ar://, arweave://, Filecoin data-CID, Walrus blob-ID, and HTTP-web-seeded magnet inputs can resolve through content-loadable gateway adapters while keeping their original decentralized source label.",
+                    "Protocols that require peer discovery, user credentials, private capabilities, or daemon state now surface a specific resolver requirement; if a storage resolver base URL is configured, the handoff preserves the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage for auditability.",
                     "Each adapter records the native verification target, such as CAR roots, blob hashes, signed feeds, encrypted object checksums, Tahoe capabilities, infohashes, DID commits, operation logs, or signed repository refs.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",

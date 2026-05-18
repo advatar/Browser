@@ -15,10 +15,28 @@
 - Deprecated Rust/Tauri planning, validation, review, and roadmap documents have been moved to `archive/deprecated-documents/`.
 - Current validation uses the Swift/Xcode build and focused Swift test lane documented in `README.md`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
-- All GitHub issues are closed as of May 17, 2026 after closing completed Swift chain-trust parent issues #59-#66.
+- Decentralized protocol content-loading work is active under #118-#131; metadata-only adapter registration no longer counts as complete.
 - AFMarket A2A peer expert and embedded training surfaces are implemented in Swift, tested locally, pushed, and #113 is closed.
 
 ## Active Task
+
+## Content-Capable Decentralized Protocol Resolution
+
+- [x] Create GitHub issue for correcting metadata-only protocol registrations (#131).
+- [x] Inspect current Swift resolver behavior and the local `./services` surface for reusable storage resolvers.
+- [x] Add a typed content resolver contract that distinguishes loadable content from adapter metadata.
+- [x] Make supported decentralized storage protocols report content-loading requirements without generic placeholders.
+- [x] Add focused Swift tests across every registered scheme.
+- [x] Verify the Swift/Xcode build and focused test lane locally.
+- [ ] Commit and push only scoped files.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- Focused decentralized content resolver tests passed with `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests/decentralizedStorageRegistryCoversAppDistributionNetworks -only-testing:dBrowserTests/decentralizedStorageAdaptersTrackNativeProtocolIssues -only-testing:dBrowserTests/decentralizedStorageContentResolutionDistinguishesLoadableBytesFromResolverRequirements -only-testing:dBrowserTests/decentralizedProtocolExplanationKeepsLightClientsAsTrustRoot -only-testing:dBrowserTests/runtimeBridgeResolvesDecentralizedAddresses -only-testing:dBrowserTests/runtimeBridgeHandlesEveryDecentralizedStorageNetwork -only-testing:dBrowserTests/runtimeBridgeRemoteResolverHandlesEveryStorageSchemeAlias -only-testing:dBrowserTests/runtimeBridgeReportsResolverRequirementWhenNoStorageResolverIsConfigured -only-testing:dBrowserTests/runtimeBridgeNamesResolverRequirementsForNonGatewayStorageProtocols -only-testing:dBrowserTests/viewModelLoadsRemoteStorageResolverHandoffs`.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed after rerun; the first concurrent run failed because Xcode locked the shared build database while the macOS build was running.
 
 ## Issue Closure And Resolver Honesty
 

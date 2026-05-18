@@ -174,6 +174,60 @@ struct dBrowserTests {
         }
     }
 
+    @Test func decentralizedStorageContentResolutionDistinguishesLoadableBytesFromResolverRequirements() {
+        let filecoin = DecentralizedStorageNetwork.profile(forScheme: "filecoin")
+        let walrus = DecentralizedStorageNetwork.profile(forScheme: "walrus")
+        let iroh = DecentralizedStorageNetwork.profile(forScheme: "iroh")
+        let magnet = DecentralizedStorageNetwork.profile(forScheme: "magnet")
+
+        let filecoinInput = "filecoin://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json"
+        let filecoinResolution = filecoin?.contentResolution(
+            for: filecoinInput,
+            url: URL(string: filecoinInput)!,
+            remoteRuntimeBaseURL: nil,
+            decentralizedGatewayHost: "dweb.link",
+            walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
+        )
+
+        let walrusInput = "walrus://abc123xyz"
+        let walrusResolution = walrus?.contentResolution(
+            for: walrusInput,
+            url: URL(string: walrusInput)!,
+            remoteRuntimeBaseURL: nil,
+            decentralizedGatewayHost: "dweb.link",
+            walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
+        )
+
+        let irohInput = "iroh://example-storage-root/app.json"
+        let irohResolution = iroh?.contentResolution(
+            for: irohInput,
+            url: URL(string: irohInput)!,
+            remoteRuntimeBaseURL: nil,
+            decentralizedGatewayHost: "dweb.link",
+            walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
+        )
+
+        let magnetInput = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&ws=https%3A%2F%2Fexample.com%2Fbundle.car"
+        let magnetResolution = magnet?.contentResolution(
+            for: magnetInput,
+            url: URL(string: magnetInput)!,
+            remoteRuntimeBaseURL: nil,
+            decentralizedGatewayHost: "dweb.link",
+            walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
+        )
+
+        #expect(filecoinResolution?.state == .loadableGateway)
+        #expect(filecoinResolution?.url?.absoluteString == "https://dweb.link/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json")
+        #expect(filecoinResolution?.isLoadable == true)
+        #expect(walrusResolution?.state == .loadableGateway)
+        #expect(walrusResolution?.url?.absoluteString == "https://aggregator.walrus-mainnet.walrus.space/v1/blobs/abc123xyz")
+        #expect(irohResolution?.state == .localResolverRequired)
+        #expect(irohResolution?.isLoadable == false)
+        #expect(irohResolution?.requirement?.resolverName.contains("Iroh") == true)
+        #expect(magnetResolution?.state == .loadableGateway)
+        #expect(magnetResolution?.url?.absoluteString == "https://example.com/bundle.car")
+    }
+
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
         for network in DecentralizedStorageNetwork.supported {
             for scheme in network.schemes {
@@ -577,7 +631,8 @@ struct dBrowserTests {
         #expect(searchableText.contains("embedded light-client contract"))
         #expect(searchableText.contains("Swarm"))
         #expect(searchableText.contains("Arweave"))
-        #expect(searchableText.contains("configured storage resolver"))
+        #expect(searchableText.contains("content-loadable"))
+        #expect(searchableText.contains("specific resolver requirement"))
         #expect(searchableText.contains("original URI"))
         #expect(searchableText.contains("Ethereum"))
         #expect(searchableText.contains("Substrate/Polkadot"))
@@ -1220,11 +1275,17 @@ struct dBrowserTests {
         #expect(arweave.source == .decentralizedStorageGateway)
         #expect(arweave.resolvedURLString == "https://arweave.net/abc123/app.json")
 
+        let filecoinCID = await bridge.resolve("filecoin://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json")
+        #expect(filecoinCID.source == .decentralizedStorageGateway)
+        #expect(filecoinCID.resolvedURLString == "https://dweb.link/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json")
+        #expect(filecoinCID.isContentLoadable)
+
         let walrus = await bridge.resolve("walrus://blob-id")
-        #expect(walrus.source == .decentralizedStorageAdapterRequired)
-        #expect(walrus.resolvedURLString == nil)
+        #expect(walrus.source == .decentralizedStorageGateway)
+        #expect(walrus.resolvedURLString == "https://aggregator.walrus-mainnet.walrus.space/v1/blobs/blob-id")
+        #expect(walrus.isContentLoadable)
+        #expect(walrus.contentAccess == .loadableGateway)
         #expect(walrus.message?.contains("Walrus") == true)
-        #expect(walrus.message?.contains("walrus.blob") == true)
     }
 
     @MainActor
@@ -1251,10 +1312,15 @@ struct dBrowserTests {
             case "arweave":
                 #expect(resolution.source == .decentralizedStorageGateway)
                 #expect(resolution.resolvedURLString == "https://arweave.net/abc123/app.json")
+            case "walrus":
+                #expect(resolution.source == .decentralizedStorageGateway)
+                #expect(resolution.resolvedURLString?.contains("aggregator.walrus-mainnet.walrus.space/v1/blobs/") == true)
+                #expect(resolution.isContentLoadable)
             default:
-                #expect(resolution.source == .decentralizedStorageAdapterRequired)
+                #expect(resolution.source == .decentralizedStorageResolverRequired)
                 #expect(resolution.resolvedURLString == nil)
-                #expect(resolution.message?.contains(network.adapter.handlerID) == true)
+                #expect(resolution.isContentLoadable == false)
+                #expect(resolution.message?.contains("content-loadable") == true)
                 #expect(resolution.message?.contains(network.adapter.issueReference ?? "") == true)
             }
         }
@@ -1306,16 +1372,46 @@ struct dBrowserTests {
     }
 
     @MainActor
-    @Test func runtimeBridgeReportsAdapterRequiredWhenNoStorageResolverIsConfigured() async {
+    @Test func runtimeBridgeReportsResolverRequirementWhenNoStorageResolverIsConfigured() async {
         let bridge = MobileRuntimeBridge()
 
         let resolution = await bridge.resolve("filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car")
 
-        #expect(resolution.source == .decentralizedStorageAdapterRequired)
+        #expect(resolution.source == .decentralizedStorageResolverRequired)
         #expect(resolution.resolvedURLString == nil)
-        #expect(resolution.message?.contains("native or configured remote storage resolver") == true)
+        #expect(resolution.isContentLoadable == false)
+        #expect(resolution.contentAccess == .localResolverRequired)
+        #expect(resolution.message?.contains("Filecoin retrieval client") == true)
         #expect(resolution.message?.contains("#119") == true)
-        #expect(resolution.message?.contains("filecoin.piece-car") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeNamesResolverRequirementsForNonGatewayStorageProtocols() async {
+        let bridge = MobileRuntimeBridge()
+        let requirementsByScheme = [
+            "piececid": "Filecoin retrieval client",
+            "iroh": "Iroh endpoint",
+            "hyper": "Hypercore",
+            "sia": "Sia renterd",
+            "storj": "Storj access grant",
+            "tahoe": "Tahoe-LAFS gateway",
+            "autonomi": "Autonomi client",
+            "magnet": "BitTorrent/WebTorrent engine",
+            "ceramic": "Ceramic node",
+            "orbitdb": "OrbitDB/IPFS",
+            "rad": "Radicle node"
+        ]
+
+        for (scheme, requiredText) in requirementsByScheme {
+            let input = sampleDecentralizedStorageURI(forScheme: scheme)
+            let resolution = await bridge.resolve(input)
+
+            #expect(resolution.source == .decentralizedStorageResolverRequired)
+            #expect(resolution.resolvedURLString == nil)
+            #expect(resolution.isContentLoadable == false)
+            #expect(resolution.message?.contains(requiredText) == true)
+            #expect(resolution.message?.contains("Native adapter issue") == true)
+        }
     }
 
     @MainActor
@@ -5906,6 +6002,8 @@ struct dBrowserTests {
             return "piececid://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/piece"
         case "fil":
             return "fil://f01234/app.car"
+        case "walrus":
+            return "walrus://abc123xyz"
         case "magnet":
             return "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01"
         default:

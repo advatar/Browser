@@ -35,6 +35,7 @@ struct RuntimeBridgeConfiguration: Equatable {
 
     var decentralizedGatewayHost: String
     var ensGatewaySuffix: String
+    var walrusAggregatorBaseURL: URL
     var remoteRuntimeBaseURL: URL?
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
@@ -55,6 +56,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     nonisolated init(
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
+        walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
@@ -74,6 +76,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     ) {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
+        self.walrusAggregatorBaseURL = walrusAggregatorBaseURL
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
@@ -99,7 +102,7 @@ enum RuntimeResolutionSource: String, Equatable {
     case ipnsGateway
     case ensGateway
     case decentralizedStorageGateway
-    case decentralizedStorageAdapterRequired
+    case decentralizedStorageResolverRequired
     case remoteRuntime
     case unsupported
 }
@@ -109,6 +112,24 @@ struct RuntimeBridgeResolution: Equatable {
     let resolvedURLString: String?
     let source: RuntimeResolutionSource
     let message: String?
+    let isContentLoadable: Bool
+    let contentAccess: DecentralizedStorageContentAccessState?
+
+    init(
+        originalInput: String,
+        resolvedURLString: String?,
+        source: RuntimeResolutionSource,
+        message: String?,
+        isContentLoadable: Bool? = nil,
+        contentAccess: DecentralizedStorageContentAccessState? = nil
+    ) {
+        self.originalInput = originalInput
+        self.resolvedURLString = resolvedURLString
+        self.source = source
+        self.message = message
+        self.isContentLoadable = isContentLoadable ?? (resolvedURLString != nil)
+        self.contentAccess = contentAccess
+    }
 }
 
 struct CopilotRunRequest: Equatable {
@@ -1201,7 +1222,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 feature: .decentralizedProtocols,
                 mode: configuration.remoteRuntimeBaseURL == nil ? .gateway : .remote,
                 isAvailable: true,
-                status: configuration.remoteRuntimeBaseURL == nil ? "Universal URI gateway bridge" : "Remote runtime bridge"
+                status: configuration.remoteRuntimeBaseURL == nil ? "Content gateway and resolver contract" : "Remote content resolver bridge"
             ),
             RuntimeFeatureState(
                 feature: .architectureOverview,
@@ -1295,31 +1316,43 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         url: URL,
         originalInput: String
     ) -> RuntimeBridgeResolution {
-        if let resolvedURL = profile.gatewayURL(for: url) {
-            return RuntimeBridgeResolution(
-                originalInput: originalInput,
-                resolvedURLString: resolvedURL.absoluteString,
-                source: .decentralizedStorageGateway,
-                message: "Resolved \(profile.title) through the decentralized storage gateway bridge."
-            )
-        }
-
-        if let remoteRuntimeBaseURL = configuration.remoteRuntimeBaseURL,
-           let resolvedURL = profile.remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
-            return RuntimeBridgeResolution(
-                originalInput: originalInput,
-                resolvedURLString: resolvedURL.absoluteString,
-                source: .remoteRuntime,
-                message: "Routed \(profile.title) URI through the \(profile.adapter.handlerID) adapter at the remote decentralized storage resolver. Trust boundary: \(profile.adapter.trustBoundary)"
-            )
-        }
-
-        return RuntimeBridgeResolution(
-            originalInput: originalInput,
-            resolvedURLString: nil,
-            source: .decentralizedStorageAdapterRequired,
-            message: "Recognized \(profile.title) URI for \(profile.distributionRole). Adapter \(profile.adapter.handlerID) is registered, but a native or configured remote storage resolver is required before this mobile build can retrieve it. Native adapter issue: \(profile.adapter.issueReference ?? "untracked")."
+        let contentResolution = profile.contentResolution(
+            for: originalInput,
+            url: url,
+            remoteRuntimeBaseURL: configuration.remoteRuntimeBaseURL,
+            decentralizedGatewayHost: configuration.decentralizedGatewayHost,
+            walrusAggregatorBaseURL: configuration.walrusAggregatorBaseURL
         )
+
+        switch contentResolution.state {
+        case .loadableGateway:
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: contentResolution.url?.absoluteString,
+                source: .decentralizedStorageGateway,
+                message: contentResolution.message,
+                isContentLoadable: contentResolution.isLoadable,
+                contentAccess: contentResolution.state
+            )
+        case .remoteRuntime:
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: contentResolution.url?.absoluteString,
+                source: .remoteRuntime,
+                message: contentResolution.message,
+                isContentLoadable: contentResolution.isLoadable,
+                contentAccess: contentResolution.state
+            )
+        case .localResolverRequired, .unsupportedLocator:
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: nil,
+                source: .decentralizedStorageResolverRequired,
+                message: contentResolution.message,
+                isContentLoadable: false,
+                contentAccess: contentResolution.state
+            )
+        }
     }
 
     private func ensResolution(url: URL, originalInput: String) -> RuntimeBridgeResolution {
