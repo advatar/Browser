@@ -7,6 +7,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case mcp
     case a2ui
     case copilot
+    case localLLM
     case runtime
 
     var id: String { rawValue }
@@ -17,6 +18,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         .mcp,
         .a2ui,
         .copilot,
+        .localLLM,
         .runtime
     ]
 
@@ -28,6 +30,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .mcp: "MCP"
         case .a2ui: "A2UI"
         case .copilot: "Copilot"
+        case .localLLM: "Local LLMs"
         case .runtime: "Runtime"
         }
     }
@@ -40,6 +43,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .mcp: "network"
         case .a2ui: "square.grid.2x2"
         case .copilot: "sparkles"
+        case .localLLM: "cpu"
         case .runtime: "server.rack"
         }
     }

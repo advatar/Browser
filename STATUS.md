@@ -20,6 +20,15 @@
 
 ## Active Task
 
+## SwiftLM Local LLM Management
+
+- [x] Inspect ../SwiftLM and ../Packages/SwiftLM integration points.
+- [x] Link the dBrowser Swift app to the local SwiftLM package products.
+- [x] Add a Local LLMs management model and panel for SwiftLM control-plane operations.
+- [x] Add unit tests covering the package-backed local LLM management surface.
+- [x] Verify the Swift/Xcode build and focused test lane locally.
+- [x] Commit and push only scoped files.
+
 ## Full Decentralized Protocol Handling
 
 - [x] Inspect current decentralized URI registry, runtime bridge, and browser fallback behavior.

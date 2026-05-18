@@ -36,12 +36,14 @@ final class BrowserViewModel: ObservableObject {
     @Published var llmConversation: LLMConversation
     @Published var llmModelOptions: [LLMModelProfile]
     @Published var selectedLLMModelID: String
+    @Published var localLLMState: LocalLLMManagementState
 
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
     private let smartHistoryStore: SmartHistoryStore
     private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
+    private let localLLMManager: LocalLLMManaging
     private var smartHistoryExcludedDomains: Set<String>
     private var copilotTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -55,7 +57,8 @@ final class BrowserViewModel: ObservableObject {
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
         llmConversationStore: LLMConversationStore = LLMConversationStore(),
-        openMindMemoryClient: OpenMindMemoryClient? = nil
+        openMindMemoryClient: OpenMindMemoryClient? = nil,
+        localLLMManager: LocalLLMManaging? = nil
     ) {
         let tab = BrowserTab(urlString: initialURL)
         let smartHistoryPayload = smartHistoryStore.load()
@@ -72,6 +75,7 @@ final class BrowserViewModel: ObservableObject {
         self.smartHistoryStore = smartHistoryStore
         self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
+        self.localLLMManager = localLLMManager ?? LocalLLMManager()
         self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
         self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
@@ -88,6 +92,7 @@ final class BrowserViewModel: ObservableObject {
         self.llmModelOptions = initialLLMModelOptions
         self.selectedLLMModelID = restoredLLMState.selectedModelID
         self.llmConversation = restoredLLMState.conversation
+        self.localLLMState = self.localLLMManager.currentState
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
@@ -418,6 +423,60 @@ final class BrowserViewModel: ObservableObject {
             kind: .modelSwitched,
             message: "Conversation switched model from \(previous) to \(model.displayName)."
         )
+    }
+
+    func refreshLocalLLMManagement() async {
+        await performLocalLLMAction {
+            await localLLMManager.refresh()
+        }
+    }
+
+    func connectLocalLLMControlPlane() async {
+        await performLocalLLMAction {
+            await localLLMManager.connect()
+        }
+    }
+
+    func bootstrapLocalLLMControlPlane() async {
+        await performLocalLLMAction {
+            await localLLMManager.bootstrapEmbeddedControlPlane()
+        }
+    }
+
+    func importRecommendedLocalLLM() async {
+        await performLocalLLMAction {
+            await localLLMManager.importRecommendedModel()
+        }
+    }
+
+    func inspectLocalLLMModel(_ id: String) async {
+        await performLocalLLMAction {
+            await localLLMManager.inspectModel(id: id)
+        }
+    }
+
+    func validateLocalLLMModel(_ id: String) async {
+        await performLocalLLMAction {
+            await localLLMManager.validateModel(id: id)
+        }
+    }
+
+    func warmLocalLLMModel(_ id: String) async {
+        await performLocalLLMAction {
+            await localLLMManager.warmModel(id: id)
+        }
+    }
+
+    func stopLocalLLMEngine(_ id: String) async {
+        await performLocalLLMAction {
+            await localLLMManager.stopEngine(id: id)
+        }
+    }
+
+    func installLocalLLMBackend(_ id: String) async {
+        await performLocalLLMAction {
+            await localLLMManager.installBackend(id: id)
+        }
     }
 
     func openBookmark(_ bookmark: BrowserBookmark) {
@@ -1401,6 +1460,13 @@ final class BrowserViewModel: ObservableObject {
             hash &*= 0x100000001b3
         }
         return "correction-\(String(hash, radix: 16))"
+    }
+
+    private func performLocalLLMAction(_ action: () async -> LocalLLMManagementState) async {
+        guard localLLMState.isWorking == false else { return }
+        localLLMState.isWorking = true
+        let nextState = await action()
+        localLLMState = nextState
     }
 
     private func finishCopilotRun(

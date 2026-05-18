@@ -459,6 +459,14 @@ struct dBrowserTests {
         #expect(aztecSearchableText.contains("noir-mcp-server"))
     }
 
+    @MainActor
+    @Test func localLLMManagementIsTopLevelPanel() {
+        #expect(BrowserPanel.allCases.contains(.localLLM))
+        #expect(BrowserPanel.browserSidebarPanels.contains(.localLLM))
+        #expect(BrowserPanel.localLLM.title == "Local LLMs")
+        #expect(BrowserPanel.localLLM.systemImage == "cpu")
+    }
+
     @Test func architectureOverviewExplainsAFMarketZeroKAndLLMGateway() {
         let feature = MobileRuntimeFeature.architectureOverview
         let explanation = feature.explanation
@@ -568,6 +576,58 @@ struct dBrowserTests {
         #expect(profile.swiftPackageProducts == ["MLXVLM", "MLXLMCommon"])
         #expect(profile.loaderSupport.isRunnableWithCurrentSwiftLoader)
         #expect(profile.readinessSummary.contains("MLXVLM"))
+    }
+
+    @Test func localLLMRecommendedImportUsesSwiftLMPackageProfile() {
+        let recommended = LocalLLMRecommendedImport.current()
+        let bundledProfile = BundledLLMSelection.recommended.profile
+
+        #expect(recommended.displayName == bundledProfile.displayName)
+        #expect(recommended.packageSummary == bundledProfile.swiftPackageSummary)
+        #expect(recommended.readinessSummary == bundledProfile.readinessSummary)
+        #expect(recommended.packageSummary.contains("mlx-swift-lm"))
+        #expect(recommended.sourceRef == bundledProfile.localWorkspacePath || recommended.sourceRef == bundledProfile.huggingFaceID)
+    }
+
+    @MainActor
+    @Test func browserViewModelRefreshesLocalLLMManagementThroughInjectedSwiftLMManager() async {
+        let expectedState = Self.localLLMConnectedFixture(statusLine: "Connected from unit test.")
+        let manager = MockLocalLLMManager(initialState: .disconnected(), refreshState: expectedState)
+        let model = makeIsolatedBrowserViewModel(localLLMManager: manager)
+
+        await model.refreshLocalLLMManagement()
+
+        #expect(manager.calls == ["refresh"])
+        #expect(model.localLLMState == expectedState)
+        #expect(model.localLLMState.models.first?.displayName == "Gemma 4 E2B IT 4-bit MLX")
+    }
+
+    @MainActor
+    @Test func browserViewModelRoutesLocalLLMActionsToSwiftLMManager() async {
+        let connectedState = Self.localLLMConnectedFixture(statusLine: "Action completed.")
+        let manager = MockLocalLLMManager(initialState: .disconnected(), refreshState: connectedState)
+        let model = makeIsolatedBrowserViewModel(localLLMManager: manager)
+
+        await model.connectLocalLLMControlPlane()
+        await model.bootstrapLocalLLMControlPlane()
+        await model.importRecommendedLocalLLM()
+        await model.inspectLocalLLMModel("model.gemma")
+        await model.validateLocalLLMModel("model.gemma")
+        await model.warmLocalLLMModel("model.gemma")
+        await model.stopLocalLLMEngine("engine.gemma")
+        await model.installLocalLLMBackend("mlx-swift")
+
+        #expect(manager.calls == [
+            "connect",
+            "bootstrap",
+            "importRecommended",
+            "inspect:model.gemma",
+            "validate:model.gemma",
+            "warm:model.gemma",
+            "stop:engine.gemma",
+            "install:mlx-swift"
+        ])
+        #expect(model.localLLMState.statusLine == "Action completed.")
     }
 
     @Test func bundledLLMUsesLocalMLXArtifactWhenPresent() {
@@ -5620,7 +5680,7 @@ struct dBrowserTests {
         #expect(BrowserPanel.wallet.title == "Wallet")
         #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
         #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
-        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .runtime])
+        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .localLLM, .runtime])
     }
 
     @MainActor
@@ -5759,7 +5819,8 @@ struct dBrowserTests {
         workflowStore: CopilotWorkflowStore = .ephemeral(),
         smartHistoryStore: SmartHistoryStore = .ephemeral(),
         llmConversationStore: LLMConversationStore = .ephemeral(),
-        openMindMemoryClient: OpenMindMemoryClient? = nil
+        openMindMemoryClient: OpenMindMemoryClient? = nil,
+        localLLMManager: LocalLLMManaging? = nil
     ) -> BrowserViewModel {
         BrowserViewModel(
             initialURL: initialURL,
@@ -5767,7 +5828,64 @@ struct dBrowserTests {
             copilotWorkflowStore: workflowStore,
             smartHistoryStore: smartHistoryStore,
             llmConversationStore: llmConversationStore,
-            openMindMemoryClient: openMindMemoryClient
+            openMindMemoryClient: openMindMemoryClient,
+            localLLMManager: localLLMManager
+        )
+    }
+
+    private static func localLLMConnectedFixture(statusLine: String) -> LocalLLMManagementState {
+        LocalLLMManagementState(
+            mode: .connected,
+            statusLine: statusLine,
+            baseURL: LocalLLMManager.defaultBaseURLString,
+            health: "ok",
+            developerKeyPreview: "sk-swiftlm...",
+            hardware: LocalLLMHardwareSummary(
+                chipFamily: "Apple M-series",
+                unifiedMemory: "16 GB",
+                freeDisk: "200 GB",
+                gpuCores: "16",
+                osVersion: "macOS 26.4"
+            ),
+            backends: [
+                LocalLLMBackendSummary(
+                    id: "mlx-swift",
+                    kind: "mlx-swift",
+                    status: "installed",
+                    version: "3.31.3",
+                    runtimePath: "/usr/local/bin/mlx-swift",
+                    capabilities: ["chat", "vision"]
+                )
+            ],
+            models: [
+                LocalLLMModelSummary(
+                    id: "model.gemma",
+                    displayName: "Gemma 4 E2B IT 4-bit MLX",
+                    source: "local: /models/gemma",
+                    family: "Gemma 4",
+                    architecture: "gemma4",
+                    quantization: "4-bit MLX",
+                    status: "ready",
+                    sizeOnDisk: "3.4 GB",
+                    contextWindow: "8192",
+                    capabilities: ["Chat", "Vision"],
+                    warnings: []
+                )
+            ],
+            activeEngines: [
+                LocalLLMEngineSummary(
+                    id: "engine.gemma",
+                    modelID: "model.gemma",
+                    backendID: "mlx-swift",
+                    queueDepth: "0",
+                    outputTokensPerSecond: "42.0 tok/s",
+                    peakMemory: "4 GB",
+                    isWarm: true
+                )
+            ],
+            recommendedImport: .current(),
+            lastError: nil,
+            isWorking: false
         )
     }
 
@@ -7285,6 +7403,68 @@ struct dBrowserTests {
         return String(data: data, encoding: .utf8)!
     }
 
+}
+
+@MainActor
+private final class MockLocalLLMManager: LocalLLMManaging {
+    private(set) var currentState: LocalLLMManagementState
+    private let refreshState: LocalLLMManagementState
+    private(set) var calls: [String] = []
+
+    init(initialState: LocalLLMManagementState, refreshState: LocalLLMManagementState) {
+        self.currentState = initialState
+        self.refreshState = refreshState
+    }
+
+    func refresh() async -> LocalLLMManagementState {
+        calls.append("refresh")
+        return update()
+    }
+
+    func connect() async -> LocalLLMManagementState {
+        calls.append("connect")
+        return update()
+    }
+
+    func bootstrapEmbeddedControlPlane() async -> LocalLLMManagementState {
+        calls.append("bootstrap")
+        return update()
+    }
+
+    func importRecommendedModel() async -> LocalLLMManagementState {
+        calls.append("importRecommended")
+        return update()
+    }
+
+    func inspectModel(id: String) async -> LocalLLMManagementState {
+        calls.append("inspect:\(id)")
+        return update()
+    }
+
+    func validateModel(id: String) async -> LocalLLMManagementState {
+        calls.append("validate:\(id)")
+        return update()
+    }
+
+    func warmModel(id: String) async -> LocalLLMManagementState {
+        calls.append("warm:\(id)")
+        return update()
+    }
+
+    func stopEngine(id: String) async -> LocalLLMManagementState {
+        calls.append("stop:\(id)")
+        return update()
+    }
+
+    func installBackend(id: String) async -> LocalLLMManagementState {
+        calls.append("install:\(id)")
+        return update()
+    }
+
+    private func update() -> LocalLLMManagementState {
+        currentState = refreshState
+        return refreshState
+    }
 }
 
 private final class JSONRequestCapture {
