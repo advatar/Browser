@@ -20,6 +20,23 @@
 
 ## Active Task
 
+## Native Decentralized Storage Adapter Rollout
+
+- [x] Inspect existing content-capable resolver state, local services, and package surfaces for reusable protocol engines.
+- [x] Add a Swift native/local adapter configuration for every registered decentralized storage protocol.
+- [x] Resolve supported protocol URIs through direct gateways or protocol-specific local endpoints before any configured remote resolver.
+- [x] Keep unsupported locator forms explicit with per-protocol requirements instead of generic failures.
+- [x] Add unit tests proving every registered protocol has a native/local adapter path and remote fallback remains opt-in.
+- [x] Verify the Swift/Xcode build and focused test lane locally.
+- [x] Commit and push only scoped files.
+
+Validation notes:
+
+- Focused decentralized storage Swift tests passed for direct gateways, native/local adapter routing, remote fallback, explicit resolver requirements, and view-model navigation handoffs.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
+
 ## Content-Capable Decentralized Protocol Resolution
 
 - [x] Create GitHub issue for correcting metadata-only protocol registrations (#131).

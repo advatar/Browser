@@ -184,6 +184,7 @@ struct dBrowserTests {
         let filecoinResolution = filecoin?.contentResolution(
             for: filecoinInput,
             url: URL(string: filecoinInput)!,
+            nativeAdapters: .localDefaults,
             remoteRuntimeBaseURL: nil,
             decentralizedGatewayHost: "dweb.link",
             walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
@@ -193,6 +194,7 @@ struct dBrowserTests {
         let walrusResolution = walrus?.contentResolution(
             for: walrusInput,
             url: URL(string: walrusInput)!,
+            nativeAdapters: .localDefaults,
             remoteRuntimeBaseURL: nil,
             decentralizedGatewayHost: "dweb.link",
             walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
@@ -202,6 +204,7 @@ struct dBrowserTests {
         let irohResolution = iroh?.contentResolution(
             for: irohInput,
             url: URL(string: irohInput)!,
+            nativeAdapters: .disabled,
             remoteRuntimeBaseURL: nil,
             decentralizedGatewayHost: "dweb.link",
             walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
@@ -211,6 +214,7 @@ struct dBrowserTests {
         let magnetResolution = magnet?.contentResolution(
             for: magnetInput,
             url: URL(string: magnetInput)!,
+            nativeAdapters: .localDefaults,
             remoteRuntimeBaseURL: nil,
             decentralizedGatewayHost: "dweb.link",
             walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
@@ -226,6 +230,51 @@ struct dBrowserTests {
         #expect(irohResolution?.requirement?.resolverName.contains("Iroh") == true)
         #expect(magnetResolution?.state == .loadableGateway)
         #expect(magnetResolution?.url?.absoluteString == "https://example.com/bundle.car")
+    }
+
+    @Test func decentralizedStorageNativeAdaptersCoverResolverBackedProtocols() {
+        let nativeNetworkIDs: Set<String> = [
+            "filecoin",
+            "walrus",
+            "iroh",
+            "hypercore",
+            "sia",
+            "storj",
+            "tahoe-lafs",
+            "autonomi",
+            "bittorrent",
+            "ceramic",
+            "orbitdb",
+            "radicle"
+        ]
+
+        #expect(DecentralizedStorageNativeAdapterConfiguration.localDefaults.enabledNetworkIDs == nativeNetworkIDs)
+
+        for network in DecentralizedStorageNetwork.supported where nativeNetworkIDs.contains(network.id) {
+            let endpoint = DecentralizedStorageNativeAdapterConfiguration.localDefaults.endpoint(for: network.id)
+            #expect(endpoint?.baseURL.host == "127.0.0.1")
+            #expect(endpoint?.routePath.contains(network.id) == true)
+            #expect(endpoint?.displayName.contains("Local") == true)
+
+            for scheme in network.schemes {
+                let input = sampleDecentralizedStorageURI(forScheme: scheme)
+                let url = URL(string: input)!
+                let nativeURL = network.nativeAdapterURL(for: input, url: url, endpoint: endpoint!)
+                let query = remoteResolverQueryItems(for: nativeURL?.absoluteString)
+
+                #expect(nativeURL?.host == "127.0.0.1")
+                #expect(nativeURL?.path == expectedNativeAdapterPath(for: network))
+                #expect(query["network"] == network.id)
+                #expect(query["scheme"] == scheme)
+                #expect(query["adapter"] == network.adapter.handlerID)
+                #expect(query["native_issue"] == network.adapter.issueNumber.map { String($0) })
+                #expect(query["resolution_stage"] == DecentralizedStorageAdapterStage.nativeLocalAdapter.rawValue)
+                #expect(query["locator_kind"] == network.adapter.locatorKind)
+                #expect(query["locator"]?.isEmpty == false)
+                #expect(query["credential_scoped"] == (endpoint?.requiresCredentialScope == true ? "true" : "false"))
+                #expect(query["uri"] == input)
+            }
+        }
     }
 
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
@@ -632,7 +681,7 @@ struct dBrowserTests {
         #expect(searchableText.contains("Swarm"))
         #expect(searchableText.contains("Arweave"))
         #expect(searchableText.contains("content-loadable"))
-        #expect(searchableText.contains("specific resolver requirement"))
+        #expect(searchableText.contains("local native adapter endpoints"))
         #expect(searchableText.contains("original URI"))
         #expect(searchableText.contains("Ethereum"))
         #expect(searchableText.contains("Substrate/Polkadot"))
@@ -1317,11 +1366,12 @@ struct dBrowserTests {
                 #expect(resolution.resolvedURLString?.contains("aggregator.walrus-mainnet.walrus.space/v1/blobs/") == true)
                 #expect(resolution.isContentLoadable)
             default:
-                #expect(resolution.source == .decentralizedStorageResolverRequired)
-                #expect(resolution.resolvedURLString == nil)
-                #expect(resolution.isContentLoadable == false)
-                #expect(resolution.message?.contains("content-loadable") == true)
-                #expect(resolution.message?.contains(network.adapter.issueReference ?? "") == true)
+                #expect(resolution.source == .decentralizedStorageNativeAdapter)
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.host == "127.0.0.1")
+                #expect(URL(string: resolution.resolvedURLString ?? "")?.path == expectedNativeAdapterPath(for: network))
+                #expect(resolution.isContentLoadable)
+                #expect(resolution.contentAccess == .nativeAdapter)
+                #expect(resolution.message?.contains(network.adapter.handlerID) == true)
             }
         }
     }
@@ -1330,6 +1380,7 @@ struct dBrowserTests {
     @Test func runtimeBridgeRemoteResolverHandlesEveryStorageSchemeAlias() async {
         let bridge = MobileRuntimeBridge(
             configuration: RuntimeBridgeConfiguration(
+                nativeStorageAdapters: .disabled,
                 remoteRuntimeBaseURL: RuntimeBridgeConfiguration.exampleRemoteRuntimeBaseURL
             )
         )
@@ -1350,7 +1401,9 @@ struct dBrowserTests {
 
         for network in DecentralizedStorageNetwork.supported where remoteRuntimeNetworkIDs.contains(network.id) {
             for scheme in network.schemes {
-                let input = sampleDecentralizedStorageURI(forScheme: scheme)
+                let input = network.id == "walrus"
+                    ? "\(scheme)://abc123xyz/site/index.html"
+                    : sampleDecentralizedStorageURI(forScheme: scheme)
                 let resolution = await bridge.resolve(input)
                 let query = remoteResolverQueryItems(for: resolution.resolvedURLString)
 
@@ -1373,7 +1426,9 @@ struct dBrowserTests {
 
     @MainActor
     @Test func runtimeBridgeReportsResolverRequirementWhenNoStorageResolverIsConfigured() async {
-        let bridge = MobileRuntimeBridge()
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(nativeStorageAdapters: .disabled)
+        )
 
         let resolution = await bridge.resolve("filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car")
 
@@ -1387,7 +1442,9 @@ struct dBrowserTests {
 
     @MainActor
     @Test func runtimeBridgeNamesResolverRequirementsForNonGatewayStorageProtocols() async {
-        let bridge = MobileRuntimeBridge()
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(nativeStorageAdapters: .disabled)
+        )
         let requirementsByScheme = [
             "piececid": "Filecoin retrieval client",
             "iroh": "Iroh endpoint",
@@ -4537,6 +4594,7 @@ struct dBrowserTests {
     @Test func viewModelLoadsRemoteStorageResolverHandoffs() async {
         let bridge = MobileRuntimeBridge(
             configuration: RuntimeBridgeConfiguration(
+                nativeStorageAdapters: .disabled,
                 remoteRuntimeBaseURL: RuntimeBridgeConfiguration.exampleRemoteRuntimeBaseURL
             )
         )
@@ -4557,6 +4615,29 @@ struct dBrowserTests {
         #expect(query["scheme"] == "filecoin")
         #expect(query["uri"] == uri)
         #expect(model.activeTab?.loadableURL?.host == "storage-resolver.example")
+        #expect(model.activeTab?.mobileNotice == nil)
+    }
+
+    @MainActor
+    @Test func viewModelLoadsNativeStorageAdapterHandoffs() async {
+        let model = BrowserViewModel()
+        let uri = "iroh://example-storage-root/app.json"
+        let expectedURLString = await model.runtimeBridge.resolve(uri).resolvedURLString
+
+        model.navigate(uri)
+
+        let resolved = await waitForActiveURL(
+            in: model,
+            expectedURLString ?? ""
+        )
+        let query = remoteResolverQueryItems(for: model.activeTab?.urlString)
+
+        #expect(resolved)
+        #expect(query["network"] == "iroh")
+        #expect(query["scheme"] == "iroh")
+        #expect(query["resolution_stage"] == DecentralizedStorageAdapterStage.nativeLocalAdapter.rawValue)
+        #expect(query["uri"] == uri)
+        #expect(model.activeTab?.loadableURL?.host == "127.0.0.1")
         #expect(model.activeTab?.mobileNotice == nil)
     }
 
@@ -6025,6 +6106,10 @@ struct dBrowserTests {
 
     private func expectedRemoteResolverPath(for network: DecentralizedStorageNetwork) -> String {
         "/dweb/\(network.id)/resolve"
+    }
+
+    private func expectedNativeAdapterPath(for network: DecentralizedStorageNetwork) -> String {
+        "/dweb/\(network.id)/native"
     }
 
     @MainActor

@@ -254,11 +254,13 @@ enum DecentralizedStorageGatewayStrategy: Equatable {
 enum DecentralizedStorageAdapterStage: String, Equatable {
     case directGateway = "direct-gateway"
     case remoteRuntimeHandoff = "remote-runtime-handoff"
+    case nativeLocalAdapter = "native-local-adapter"
     case nativePlanned = "native-planned"
 }
 
 enum DecentralizedStorageContentAccessState: String, Equatable {
     case loadableGateway = "loadable-gateway"
+    case nativeAdapter = "native-adapter"
     case remoteRuntime = "remote-runtime"
     case localResolverRequired = "local-resolver-required"
     case unsupportedLocator = "unsupported-locator"
@@ -283,7 +285,126 @@ struct DecentralizedStorageContentResolution: Equatable {
     let requirement: DecentralizedStorageResolverRequirement?
 
     var isLoadable: Bool {
-        url != nil && (state == .loadableGateway || state == .remoteRuntime)
+        url != nil && (state == .loadableGateway || state == .nativeAdapter || state == .remoteRuntime)
+    }
+}
+
+struct DecentralizedStorageNativeAdapterEndpoint: Equatable {
+    let baseURL: URL
+    let routePath: String
+    let displayName: String
+    let trustBoundary: String
+    let requiresCredentialScope: Bool
+}
+
+struct DecentralizedStorageNativeAdapterConfiguration: Equatable {
+    var endpoints: [String: DecentralizedStorageNativeAdapterEndpoint]
+
+    static let disabled = DecentralizedStorageNativeAdapterConfiguration(endpoints: [:])
+
+    static let localDefaults = DecentralizedStorageNativeAdapterConfiguration(
+        endpoints: [
+            "filecoin": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4881")!,
+                routePath: "/dweb/filecoin/native",
+                displayName: "Local Filecoin retrieval adapter",
+                trustBoundary: "Local Filecoin retrieval service supplies CAR or payload bytes; the app keeps CID, deal, and piece verification metadata visible.",
+                requiresCredentialScope: false
+            ),
+            "walrus": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4882")!,
+                routePath: "/dweb/walrus/native",
+                displayName: "Local Walrus Sites/quilt adapter",
+                trustBoundary: "Local Walrus adapter resolves site, quilt, and blob metadata while the app preserves blob IDs and Sui/Walrus verification inputs.",
+                requiresCredentialScope: false
+            ),
+            "iroh": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4883")!,
+                routePath: "/dweb/iroh/native",
+                displayName: "Local Iroh blobs adapter",
+                trustBoundary: "Local Iroh blobs runtime handles peer dialing and streaming while the app preserves BLAKE3 hash or ticket verification metadata.",
+                requiresCredentialScope: false
+            ),
+            "hypercore": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4884")!,
+                routePath: "/dweb/hypercore/native",
+                displayName: "Local Hypercore/Hyperdrive adapter",
+                trustBoundary: "Local Hypercore runtime handles discovery and replication while the app preserves signed feed, version, and path metadata.",
+                requiresCredentialScope: false
+            ),
+            "sia": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4885")!,
+                routePath: "/dweb/sia/native",
+                displayName: "Local Sia renterd adapter",
+                trustBoundary: "Local renterd bridge owns host retrieval and credentials while the app keeps object path, checksum, and encryption metadata separate.",
+                requiresCredentialScope: true
+            ),
+            "storj": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4886")!,
+                routePath: "/dweb/storj/native",
+                displayName: "Local Storj uplink adapter",
+                trustBoundary: "Local Storj adapter owns grants and passphrases while the app preserves bucket, object, version, and credential-scope metadata.",
+                requiresCredentialScope: true
+            ),
+            "tahoe-lafs": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4887")!,
+                routePath: "/dweb/tahoe-lafs/native",
+                displayName: "Local Tahoe-LAFS WebAPI adapter",
+                trustBoundary: "Local Tahoe adapter dereferences capabilities inside the user-selected grid boundary while the app treats capabilities as secrets.",
+                requiresCredentialScope: true
+            ),
+            "autonomi": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4888")!,
+                routePath: "/dweb/autonomi/native",
+                displayName: "Local Autonomi client adapter",
+                trustBoundary: "Local Autonomi client resolves data maps and private chunks while the app preserves content-address and decryption metadata.",
+                requiresCredentialScope: true
+            ),
+            "bittorrent": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4889")!,
+                routePath: "/dweb/bittorrent/native",
+                displayName: "Local BitTorrent/WebTorrent adapter",
+                trustBoundary: "Local torrent engine owns tracker, DHT, or WebRTC peer discovery while the app preserves infohash and signed manifest metadata.",
+                requiresCredentialScope: false
+            ),
+            "ceramic": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4890")!,
+                routePath: "/dweb/ceramic/native",
+                displayName: "Local Ceramic node adapter",
+                trustBoundary: "Local Ceramic node loads stream events while the app preserves DID, commit, and anchor proof verification metadata.",
+                requiresCredentialScope: false
+            ),
+            "orbitdb": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4891")!,
+                routePath: "/dweb/orbitdb/native",
+                displayName: "Local OrbitDB replication adapter",
+                trustBoundary: "Local OrbitDB/IPFS runtime owns replication while the app preserves database address, access-controller, and signed log metadata.",
+                requiresCredentialScope: false
+            ),
+            "radicle": DecentralizedStorageNativeAdapterEndpoint(
+                baseURL: URL(string: "http://127.0.0.1:4892")!,
+                routePath: "/dweb/radicle/native",
+                displayName: "Local Radicle node adapter",
+                trustBoundary: "Local Radicle node/httpd owns seed discovery and Git object retrieval while the app preserves repository identity and signed refs metadata.",
+                requiresCredentialScope: false
+            )
+        ]
+    )
+
+    var enabledNetworkIDs: Set<String> {
+        Set(endpoints.keys)
+    }
+
+    func endpoint(for networkID: String) -> DecentralizedStorageNativeAdapterEndpoint? {
+        endpoints[networkID]
+    }
+
+    func disabling(_ networkIDs: Set<String>) -> DecentralizedStorageNativeAdapterConfiguration {
+        var copy = self
+        for networkID in networkIDs {
+            copy.endpoints.removeValue(forKey: networkID)
+        }
+        return copy
     }
 }
 
@@ -404,7 +525,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 119,
                 handlerID: "filecoin.piece-car",
                 locatorKind: "Filecoin CID, piece CID, or storage deal reference",
-                trustBoundary: "A configured storage resolver retrieves CAR or payload data while the app keeps CID and deal verification as the local trust target.",
+                trustBoundary: "A native/local adapter retrieves CAR or payload data while the app keeps CID and deal verification as the local trust target.",
                 verificationRequirements: [
                     "Preserve payload CID, piece CID, path, query, and fragment.",
                     "Verify CAR block roots and piece inclusion before treating retrieved content as trusted."
@@ -421,7 +542,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 120,
                 handlerID: "walrus.blob",
                 locatorKind: "Walrus blob ID",
-                trustBoundary: "A configured storage resolver locates the blob while the app keeps Sui/Walrus blob metadata and checksum validation explicit.",
+                trustBoundary: "A native/local adapter locates the blob while the app keeps Sui/Walrus blob metadata and checksum validation explicit.",
                 verificationRequirements: [
                     "Preserve blob ID and any epoch or object metadata.",
                     "Validate blob digest and Sui/Walrus metadata before install or render."
@@ -438,7 +559,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 121,
                 handlerID: "iroh.blake3-blob",
                 locatorKind: "Iroh blob hash or ticket",
-                trustBoundary: "A configured storage resolver or Iroh peer fetches bytes while the app keeps BLAKE3 hash verification local.",
+                trustBoundary: "A native/local adapter or Iroh peer fetches bytes while the app keeps BLAKE3 hash verification local.",
                 verificationRequirements: [
                     "Preserve blob hash, ticket, peer hints, and path.",
                     "Verify BLAKE3 content hash before exposing fetched bytes."
@@ -455,7 +576,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 122,
                 handlerID: "hypercore.feed",
                 locatorKind: "Hypercore public key, Hyperdrive key, or Pear app key",
-                trustBoundary: "A configured storage resolver resolves feed data while append-only signature verification remains the local trust target.",
+                trustBoundary: "A native/local adapter resolves feed data while append-only signature verification remains the local trust target.",
                 verificationRequirements: [
                     "Preserve feed key, drive path, version, and discovery key hints.",
                     "Verify signed tree or feed blocks before trusting mutable catalog state."
@@ -472,7 +593,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 123,
                 handlerID: "sia.renterd-object",
                 locatorKind: "Sia object ID, Skylink, or renterd path",
-                trustBoundary: "A configured storage resolver bridges renterd or host retrieval while encryption keys and object integrity stay app-owned.",
+                trustBoundary: "A native/local adapter bridges renterd or host retrieval while encryption keys and object integrity stay app-owned.",
                 verificationRequirements: [
                     "Preserve object path, bucket, skylink, and encryption metadata.",
                     "Validate object checksum and decrypt locally when keys are user-held."
@@ -489,7 +610,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 124,
                 handlerID: "storj.uplink-object",
                 locatorKind: "Storj bucket and object path",
-                trustBoundary: "A configured storage resolver bridges uplink access while encryption passphrases, grants, and object validation remain separate from browsing state.",
+                trustBoundary: "A native/local adapter bridges uplink access while encryption passphrases, grants, and object validation remain separate from browsing state.",
                 verificationRequirements: [
                     "Preserve bucket, object key, grant scope, version, and path.",
                     "Validate object checksum and avoid leaking encryption grants to generic page context."
@@ -506,7 +627,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 125,
                 handlerID: "tahoe.capability",
                 locatorKind: "Tahoe-LAFS capability URI",
-                trustBoundary: "A configured storage resolver relays grid access while the app treats Tahoe capabilities as secrets and least-authority access tokens.",
+                trustBoundary: "A native/local adapter relays grid access while the app treats Tahoe capabilities as secrets and least-authority access tokens.",
                 verificationRequirements: [
                     "Preserve read/write capability type without promoting it into visible page text.",
                     "Verify immutable directory or file hashes when capabilities include them."
@@ -523,7 +644,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 126,
                 handlerID: "autonomi.address",
                 locatorKind: "Autonomi address or SAFE URL",
-                trustBoundary: "A configured storage resolver bridges network lookup while app-held keys and content address checks remain the trust boundary.",
+                trustBoundary: "A native/local adapter bridges network lookup while app-held keys and content address checks remain the trust boundary.",
                 verificationRequirements: [
                     "Preserve address, data map, and private access metadata.",
                     "Verify encrypted chunk map and content address before install or render."
@@ -540,7 +661,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 127,
                 handlerID: "bittorrent.infohash",
                 locatorKind: "BTIH/BTMH infohash or torrent URI",
-                trustBoundary: "A configured storage resolver can seed or fetch torrent data while signed manifests and infohash verification stay visible to the app.",
+                trustBoundary: "A native/local adapter can seed or fetch torrent data while signed manifests and infohash verification stay visible to the app.",
                 verificationRequirements: [
                     "Preserve xt, dn, tr, ws, and exact magnet parameters.",
                     "Verify infohash and signed release manifest before trusting downloaded app content."
@@ -557,7 +678,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 128,
                 handlerID: "ceramic.stream",
                 locatorKind: "Ceramic stream ID or commit ID",
-                trustBoundary: "A configured storage resolver resolves stream state while DID signatures, anchors, and commit history remain explicit verification inputs.",
+                trustBoundary: "A native/local adapter resolves stream state while DID signatures, anchors, and commit history remain explicit verification inputs.",
                 verificationRequirements: [
                     "Preserve stream ID, commit ID, controller DID, and model hints.",
                     "Verify signed commits and anchor proofs before trusting mutable metadata."
@@ -574,7 +695,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 129,
                 handlerID: "orbitdb.address",
                 locatorKind: "OrbitDB address",
-                trustBoundary: "A configured storage resolver can bridge replication while access-controller checks and signed log heads stay local verification targets.",
+                trustBoundary: "A native/local adapter can bridge replication while access-controller checks and signed log heads stay local verification targets.",
                 verificationRequirements: [
                     "Preserve database address, store type, and access-controller metadata.",
                     "Verify signed operation log entries before treating collaborative state as trusted."
@@ -591,7 +712,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 issueNumber: 130,
                 handlerID: "radicle.repository",
                 locatorKind: "Radicle repository ID, NID, or URN",
-                trustBoundary: "A configured storage resolver bridges seed lookup while repository identity, signed refs, and code provenance stay app-visible.",
+                trustBoundary: "A native/local adapter bridges seed lookup while repository identity, signed refs, and code provenance stay app-visible.",
                 verificationRequirements: [
                     "Preserve repository ID, revision, path, and seed hints.",
                     "Verify signed refs and expected repository identity before installing code."
@@ -638,6 +759,7 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
     func contentResolution(
         for originalInput: String,
         url: URL,
+        nativeAdapters: DecentralizedStorageNativeAdapterConfiguration,
         remoteRuntimeBaseURL: URL?,
         decentralizedGatewayHost: String,
         walrusAggregatorBaseURL: URL
@@ -654,17 +776,6 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             )
         }
 
-        if let remoteRuntimeBaseURL,
-           let resolvedURL = remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
-            return DecentralizedStorageContentResolution(
-                state: .remoteRuntime,
-                url: resolvedURL,
-                locator: locator,
-                message: "Routed \(title) URI through the \(adapter.handlerID) content resolver. Trust boundary: \(adapter.trustBoundary)",
-                requirement: nil
-            )
-        }
-
         if let resolvedURL = opportunisticContentGatewayURL(
             for: url,
             decentralizedGatewayHost: decentralizedGatewayHost,
@@ -675,6 +786,28 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
                 url: resolvedURL,
                 locator: locator,
                 message: "Resolved \(title) through a protocol-specific content gateway while preserving \(adapter.locatorKind).",
+                requirement: nil
+            )
+        }
+
+        if let endpoint = nativeAdapters.endpoint(for: id),
+           let resolvedURL = nativeAdapterURL(for: originalInput, url: url, endpoint: endpoint) {
+            return DecentralizedStorageContentResolution(
+                state: .nativeAdapter,
+                url: resolvedURL,
+                locator: locator,
+                message: "Routed \(title) URI through \(endpoint.displayName) using \(adapter.handlerID). Trust boundary: \(endpoint.trustBoundary)",
+                requirement: nil
+            )
+        }
+
+        if let remoteRuntimeBaseURL,
+           let resolvedURL = remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
+            return DecentralizedStorageContentResolution(
+                state: .remoteRuntime,
+                url: resolvedURL,
+                locator: locator,
+                message: "Routed \(title) URI through the configured remote \(adapter.handlerID) content resolver. Trust boundary: \(adapter.trustBoundary)",
                 requirement: nil
             )
         }
@@ -709,6 +842,40 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         queryItems.append(URLQueryItem(name: "resolution_stage", value: adapter.stage.rawValue))
         queryItems.append(URLQueryItem(name: "locator_kind", value: adapter.locatorKind))
         queryItems.append(URLQueryItem(name: "locator", value: adapterLocator(for: url, originalInput: originalInput)))
+        if let issueNumber = adapter.issueNumber {
+            queryItems.append(URLQueryItem(name: "native_issue", value: "\(issueNumber)"))
+        }
+        queryItems.append(URLQueryItem(name: "uri", value: originalInput))
+        components.queryItems = queryItems
+        components.fragment = nil
+        return components.url
+    }
+
+    func nativeAdapterURL(
+        for originalInput: String,
+        url: URL,
+        endpoint: DecentralizedStorageNativeAdapterEndpoint
+    ) -> URL? {
+        guard case .remoteRuntime = gatewayStrategy,
+              var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let adapterPath = endpoint.routePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let joinedPath = [basePath, adapterPath]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/")
+        components.path = joinedPath.isEmpty ? "" : "/\(joinedPath)"
+
+        var queryItems = components.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "network", value: id))
+        queryItems.append(URLQueryItem(name: "scheme", value: url.scheme?.lowercased() ?? primaryScheme))
+        queryItems.append(URLQueryItem(name: "adapter", value: adapter.handlerID))
+        queryItems.append(URLQueryItem(name: "resolution_stage", value: DecentralizedStorageAdapterStage.nativeLocalAdapter.rawValue))
+        queryItems.append(URLQueryItem(name: "locator_kind", value: adapter.locatorKind))
+        queryItems.append(URLQueryItem(name: "locator", value: adapterLocator(for: url, originalInput: originalInput)))
+        queryItems.append(URLQueryItem(name: "credential_scoped", value: endpoint.requiresCredentialScope ? "true" : "false"))
         if let issueNumber = adapter.issueNumber {
             queryItems.append(URLQueryItem(name: "native_issue", value: "\(issueNumber)"))
         }
@@ -986,7 +1153,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         switch self {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
-        case .decentralizedProtocols: "Gateway bridge"
+        case .decentralizedProtocols: "Native/local adapters"
         case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .chainTrust: "Gateway/RPC fallback"
         case .mcpServers: "HTTP, WebSocket, STDIO"
@@ -1047,11 +1214,12 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge resolves to content-loadable URLs for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, Arweave through arweave.net, Filecoin data CIDs through the IPFS-compatible gateway path, Walrus blob IDs through the configured Walrus aggregator, and magnet links that include HTTP web seeds. Other Filecoin locators plus Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, Ceramic, OrbitDB, and Radicle now report the exact native/local resolver they require instead of claiming adapter metadata is enough. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge resolves to content-loadable URLs for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, Arweave through arweave.net, Filecoin data CIDs through the IPFS-compatible gateway path, Walrus blob IDs through the configured Walrus aggregator, and magnet links that include HTTP web seeds. Other Filecoin locators plus Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent without web seeds, Ceramic, OrbitDB, and Radicle route through protocol-specific local native adapter endpoints before any configured remote resolver is considered. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
                     "bzz://, swarm://, ar://, arweave://, Filecoin data-CID, Walrus blob-ID, and HTTP-web-seeded magnet inputs can resolve through content-loadable gateway adapters while keeping their original decentralized source label.",
-                    "Protocols that require peer discovery, user credentials, private capabilities, or daemon state now surface a specific resolver requirement; if a storage resolver base URL is configured, the handoff preserves the original URI, network id, scheme, adapter id, locator, native issue, and resolution stage for auditability.",
+                    "Protocols that require peer discovery, user credentials, private capabilities, or daemon state route to local native adapter endpoints with the original URI, network id, scheme, adapter id, locator, native issue, credential-scope flag, and resolution stage preserved for auditability.",
+                    "If a local native adapter endpoint is disabled and a remote storage resolver base URL is explicitly configured, the same protocol metadata is handed to that configured resolver as an opt-in fallback.",
                     "Each adapter records the native verification target, such as CAR roots, blob hashes, signed feeds, encrypted object checksums, Tahoe capabilities, infohashes, DID commits, operation logs, or signed repository refs.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",

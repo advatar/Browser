@@ -36,6 +36,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var decentralizedGatewayHost: String
     var ensGatewaySuffix: String
     var walrusAggregatorBaseURL: URL
+    var nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration
     var remoteRuntimeBaseURL: URL?
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
@@ -57,6 +58,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
         walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
+        nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = .localDefaults,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
@@ -77,6 +79,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.decentralizedGatewayHost = decentralizedGatewayHost
         self.ensGatewaySuffix = ensGatewaySuffix
         self.walrusAggregatorBaseURL = walrusAggregatorBaseURL
+        self.nativeStorageAdapters = nativeStorageAdapters
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
@@ -102,6 +105,7 @@ enum RuntimeResolutionSource: String, Equatable {
     case ipnsGateway
     case ensGateway
     case decentralizedStorageGateway
+    case decentralizedStorageNativeAdapter
     case decentralizedStorageResolverRequired
     case remoteRuntime
     case unsupported
@@ -1220,9 +1224,13 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             RuntimeFeatureState(feature: .tabs, mode: .native, isAvailable: true, status: "Swift state"),
             RuntimeFeatureState(
                 feature: .decentralizedProtocols,
-                mode: configuration.remoteRuntimeBaseURL == nil ? .gateway : .remote,
+                mode: configuration.nativeStorageAdapters.enabledNetworkIDs.isEmpty
+                    ? (configuration.remoteRuntimeBaseURL == nil ? .gateway : .remote)
+                    : .native,
                 isAvailable: true,
-                status: configuration.remoteRuntimeBaseURL == nil ? "Content gateway and resolver contract" : "Remote content resolver bridge"
+                status: configuration.nativeStorageAdapters.enabledNetworkIDs.isEmpty
+                    ? (configuration.remoteRuntimeBaseURL == nil ? "Content gateway and resolver contract" : "Remote content resolver bridge")
+                    : "Native/local storage adapters"
             ),
             RuntimeFeatureState(
                 feature: .architectureOverview,
@@ -1319,6 +1327,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let contentResolution = profile.contentResolution(
             for: originalInput,
             url: url,
+            nativeAdapters: configuration.nativeStorageAdapters,
             remoteRuntimeBaseURL: configuration.remoteRuntimeBaseURL,
             decentralizedGatewayHost: configuration.decentralizedGatewayHost,
             walrusAggregatorBaseURL: configuration.walrusAggregatorBaseURL
@@ -1339,6 +1348,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 originalInput: originalInput,
                 resolvedURLString: contentResolution.url?.absoluteString,
                 source: .remoteRuntime,
+                message: contentResolution.message,
+                isContentLoadable: contentResolution.isLoadable,
+                contentAccess: contentResolution.state
+            )
+        case .nativeAdapter:
+            return RuntimeBridgeResolution(
+                originalInput: originalInput,
+                resolvedURLString: contentResolution.url?.absoluteString,
+                source: .decentralizedStorageNativeAdapter,
                 message: contentResolution.message,
                 isContentLoadable: contentResolution.isLoadable,
                 contentAccess: contentResolution.state
