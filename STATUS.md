@@ -37,6 +37,23 @@ Validation notes:
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
 
+## Vendored SwiftLM Local LLM Runtime
+
+- [x] Create GitHub issue for vendoring SwiftLM local LLM functionality (#132).
+- [x] Vendor the SwiftLM package that owns local model download, catalog, runtime, and control-plane behavior into this repo.
+- [x] Repoint the dBrowser Xcode project from the sibling `../../../Packages/SwiftLM` checkout to the repo-local package.
+- [x] Add focused tests proving the app uses the vendored package and still routes local LLM control-plane actions.
+- [x] Verify the vendored Swift package and dBrowser Swift/Xcode build locally.
+- [x] Commit and push only scoped files from the worktree.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser.xcodeproj/project.pbxproj swift/dBrowser/dBrowserTests/dBrowserTests.swift swift/Packages/SwiftLM` passed.
+- `swift test --package-path swift/Packages/SwiftLM` passed; it emitted an existing `String(contentsOf:)` deprecation warning in the copied SwiftLM `Storage.swift`.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests` passed after removing the stale project comment that still named the sibling SwiftLM path.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'generic/platform=iOS Simulator'` passed.
+
 ## Content-Capable Decentralized Protocol Resolution
 
 - [x] Create GitHub issue for correcting metadata-only protocol registrations (#131).

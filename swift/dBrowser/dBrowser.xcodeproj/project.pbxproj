@@ -235,7 +235,7 @@
 			packageReferences = (
 				28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */,
 				B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
-				08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../../../Packages/SwiftLM" */,
+				08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../Packages/SwiftLM" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C135A7E2FB7C4D4002F9C73 /* Products */;
@@ -690,9 +690,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../../../Packages/SwiftLM" */ = {
+		08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../Packages/SwiftLM" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../Packages/SwiftLM;
+			relativePath = ../Packages/SwiftLM;
 		};
 /* End XCLocalSwiftPackageReference section */
 
