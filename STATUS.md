@@ -28,7 +28,7 @@
 - [x] Make supported decentralized storage protocols report content-loading requirements without generic placeholders.
 - [x] Add focused Swift tests across every registered scheme.
 - [x] Verify the Swift/Xcode build and focused test lane locally.
-- [ ] Commit and push only scoped files.
+- [x] Commit and push only scoped files.
 
 Validation notes:
 
