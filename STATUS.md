@@ -16,9 +16,27 @@
 - Current validation uses the Swift/Xcode build and focused Swift test lane documented in `README.md`.
 - Swift wallet and blockchain explorer parity foundation is implemented, tested, pushed, and #102 is closed.
 - Decentralized protocol content-loading work is active under #118-#131; metadata-only adapter registration no longer counts as complete.
+- Native decentralized protocol engine bundling is tracked under #133; user-installed protocol prerequisites are not acceptable as the default path.
 - AFMarket A2A peer expert and embedded training surfaces are implemented in Swift, tested locally, pushed, and #113 is closed.
 
 ## Active Task
+
+## Native Protocol Engine Bundling Plan
+
+- [x] Create a GitHub issue for bundling native decentralized protocol engines (#133).
+- [x] Inspect the current Swift adapter states and local `services/storage-adapters` service boundary.
+- [x] Confirm the product requirement that users must not install renterd, Storj uplink, Tahoe, Autonomi, Iroh, Hypercore, Radicle, Ceramic, OrbitDB/IPFS, torrent engines, or other protocol prerequisites themselves.
+- [x] Capture the platform split between macOS bundled helper engines and iOS signed in-process Swift/native-framework engines.
+- [x] Document the protocol-by-protocol bundling matrix, reproducible script layout, engine manager contract, and implementation phases.
+- [x] Verify documentation hygiene and the Swift/Xcode build locally.
+- [x] Commit and push only scoped files.
+
+Validation notes:
+
+- Created GitHub issue #133 and added the bundle-first product clarification as an issue comment.
+- `git diff --check -- STATUS.md docs/NATIVE_PROTOCOL_ENGINE_BUNDLING_PLAN.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md docs/NATIVE_PROTOCOL_ENGINE_BUNDLING_PLAN.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
 
 ## Native Protocol Handler Service
 
