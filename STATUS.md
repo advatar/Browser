@@ -20,6 +20,14 @@
 
 ## Active Task
 
+## Full Decentralized Protocol Handling
+
+- [x] Inspect current decentralized URI registry, runtime bridge, and browser fallback behavior.
+- [x] Add explicit runtime handling state for recognized protocols that still need native or remote resolvers.
+- [x] Extend resolver/runtime tests across every registered protocol and scheme alias.
+- [x] Verify the Swift/Xcode build and test lane locally.
+- [x] Commit and push only scoped files.
+
 ## A2UI App Store Preview Feedback
 
 - [x] Inspect the current Swift A2UI App Store preview button path.

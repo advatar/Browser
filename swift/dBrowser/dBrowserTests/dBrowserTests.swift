@@ -46,13 +46,10 @@ struct dBrowserTests {
     }
 
     @Test func decentralizedStorageRegistryCoversAppDistributionNetworks() {
-        let schemes = DecentralizedStorageNetwork.supportedSchemes
-        let requiredSchemes = [
+        let requiredNetworkIDs = [
             "ipfs",
             "ipns",
-            "bzz",
             "swarm",
-            "ar",
             "arweave",
             "filecoin",
             "walrus",
@@ -60,13 +57,51 @@ struct dBrowserTests {
             "hypercore",
             "sia",
             "storj",
-            "tahoe",
+            "tahoe-lafs",
             "autonomi",
-            "magnet",
+            "bittorrent",
             "ceramic",
             "orbitdb",
             "radicle"
         ]
+        let schemes = DecentralizedStorageNetwork.supportedSchemes
+        let requiredSchemes = [
+            "ipfs",
+            "ipns",
+            "bzz",
+            "bzzr",
+            "swarm",
+            "ar",
+            "arweave",
+            "filecoin",
+            "piececid",
+            "fil",
+            "walrus",
+            "iroh",
+            "iroh-blob",
+            "hyper",
+            "hypercore",
+            "hyperdrive",
+            "pear",
+            "dat",
+            "sia",
+            "storj",
+            "tahoe",
+            "lafs",
+            "autonomi",
+            "safe",
+            "magnet",
+            "bittorrent",
+            "webtorrent",
+            "ceramic",
+            "ceramic-stream",
+            "orbitdb",
+            "rad",
+            "radicle"
+        ]
+        let registeredNetworkIDs = Set(DecentralizedStorageNetwork.supported.map(\.id))
+
+        #expect(registeredNetworkIDs == Set(requiredNetworkIDs))
 
         for scheme in requiredSchemes {
             #expect(schemes.contains(scheme))
@@ -81,23 +116,19 @@ struct dBrowserTests {
     }
 
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
-        let examples = [
-            ("bzz://abcdef/app.json", "Swarm"),
-            ("ar://abc123/app.json", "Arweave"),
-            ("walrus://blob-id", "Walrus"),
-            ("magnet:?xt=urn:btih:abcdef", "BitTorrent / WebTorrent")
-        ]
+        for network in DecentralizedStorageNetwork.supported {
+            for scheme in network.schemes {
+                let input = sampleDecentralizedStorageURI(forScheme: scheme)
+                let resolved = BrowserURLResolver.resolve(input)
+                guard case .unsupported(let raw, let message) = resolved else {
+                    Issue.record("Expected runtime bridge delegation for \(input)")
+                    continue
+                }
 
-        for (input, label) in examples {
-            let resolved = BrowserURLResolver.resolve(input)
-            guard case .unsupported(let raw, let message) = resolved else {
-                Issue.record("Expected runtime bridge delegation for \(input)")
-                continue
+                #expect(raw == input)
+                #expect(message.contains(network.title))
+                #expect(message.contains("runtime bridge"))
             }
-
-            #expect(raw == input)
-            #expect(message.contains(label))
-            #expect(message.contains("runtime bridge"))
         }
     }
 
@@ -1044,9 +1075,41 @@ struct dBrowserTests {
         #expect(arweave.resolvedURLString == "https://arweave.net/abc123/app.json")
 
         let walrus = await bridge.resolve("walrus://blob-id")
-        #expect(walrus.source == .unsupported)
+        #expect(walrus.source == .decentralizedStorageResolverRequired)
         #expect(walrus.resolvedURLString == nil)
         #expect(walrus.message?.contains("Recognized Walrus URI") == true)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeHandlesEveryDecentralizedStorageNetwork() async {
+        let bridge = MobileRuntimeBridge()
+
+        for network in DecentralizedStorageNetwork.supported {
+            let input = sampleDecentralizedStorageURI(forScheme: network.primaryScheme)
+            let resolution = await bridge.resolve(input)
+
+            #expect(resolution.originalInput == input)
+            #expect(resolution.message?.contains(network.title) == true)
+
+            switch network.id {
+            case "ipfs":
+                #expect(resolution.source == .ipfsGateway)
+                #expect(resolution.resolvedURLString?.contains("/ipfs/") == true)
+            case "ipns":
+                #expect(resolution.source == .ipnsGateway)
+                #expect(resolution.resolvedURLString?.contains("/ipns/") == true)
+            case "swarm":
+                #expect(resolution.source == .decentralizedStorageGateway)
+                #expect(resolution.resolvedURLString == "https://gateway.ethswarm.org/bzz/abcdef/app.json")
+            case "arweave":
+                #expect(resolution.source == .decentralizedStorageGateway)
+                #expect(resolution.resolvedURLString == "https://arweave.net/abc123/app.json")
+            default:
+                #expect(resolution.source == .decentralizedStorageResolverRequired)
+                #expect(resolution.resolvedURLString == nil)
+                #expect(resolution.message?.contains("native or remote resolver") == true)
+            }
+        }
     }
 
     @MainActor
@@ -4169,6 +4232,19 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func viewModelPreservesResolverRequiredStorageURIs() async {
+        let model = BrowserViewModel()
+        let uri = "filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car"
+
+        model.navigate(uri)
+
+        let resolved = await waitForMobileNotice(in: model, containing: "Recognized Filecoin URI")
+        #expect(resolved)
+        #expect(model.activeTab?.urlString == uri)
+        #expect(model.activeTab?.loadableURL == nil)
+    }
+
+    @MainActor
     @Test func viewModelLoadsFeaturedIPFSStartingPointsThroughRuntimeBridge() async {
         for point in DecentralizedStartingPoint.featured {
             let model = BrowserViewModel()
@@ -5592,6 +5668,40 @@ struct dBrowserTests {
         model.closeTab(onlyTab)
         #expect(model.tabs.count == 1)
         #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
+    }
+
+    private func sampleDecentralizedStorageURI(forScheme scheme: String) -> String {
+        switch scheme {
+        case "ipfs":
+            return "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json"
+        case "ipns":
+            return "ipns://docs.ipfs.tech/app.json"
+        case "bzz", "bzzr", "swarm":
+            return "\(scheme)://abcdef/app.json"
+        case "ar", "arweave":
+            return "\(scheme)://abc123/app.json"
+        case "filecoin":
+            return "filecoin://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/app.car"
+        case "piececid":
+            return "piececid://baga6ea4seaqaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/piece"
+        case "fil":
+            return "fil://f01234/app.car"
+        case "magnet":
+            return "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01"
+        default:
+            return "\(scheme)://example-storage-root/app.json"
+        }
+    }
+
+    @MainActor
+    private func waitForMobileNotice(in model: BrowserViewModel, containing text: String) async -> Bool {
+        for _ in 0..<20 {
+            if model.activeTab?.mobileNotice?.contains(text) == true {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
     }
 
     @MainActor

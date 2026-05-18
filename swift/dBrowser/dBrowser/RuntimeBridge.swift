@@ -97,6 +97,7 @@ enum RuntimeResolutionSource: String, Equatable {
     case ipnsGateway
     case ensGateway
     case decentralizedStorageGateway
+    case decentralizedStorageResolverRequired
     case remoteRuntime
     case unsupported
 }
@@ -1296,8 +1297,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             return RuntimeBridgeResolution(
                 originalInput: originalInput,
                 resolvedURLString: nil,
-                source: .unsupported,
-                message: "Recognized \(profile.title) URI for \(profile.distributionRole) A native or remote resolver is required before this mobile build can retrieve it."
+                source: .decentralizedStorageResolverRequired,
+                message: "Recognized \(profile.title) URI for \(profile.distributionRole). A native or remote resolver is required before this mobile build can retrieve it."
             )
         }
 
