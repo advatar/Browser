@@ -21,6 +21,22 @@
 
 ## Active Task
 
+## Swift Strawberry Advantage Center
+
+- [x] Create GitHub issue for adding an in-app Swift Advantage Center (#135).
+- [x] Add Swift capability/advantage models that compare dBrowser against Strawberry's public baseline.
+- [x] Add a top-level Advantage panel with score tiles, advantage groups, and action buttons into existing Swift UX.
+- [x] Add focused Swift tests proving dBrowser exceeds Strawberry in tracked capabilities and surfaces gap actions.
+- [x] Verify focused Swift tests, Markdown hygiene, and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests/panelSelectionShowsPanelsAndNavigationReturnsToBrowser -only-testing:dBrowserTests/walletPanelIsTopLevelNavigationAndSeparateSidebarSection -only-testing:dBrowserTests/advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline -only-testing:dBrowserTests/browserViewModelCanNavigateFromAdvantageActions` passed.
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- Changed-line non-ASCII scan passed for the scoped files; the broader scan still reports existing accented author comments in Swift headers.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+
 ## Swift Strawberry Survey Renewal
 
 - [x] Create GitHub issue for renewing the Swift Strawberry parity survey (#134).

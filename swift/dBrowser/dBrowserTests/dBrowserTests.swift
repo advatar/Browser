@@ -6043,6 +6043,9 @@ struct dBrowserTests {
         model.selectPanel(.mcp)
         #expect(model.selectedPanel == .mcp)
 
+        model.selectPanel(.advantage)
+        #expect(model.selectedPanel == .advantage)
+
         model.navigate("example.com")
         #expect(model.selectedPanel == nil)
 
@@ -6057,7 +6060,47 @@ struct dBrowserTests {
         #expect(BrowserPanel.wallet.title == "Wallet")
         #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
         #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
-        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .localLLM, .runtime])
+        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .advantage, .localLLM, .runtime])
+    }
+
+    @Test func advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline() {
+        let scorecard = BrowserAdvantageScorecard.current
+        let baseline = Set(BrowserAdvantageCategory.strawberryBaseline)
+        let gapActions = scorecard.capabilities(with: .gap).compactMap(\.action)
+
+        #expect(BrowserPanel.allCases.contains(.advantage))
+        #expect(BrowserPanel.advantage.title == "Advantage")
+        #expect(BrowserPanel.advantage.systemImage == "chart.line.uptrend.xyaxis")
+        #expect(BrowserPanel.browserSidebarPanels.contains(.advantage))
+        #expect(scorecard.trackedStrawberryBaselineCategories == baseline)
+        #expect(scorecard.capabilities.count > BrowserAdvantageCategory.strawberryBaseline.count)
+        #expect(scorecard.exceededCount > scorecard.gapCount)
+        #expect(scorecard.baselineCoverageText == "12/12 Strawberry areas tracked")
+        #expect(gapActions.count == scorecard.gapCount)
+        #expect(scorecard.capabilities.contains { $0.id == "local-first-model-switching" && $0.status == .exceeds })
+        #expect(scorecard.capabilities.contains { $0.id == "dweb-chain-trust" && $0.status == .exceeds })
+        #expect(scorecard.capabilities.contains { $0.id == "benchmarks-public-runner" && $0.action?.targetPanel == .advantage })
+    }
+
+    @MainActor
+    @Test func browserViewModelCanNavigateFromAdvantageActions() {
+        let model = BrowserViewModel()
+        let scorecard = BrowserAdvantageScorecard.current
+        let targetPanels = Set(
+            scorecard.capabilities
+                .compactMap { $0.action?.targetPanel }
+        )
+
+        #expect(targetPanels.contains(.copilot))
+        #expect(targetPanels.contains(.runtime))
+        #expect(targetPanels.contains(.a2ui))
+        #expect(targetPanels.contains(.wallet))
+
+        model.selectPanel(.advantage)
+        #expect(model.selectedPanel == .advantage)
+
+        model.selectPanel(.localLLM)
+        #expect(model.selectedPanel == .localLLM)
     }
 
     @MainActor

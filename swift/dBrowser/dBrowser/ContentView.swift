@@ -368,6 +368,8 @@ private struct BrowserPanelContentView: View {
                 A2UITokenPanelView()
             case .copilot:
                 CopilotPanelView(browser: browser)
+            case .advantage:
+                AdvantagePanelView(browser: browser)
             case .localLLM:
                 LocalLLMPanelView(browser: browser)
             case .runtime:
@@ -412,6 +414,225 @@ private struct EmptyPanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct AdvantagePanelView: View {
+    @ObservedObject var browser: BrowserViewModel
+    private let scorecard = BrowserAdvantageScorecard.current
+
+    private var metricColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 150), spacing: 10)]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                PanelHeaderView(
+                    title: "Advantage",
+                    systemImage: BrowserPanel.advantage.systemImage,
+                    subtitle: "Track where dBrowser beats Strawberry and jump directly to the work that closes remaining UX gaps."
+                )
+
+                LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 10) {
+                    AdvantageMetricTile(
+                        title: "Lead",
+                        value: "\(scorecard.exceededCount)",
+                        systemImage: BrowserAdvantageStatus.exceeds.systemImage,
+                        tint: .green
+                    )
+                    AdvantageMetricTile(
+                        title: "Parity",
+                        value: "\(scorecard.matchedCount)",
+                        systemImage: BrowserAdvantageStatus.matches.systemImage,
+                        tint: .blue
+                    )
+                    AdvantageMetricTile(
+                        title: "Next",
+                        value: "\(scorecard.gapCount)",
+                        systemImage: BrowserAdvantageStatus.gap.systemImage,
+                        tint: .orange
+                    )
+                    AdvantageMetricTile(
+                        title: "Coverage",
+                        value: scorecard.baselineCoverageText,
+                        systemImage: "scope",
+                        tint: .purple
+                    )
+                }
+
+                Text(scorecard.leadText)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(BrowserAdvantageStatus.allCases) { status in
+                    AdvantageStatusSection(
+                        status: status,
+                        capabilities: scorecard.capabilities(with: status),
+                        browser: browser
+                    )
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("panel-content-advantage")
+    }
+}
+
+private struct AdvantageMetricTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(tint)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.82)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(minHeight: 72)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct AdvantageStatusSection: View {
+    let status: BrowserAdvantageStatus
+    let capabilities: [BrowserAdvantageCapability]
+    @ObservedObject var browser: BrowserViewModel
+
+    private var tint: Color {
+        switch status {
+        case .exceeds: .green
+        case .matches: .blue
+        case .gap: .orange
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(status.title, systemImage: status.systemImage)
+                .font(.headline)
+                .foregroundStyle(tint)
+
+            if capabilities.isEmpty {
+                Text("No capabilities in this state.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(capabilities) { capability in
+                    AdvantageCapabilityCard(
+                        capability: capability,
+                        tint: tint,
+                        browser: browser
+                    )
+                }
+            }
+        }
+    }
+}
+
+private struct AdvantageCapabilityCard: View {
+    let capability: BrowserAdvantageCapability
+    let tint: Color
+    @ObservedObject var browser: BrowserViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(capability.title)
+                    .font(.subheadline.weight(.semibold))
+                Text(capability.category.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(tint.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(capability.strawberryBaseline)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(capability.dBrowserPosition)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+
+            if !capability.evidence.isEmpty {
+                FlowPillRow(items: capability.evidence, tint: tint)
+            }
+
+            if let action = capability.action {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(action.title)
+                            .font(.caption.weight(.semibold))
+                        Text(action.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if let target = action.targetPanel {
+                        Button {
+                            browser.selectPanel(target)
+                        } label: {
+                            Label(target.title, systemImage: target.systemImage)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct FlowPillRow: View {
+    let items: [String]
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(items.prefix(4), id: \.self) { item in
+                Text(item)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(tint.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            if items.count > 4 {
+                Text("+\(items.count - 4)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 

@@ -7,6 +7,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case mcp
     case a2ui
     case copilot
+    case advantage
     case localLLM
     case runtime
 
@@ -18,6 +19,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         .mcp,
         .a2ui,
         .copilot,
+        .advantage,
         .localLLM,
         .runtime
     ]
@@ -30,6 +32,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .mcp: "MCP"
         case .a2ui: "A2UI"
         case .copilot: "Copilot"
+        case .advantage: "Advantage"
         case .localLLM: "Local LLMs"
         case .runtime: "Runtime"
         }
@@ -43,10 +46,436 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .mcp: "network"
         case .a2ui: "square.grid.2x2"
         case .copilot: "sparkles"
+        case .advantage: "chart.line.uptrend.xyaxis"
         case .localLLM: "cpu"
         case .runtime: "server.rack"
         }
     }
+}
+
+enum BrowserAdvantageStatus: String, CaseIterable, Identifiable, Equatable {
+    case exceeds
+    case matches
+    case gap
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .exceeds: "dBrowser leads"
+        case .matches: "Parity covered"
+        case .gap: "Close next"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .exceeds: "arrow.up.right.circle"
+        case .matches: "checkmark.circle"
+        case .gap: "wrench.and.screwdriver"
+        }
+    }
+}
+
+enum BrowserAdvantageCategory: String, CaseIterable, Identifiable, Equatable {
+    case distribution
+    case browserSwitching
+    case companionOnboarding
+    case pageContext
+    case research
+    case pageActions
+    case workflows
+    case integrations
+    case safety
+    case privacy
+    case credits
+    case benchmarks
+    case localModels
+    case governedMemory
+    case afMarket
+    case a2uiApps
+    case decentralizedTrust
+    case walletTrust
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .distribution: "Distribution"
+        case .browserSwitching: "Browser switching"
+        case .companionOnboarding: "Companion onboarding"
+        case .pageContext: "Page context"
+        case .research: "Research"
+        case .pageActions: "Page actions"
+        case .workflows: "Workflows"
+        case .integrations: "Integrations"
+        case .safety: "Safety"
+        case .privacy: "Privacy"
+        case .credits: "Credits"
+        case .benchmarks: "Benchmarks"
+        case .localModels: "Local models"
+        case .governedMemory: "Governed memory"
+        case .afMarket: "AFMarket"
+        case .a2uiApps: "A2UI apps"
+        case .decentralizedTrust: "DWeb trust"
+        case .walletTrust: "Wallet trust"
+        }
+    }
+
+    static let strawberryBaseline: [BrowserAdvantageCategory] = [
+        .distribution,
+        .browserSwitching,
+        .companionOnboarding,
+        .pageContext,
+        .research,
+        .pageActions,
+        .workflows,
+        .integrations,
+        .safety,
+        .privacy,
+        .credits,
+        .benchmarks
+    ]
+}
+
+struct BrowserAdvantageAction: Equatable, Identifiable {
+    let id: String
+    var title: String
+    var detail: String
+    var targetPanel: BrowserPanel?
+
+    init(id: String, title: String, detail: String, targetPanel: BrowserPanel?) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.targetPanel = targetPanel
+    }
+}
+
+struct BrowserAdvantageCapability: Equatable, Identifiable {
+    let id: String
+    var category: BrowserAdvantageCategory
+    var title: String
+    var strawberryBaseline: String
+    var dBrowserPosition: String
+    var status: BrowserAdvantageStatus
+    var evidence: [String]
+    var action: BrowserAdvantageAction?
+
+    var tracksStrawberryBaseline: Bool {
+        BrowserAdvantageCategory.strawberryBaseline.contains(category)
+    }
+}
+
+struct BrowserAdvantageScorecard: Equatable {
+    var capabilities: [BrowserAdvantageCapability]
+
+    var exceededCount: Int {
+        count(.exceeds)
+    }
+
+    var matchedCount: Int {
+        count(.matches)
+    }
+
+    var gapCount: Int {
+        count(.gap)
+    }
+
+    var trackedStrawberryBaselineCategories: Set<BrowserAdvantageCategory> {
+        Set(capabilities.filter(\.tracksStrawberryBaseline).map(\.category))
+    }
+
+    var baselineCoverageText: String {
+        "\(trackedStrawberryBaselineCategories.count)/\(BrowserAdvantageCategory.strawberryBaseline.count) Strawberry areas tracked"
+    }
+
+    var leadText: String {
+        "\(exceededCount) lead, \(matchedCount) parity, \(gapCount) next"
+    }
+
+    func capabilities(with status: BrowserAdvantageStatus) -> [BrowserAdvantageCapability] {
+        capabilities.filter { $0.status == status }
+    }
+
+    private func count(_ status: BrowserAdvantageStatus) -> Int {
+        capabilities.filter { $0.status == status }.count
+    }
+
+    static let current = BrowserAdvantageScorecard(
+        capabilities: [
+            BrowserAdvantageCapability(
+                id: "distribution-apple-native",
+                category: .distribution,
+                title: "Apple-native browser runtime",
+                strawberryBaseline: "Strawberry publicly offers macOS and Windows beta builds.",
+                dBrowserPosition: "dBrowser is native Swift for Apple platforms with WKWebView, SwiftUI, Keychain-compatible policy surfaces, and iOS/macOS build lanes.",
+                status: .matches,
+                evidence: ["Native Swift app", "macOS and iOS simulator build targets"],
+                action: BrowserAdvantageAction(
+                    id: "distribution-windows-decision",
+                    title: "Decide Windows shell",
+                    detail: "Document whether Windows parity is required or intentionally traded for Apple-native depth.",
+                    targetPanel: .runtime
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "browser-switch-import",
+                category: .browserSwitching,
+                title: "Switcher and import setup",
+                strawberryBaseline: "Strawberry advertises import of passwords, bookmarks, and history from major browsers.",
+                dBrowserPosition: "dBrowser has native history, bookmarks, and tabs; first-run browser import is the remaining UX gap.",
+                status: .gap,
+                evidence: ["Native history store", "Native bookmark model"],
+                action: BrowserAdvantageAction(
+                    id: "browser-import-builder",
+                    title: "Build importer",
+                    detail: "Add safe bookmark/history import and explicit high-risk password/cookie handling.",
+                    targetPanel: .bookmarks
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "companion-onboarding",
+                category: .companionOnboarding,
+                title: "Companion setup",
+                strawberryBaseline: "Strawberry asks role, connected apps, and recurring work to personalize companions.",
+                dBrowserPosition: "dBrowser can combine A2UI apps, MCP profiles, OpenMind posture, AFMarket packs, and local model choices into a stronger setup flow.",
+                status: .gap,
+                evidence: ["A2UI app catalog", "MCP profiles", "OpenMind memory state", "AFMarket packs"],
+                action: BrowserAdvantageAction(
+                    id: "advantage-onboarding",
+                    title: "Add setup flow",
+                    detail: "Create a first-run companion profile that recommends apps, models, memory posture, and workflows.",
+                    targetPanel: .advantage
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "page-context-active-page",
+                category: .pageContext,
+                title: "Audited page context",
+                strawberryBaseline: "Strawberry companions understand page content, page structure, conversation memory, and related tabs.",
+                dBrowserPosition: "dBrowser already captures bounded active-page snapshots and DOM records, with redaction and provider-neutral conversation attachments.",
+                status: .matches,
+                evidence: ["PageSnapshot", "DOMQueryResult", "LLMPageSnapshotAttachment", "OpenMind memory citations"],
+                action: BrowserAdvantageAction(
+                    id: "multi-tab-context",
+                    title: "Add multi-tab ranking",
+                    detail: "Rank other open tabs before including them in model context.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "research-source-ledger",
+                category: .research,
+                title: "Research source ledger",
+                strawberryBaseline: "Strawberry claims parallel research, source-linked synthesis, and structured comparisons.",
+                dBrowserPosition: "dBrowser has Copilot runs, AFMarket routing, Smart History, and page snapshots; the next step is a formal source ledger and export schema.",
+                status: .gap,
+                evidence: ["Copilot runs", "AFMarket router", "Smart History summaries"],
+                action: BrowserAdvantageAction(
+                    id: "research-ledger",
+                    title: "Build ledger",
+                    detail: "Record source URL, retrieval date, evidence snippets, confidence, and export artifacts.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "page-actions-typed-bridge",
+                category: .pageActions,
+                title: "Typed real-page actions",
+                strawberryBaseline: "Strawberry advertises clicking, filling, scrolling, navigating, selecting, submitting, and downloading.",
+                dBrowserPosition: "dBrowser executes typed click, type, focus, submit, scroll, navigate, wait, and stop commands through audited WKWebView scripts.",
+                status: .matches,
+                evidence: ["BrowserAutomationCommand", "BrowserDOMAction", "BrowserAutomationApprovalPolicy"],
+                action: BrowserAdvantageAction(
+                    id: "page-action-coverage",
+                    title: "Expand action coverage",
+                    detail: "Add select/menu, download, new-tab, upload metadata, and fixture-backed UI tests.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "workflow-recurring-automation",
+                category: .workflows,
+                title: "Recurring workflow engine",
+                strawberryBaseline: "Strawberry saves workflows, reruns them, schedules them, monitors page changes, and notifies users.",
+                dBrowserPosition: "dBrowser persists saved workflows and run state; real scheduler execution and page-change triggers are the next slice.",
+                status: .gap,
+                evidence: ["SavedCopilotWorkflow", "CopilotWorkflowSchedule", "CopilotWorkflowStore"],
+                action: BrowserAdvantageAction(
+                    id: "workflow-scheduler",
+                    title: "Ship scheduler",
+                    detail: "Run recurring workflows with cooldowns, notifications, and approval-preserving policies.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "integrations-mcp-a2ui",
+                category: .integrations,
+                title: "Extensible app and MCP surface",
+                strawberryBaseline: "Strawberry integrates apps and MCP servers.",
+                dBrowserPosition: "dBrowser supports MCP over HTTP, WebSocket, and stdio, plus installable A2UI apps, AFMarket runner packs, wallet capability contracts, and OpenMind memory.",
+                status: .exceeds,
+                evidence: ["MCPServerConfiguration", "A2UIAppStoreListing", "AFMPackSummary", "BlockchainCapabilityGrant"],
+                action: BrowserAdvantageAction(
+                    id: "production-connectors",
+                    title: "Harden connectors",
+                    detail: "Add built-in OAuth connector profiles, Keychain persistence, revocation, and last-used audit.",
+                    targetPanel: .mcp
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "safety-approval-trust",
+                category: .safety,
+                title: "Approval and trust gates",
+                strawberryBaseline: "Strawberry asks approval for protected/permanent actions and lets users stop or take over.",
+                dBrowserPosition: "dBrowser gates form submit, credentials, cross-origin navigation, destructive clicks, downloads, and wallet/signing, then cancels runs on tab takeover.",
+                status: .exceeds,
+                evidence: ["BrowserAutomationApprovalReason", "CopilotRunEvent", "cancelCopilotRuns", "WalletTransactionPolicyReceipt"],
+                action: BrowserAdvantageAction(
+                    id: "approval-presets",
+                    title: "Add presets",
+                    detail: "Add scoped allow/ask/deny presets with explanations for recurring workflows.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "privacy-governed-context",
+                category: .privacy,
+                title: "Governed local context",
+                strawberryBaseline: "Strawberry stores chats/passwords/history/cookies locally and Smart History summaries locally when enabled.",
+                dBrowserPosition: "dBrowser keeps local stores, redacts page snapshots, attaches only approved OpenMind citations, and records context commitments.",
+                status: .exceeds,
+                evidence: ["SmartHistoryStore", "OpenMindAccessDecision", "LLMRenderedConversationContext", "snapshotCommitment"],
+                action: BrowserAdvantageAction(
+                    id: "smart-history-opt-in",
+                    title: "Make opt-in explicit",
+                    detail: "Expose Smart History modes and run-level data-egress receipts.",
+                    targetPanel: .history
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "credits-run-receipts",
+                category: .credits,
+                title: "Run-level credit visibility",
+                strawberryBaseline: "Strawberry regular browsing is free; credits are consumed by companion work.",
+                dBrowserPosition: "dBrowser already treats browser operations as zero-cost and records estimated provider/model usage per run.",
+                status: .matches,
+                evidence: ["CopilotCreditUsage.zeroBrowserOperation", "CopilotCreditUsage.estimate", "LLMConversationMessage.usage"],
+                action: BrowserAdvantageAction(
+                    id: "exact-usage",
+                    title: "Use exact tokens",
+                    detail: "Pass through exact provider usage when available and show plan or balance receipts.",
+                    targetPanel: .copilot
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "benchmarks-public-runner",
+                category: .benchmarks,
+                title: "Public benchmark proof",
+                strawberryBaseline: "Strawberry publishes a 12-workflow benchmark specification and score claims.",
+                dBrowserPosition: "dBrowser has tests and validation lanes but still needs a Strawberry-compatible benchmark runner and artifacts.",
+                status: .gap,
+                evidence: ["Swift test lane", "STRAWBERRY_SWIFT.md benchmark plan"],
+                action: BrowserAdvantageAction(
+                    id: "benchmark-runner",
+                    title: "Build benchmark lane",
+                    detail: "Mirror B1-B12 tasks, score artifacts, blocker metadata, and 9/12 benchmark modes.",
+                    targetPanel: .advantage
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "local-first-model-switching",
+                category: .localModels,
+                title: "Local-first model switching",
+                strawberryBaseline: "Strawberry exposes companions; public docs do not describe context-preserving local model switching.",
+                dBrowserPosition: "dBrowser preserves a provider-neutral conversation ledger while switching local MLX, LLM Router, AFMarket, and gateway models.",
+                status: .exceeds,
+                evidence: ["LLMConversation.switchModel", "LLMModelRegistry", "LLMConversationContextRenderer"],
+                action: BrowserAdvantageAction(
+                    id: "model-mode-ux",
+                    title: "Promote run modes",
+                    detail: "Add keep-local, fastest-available, and proof-backed mode controls.",
+                    targetPanel: .localLLM
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "openmind-governed-memory",
+                category: .governedMemory,
+                title: "Policy-gated personal memory",
+                strawberryBaseline: "Strawberry describes conversation memory and Smart History.",
+                dBrowserPosition: "dBrowser uses OpenMind access intents, evidence bundles, step-up grants, writeback approvals, and correction workflows.",
+                status: .exceeds,
+                evidence: ["OpenMindAccessIntent", "OpenMindEvidenceBundle", "OpenMindStepUpRequest", "OpenMindCorrectionOutcome"],
+                action: BrowserAdvantageAction(
+                    id: "memory-review-ux",
+                    title: "Review memory posture",
+                    detail: "Use the runtime memory panel to inspect posture, step-up, review tasks, and correction state.",
+                    targetPanel: .runtime
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "afmarket-attested-runs",
+                category: .afMarket,
+                title: "Attested market execution",
+                strawberryBaseline: "Strawberry public docs do not claim proof-backed runner marketplaces or settlement.",
+                dBrowserPosition: "dBrowser models runner packs, routing, leases, node install, attested runs, proof state, settlement state, and A2A experts.",
+                status: .exceeds,
+                evidence: ["AFMRunnerPack", "AFMRouteResult", "AFMAttestedRun", "AFMSettlementState", "AFMA2APeerExpert"],
+                action: BrowserAdvantageAction(
+                    id: "afmarket-use",
+                    title: "Use AFMarket",
+                    detail: "Pick a runner pack for Copilot and inspect attestation, proof, and settlement events.",
+                    targetPanel: .runtime
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "a2ui-companion-apps",
+                category: .a2uiApps,
+                title: "Installable native AI app surfaces",
+                strawberryBaseline: "Strawberry companions operate inside the browser; public docs do not claim A2UI-native app rendering.",
+                dBrowserPosition: "dBrowser installs A2UI apps and renders token streams as native SwiftUI widgets with runtime profiles.",
+                status: .exceeds,
+                evidence: ["A2UIAppStore", "A2UIRuntimeProfile", "A2UISurfaceView"],
+                action: BrowserAdvantageAction(
+                    id: "a2ui-templates",
+                    title: "Add templates",
+                    detail: "Promote sales, recruiting, operations, extraction, research, travel, and shopping templates.",
+                    targetPanel: .a2ui
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "dweb-chain-trust",
+                category: .decentralizedTrust,
+                title: "DWeb and chain verification",
+                strawberryBaseline: "Strawberry focuses on web and app work; public docs do not claim decentralized protocol loading or chain trust.",
+                dBrowserPosition: "dBrowser tracks decentralized storage adapters and chain-trust states for Bitcoin, EVM, Solana, Cosmos, Substrate, Avalanche, TRON, XRPL, Sui, and Aptos.",
+                status: .exceeds,
+                evidence: ["DecentralizedStorageNetwork", "ChainTrustRegistry", "BitcoinLightClientSnapshot", "MoveChainServiceSnapshot"],
+                action: BrowserAdvantageAction(
+                    id: "native-protocol-engines",
+                    title: "Bundle engines",
+                    detail: "Finish native decentralized protocol engine bundling under #133.",
+                    targetPanel: .runtime
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "wallet-policy-trust",
+                category: .walletTrust,
+                title: "Wallet policies and receipts",
+                strawberryBaseline: "Strawberry docs do not claim wallet policy receipts or proof-aware signing flows.",
+                dBrowserPosition: "dBrowser exposes embedded wallet creation, chain trust labels, permission receipts, transfer previews, and approval-gated signing.",
+                status: .exceeds,
+                evidence: ["WalletPortfolioSnapshot", "BlockchainCapabilityGrant", "WalletTransactionPolicyReceipt"],
+                action: BrowserAdvantageAction(
+                    id: "wallet-advantage",
+                    title: "Open wallet",
+                    detail: "Inspect chain trust, embedded wallet state, policy receipts, and transfer previews.",
+                    targetPanel: .wallet
+                )
+            )
+        ]
+    )
 }
 
 enum BrowserWebCommand: Equatable {
