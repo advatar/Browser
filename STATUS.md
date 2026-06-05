@@ -21,6 +21,34 @@
 
 ## Active Task
 
+## Swift Strawberry Gap Closure
+
+- [x] Create GitHub issue for closing the remaining Swift Strawberry UX gaps (#137).
+- [ ] Add Swift models for browser import/switcher, companion onboarding, research source ledgers, recurring workflow automation, and Strawberry-style benchmark proof.
+- [ ] Update the Advantage scorecard so the former Strawberry gap areas are matched or exceeded with concrete Swift evidence.
+- [ ] Add focused Swift tests for the closed gap models and no-gap Advantage scorecard.
+- [ ] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped changes.
+
+## Local AFM Expert Training Marketplace
+
+- [x] Create GitHub issue for local AFM expert training and marketplace build-out (#136).
+- [x] Replace the placeholder `apps/afm-marketplace` target with a repo-owned local training and marketplace API.
+- [x] Add deterministic local adapter/runner-pack artifact generation for embedded AFM expert training jobs.
+- [x] Extend the Swift AFM service client/runtime bridge so marketplace-backed training jobs can be created, published, and surfaced as available runner packs and peer experts.
+- [x] Add focused Node and Swift unit tests for training, marketplace publishing, snapshot decoding, and local fallback labeling.
+- [x] Verify the marketplace package and Swift/Xcode test lanes locally.
+- [ ] Commit and push only scoped changes.
+
+Validation notes:
+
+- `pnpm --filter @browser/afm-marketplace test` passed.
+- `pnpm --filter @browser/afm-marketplace build` passed.
+- `pnpm --filter @browser/afm-marketplace lint` passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-local-afm-marketplace-tests -only-testing:dBrowserTests/afmExpertTrainingJobBuildsLocalPeerExpertContract -only-testing:dBrowserTests/runtimeBridgeCreatesEmbeddedAFMTrainingJobAndA2APreview -only-testing:dBrowserTests/afmServicesClientLoadsMarketplaceRunnerPacks -only-testing:dBrowserTests/afmServicesClientCreatesAndPublishesMarketplaceTrainingJob -only-testing:dBrowserTests/runtimeBridgePublishesLocalAFMTrainingJobIntoMarketplacePacks` passed.
+- `git diff --check -- STATUS.md README.md docs/ARCHITECTURE.md apps/afm-marketplace/package.json apps/afm-marketplace/scripts/build.mjs apps/afm-marketplace/scripts/dev-server.mjs apps/afm-marketplace/scripts/lint.mjs apps/afm-marketplace/src/main.mjs apps/afm-marketplace/src/main.test.mjs swift/dBrowser/dBrowser/AFMExpertTraining.swift swift/dBrowser/dBrowser/AFMServicesClient.swift swift/dBrowser/dBrowser/BrowserViewModel.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-local-afm-marketplace-build` passed.
+
 ## Swift Strawberry Advantage Center
 
 - [x] Create GitHub issue for adding an in-app Swift Advantage Center (#135).

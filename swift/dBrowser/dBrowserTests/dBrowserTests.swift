@@ -2021,7 +2021,11 @@ struct dBrowserTests {
 
     @MainActor
     @Test func runtimeBridgeCreatesEmbeddedAFMTrainingJobAndA2APreview() async {
-        let bridge = MobileRuntimeBridge()
+        var afmConfig = AFMServiceEndpointConfiguration.local
+        afmConfig.marketplaceBaseURL = nil
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: afmConfig)
+        )
         let job = await bridge.createAFMExpertTrainingJob(.demo)
 
         #expect(bridge.afmTrainingJobs.count == 1)
@@ -2049,7 +2053,7 @@ struct dBrowserTests {
         )
         #expect(preview.status == .localPreview)
         #expect(preview.expert?.transport == .localEmbedded)
-        #expect(preview.summary.contains("Production Apple Foundation Model fine-tune execution is not configured"))
+        #expect(preview.summary.contains("local adapter artifact"))
         #expect(bridge.latestAFMA2ACallResult?.id == preview.id)
     }
 
@@ -2113,6 +2117,14 @@ struct dBrowserTests {
                 ])
             }
 
+            if path == "/api/experts" {
+                return Self.jsonResponse(for: request, body: [
+                    "experts": [
+                        Self.localAFMExpertBody(runnerID: "eu-law@v1")
+                    ]
+                ])
+            }
+
             return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
         }
         let client = AFMServicesClient(
@@ -2125,6 +2137,8 @@ struct dBrowserTests {
 
         #expect(snapshot.marketplaceAvailable == true)
         #expect(snapshot.marketplacePacks.first?.runnerID == "eu-law@v1")
+        #expect(snapshot.marketplaceExperts.first?.id == "eu-law@v1")
+        #expect(snapshot.peerExperts.first?.id == "eu-law@v1")
         #expect(snapshot.marketplacePacks.first?.prompting.params.temperature == 0.2)
         #expect(snapshot.marketplacePacks.first?.hashes?.preferredChecksum == "sha256:bundle")
         #expect(pack?.modelID == "apple.afm.medium:2025.10")
@@ -2137,6 +2151,126 @@ struct dBrowserTests {
         #expect(pack?.signature == "0xsig")
         #expect(pack?.ownerID == "creator-1")
         #expect(pack?.createdAtMillis == 1762127512523)
+    }
+
+    @MainActor
+    @Test func afmServicesClientCreatesAndPublishesMarketplaceTrainingJob() async throws {
+        let serviceHarness = Self.makeAFMServiceSession(key: "markettrain", includesMarketplace: true) { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/api/training-jobs", request.httpMethod == "POST" {
+                return Self.jsonResponse(for: request, status: 201, body: [
+                    "job": Self.localAFMMarketplaceJobBody()
+                ])
+            }
+
+            if path == "/api/training-jobs/train-demo/publish", request.httpMethod == "POST" {
+                return Self.jsonResponse(for: request, body: [
+                    "job": Self.localAFMMarketplaceJobBody(
+                        publishStatus: "published",
+                        status: "publishReady",
+                        publishReadiness: "readyForAFMarket"
+                    ),
+                    "pack": Self.localAFMRunnerPackBody(),
+                    "expert": Self.localAFMExpertBody()
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = AFMServicesClient(
+            configuration: serviceHarness.configuration,
+            session: serviceHarness.session
+        )
+
+        let created = try await client.createMarketplaceTrainingJob(.demo)
+        #expect(created.id == "train-demo")
+        #expect(created.publishStatus == "draft")
+        #expect(created.runnerPack?.runnerID == "afm-local-demo@v1")
+        #expect(created.peerExpert?.id == "afm-local-demo@v1")
+
+        let published = try await client.publishMarketplaceTrainingJob(id: created.id)
+        #expect(published.job.status == .publishReady)
+        #expect(published.job.publishReadiness == .readyForAFMarket)
+        #expect(published.job.publishStatus == "published")
+        #expect(published.pack?.packSummary.id == "afm-local-demo@v1")
+        #expect(published.expert?.baseModel == "apple.foundation-model.local")
+    }
+
+    @MainActor
+    @Test func runtimeBridgePublishesLocalAFMTrainingJobIntoMarketplacePacks() async {
+        var published = false
+        let serviceHarness = Self.makeAFMServiceSession(key: "runtimeafmtrain", includesMarketplace: true) { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/health" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+
+            if path == "/packs" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+
+            if path == "/v1/experts" {
+                return Self.jsonResponse(for: request, body: ["experts": []])
+            }
+
+            if path == "/v1/bundles" {
+                return Self.jsonResponse(for: request, body: ["bundles": []])
+            }
+
+            if path == "/api/training-jobs", request.httpMethod == "POST" {
+                return Self.jsonResponse(for: request, status: 201, body: [
+                    "job": Self.localAFMMarketplaceJobBody()
+                ])
+            }
+
+            if path == "/api/training-jobs/train-demo/publish", request.httpMethod == "POST" {
+                published = true
+                return Self.jsonResponse(for: request, body: [
+                    "job": Self.localAFMMarketplaceJobBody(
+                        publishStatus: "published",
+                        status: "publishReady",
+                        publishReadiness: "readyForAFMarket"
+                    ),
+                    "pack": Self.localAFMRunnerPackBody(),
+                    "expert": Self.localAFMExpertBody()
+                ])
+            }
+
+            if path == "/api/packs" {
+                return Self.jsonResponse(for: request, body: [
+                    "packs": published ? [Self.localAFMRunnerPackBody()] : []
+                ])
+            }
+
+            if path == "/api/experts" {
+                return Self.jsonResponse(for: request, body: [
+                    "experts": published ? [Self.localAFMExpertBody()] : []
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(afmServices: serviceHarness.configuration),
+            afmServicesClient: AFMServicesClient(
+                configuration: serviceHarness.configuration,
+                session: serviceHarness.session
+            )
+        )
+
+        let draft = await bridge.createAFMExpertTrainingJob(.demo)
+        #expect(draft.marketplaceJobID == "train-demo")
+        #expect(draft.marketplacePublishStatus == "draft")
+        #expect(draft.manifestHash == "sha256:manifest-local")
+
+        let publishedJob = await bridge.publishAFMExpertTrainingJob(draft.id)
+        #expect(publishedJob?.isPublishedToMarketplace == true)
+        #expect(bridge.afmServiceSnapshot.marketplacePacks.first?.runnerID == "afm-local-demo@v1")
+        #expect(bridge.afmServiceSnapshot.marketplaceExperts.first?.id == "afm-local-demo@v1")
+        #expect(bridge.afmServiceSnapshot.peerExperts.first?.transport == .registryIngest)
+        #expect(bridge.featureStates.first { $0.feature == .afmServices }?.status.contains("1 published") == true)
     }
 
     @MainActor
@@ -6409,6 +6543,88 @@ struct dBrowserTests {
             marketplaceBaseURL: includesMarketplace ? URL(string: "http://\(key)-marketplace.test:4850")! : nil
         )
         return (endpoints, URLSession(configuration: configuration))
+    }
+
+    private static func localAFMMarketplaceJobBody(
+        publishStatus: String = "draft",
+        status: String = "readyForLocalUse",
+        publishReadiness: String = "needsAttestation",
+        runnerID: String = "afm-local-demo@v1"
+    ) -> [String: Any] {
+        [
+            "id": "train-demo",
+            "status": status,
+            "publishReadiness": publishReadiness,
+            "publishStatus": publishStatus,
+            "progress": 1.0,
+            "localAdapterID": "afm-local-demo",
+            "outputRunnerID": runnerID,
+            "artifactBundleURL": "local://afm-marketplace/artifacts/\(runnerID).json",
+            "manifestHash": "sha256:manifest-local",
+            "trainingSummary": "Prepared profile adapter artifact from 42 approved examples.",
+            "adapterStatus": "Profile adapter artifact is ready for local use and marketplace publishing.",
+            "runnerPack": localAFMRunnerPackBody(runnerID: runnerID),
+            "peerExpert": localAFMExpertBody(runnerID: runnerID)
+        ]
+    }
+
+    private static func localAFMRunnerPackBody(runnerID: String = "afm-local-demo@v1") -> [String: Any] {
+        [
+            "runner_id": runnerID,
+            "afm": [
+                "model_id": "apple.foundation-model.local"
+            ],
+            "prompting": [
+                "system": "You are a local policy expert.",
+                "template": "{{prompt}}",
+                "params": [
+                    "temperature": 0.2,
+                    "top_p": 0.9,
+                    "max_tokens": 900
+                ]
+            ],
+            "policy": [
+                "allowed_domains": ["travel", "policy"],
+                "max_context": 128000
+            ],
+            "royalties": [
+                "creator_bps": 500,
+                "data_bps": 100
+            ],
+            "attestation": ["method:profileAdapter", "privacy:redactedA2A"],
+            "capability_vector": [0.12, 0.34, 0.56],
+            "hashes": [
+                "manifest": "sha256:manifest-local",
+                "adapter": "sha256:adapter-local",
+                "bundle": "sha256:bundle-local"
+            ],
+            "bundle_url": "local://afm-marketplace/artifacts/\(runnerID).json",
+            "signature": "local-dev:sig",
+            "runner_root": "fnv1a64:local",
+            "owner_id": "local-user",
+            "created_at": 1798761600000
+        ]
+    }
+
+    private static func localAFMExpertBody(runnerID: String = "afm-local-demo@v1") -> [String: Any] {
+        [
+            "id": runnerID,
+            "name": "Local Travel Policy Expert",
+            "nodePub": "local-node-demo",
+            "capability": [0.12, 0.34, 0.56],
+            "pricePer1k": 0.0,
+            "latencyP50": 5.0,
+            "tags": ["travel", "policy"],
+            "baseModel": "apple.foundation-model.local",
+            "coverage": 1.0,
+            "reputation": 0.0,
+            "stake": 0.0,
+            "attestation": "local-adapter:afm-local-demo",
+            "ingestUrl": "local://afm-marketplace/a2a/\(runnerID)",
+            "profileSig": "local-profile:sig",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "updatedAt": "2026-01-01T00:00:00.000Z"
+        ]
     }
 
     private static func makeOpenMindMemorySession(

@@ -34,6 +34,16 @@ xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -de
 xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -only-testing:dBrowserTests
 ```
 
+## Local AFM Marketplace
+
+The Swift app uses the local AFM marketplace on `127.0.0.1:4850` when it is running. Start it during local development with:
+
+```sh
+pnpm --filter @browser/afm-marketplace dev
+```
+
+The service exposes `/api/training-jobs`, `/api/packs`, and `/api/experts`. Local training jobs create deterministic adapter artifacts and can be published into marketplace runner-pack and peer-expert indexes. This is the local artifact and marketplace path; Apple Foundation Model weight export remains an adapter boundary for future runtime support.
+
 ## Local Decentralized Storage Handlers
 
 The Swift app routes non-gateway decentralized storage URIs to localhost native adapter endpoints on ports `4881` through `4892`. Start the repo-owned handler service during local development with:

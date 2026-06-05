@@ -2739,6 +2739,9 @@ private struct RuntimePanelView: View {
                     onCreateTrainingJob: {
                         Task { await browser.createDemoAFMExpertTrainingJob() }
                     },
+                    onPublishTrainingJob: { job in
+                        Task { await browser.publishAFMExpertTrainingJob(job.id) }
+                    },
                     onPrepareA2ACall: { expert in
                         Task {
                             _ = await browser.callAFMPeerExpert(
@@ -3109,6 +3112,7 @@ private struct AFMServicesPanelView: View {
     let trainingJobs: [AFMExpertTrainingJob]
     let latestA2ACall: AFMA2ACallResult?
     let onCreateTrainingJob: () -> Void
+    let onPublishTrainingJob: (AFMExpertTrainingJob) -> Void
     let onPrepareA2ACall: (AFMA2APeerExpert) -> Void
 
     var body: some View {
@@ -3129,7 +3133,7 @@ private struct AFMServicesPanelView: View {
                 .foregroundStyle(.secondary)
             if let marketplaceAvailable = snapshot.marketplaceAvailable {
                 Label(
-                    "Marketplace \(marketplaceAvailable ? "online" : "offline") with \(snapshot.marketplacePacks.count) runner pack\(snapshot.marketplacePacks.count == 1 ? "" : "s")",
+                    "Marketplace \(marketplaceAvailable ? "online" : "offline") with \(snapshot.marketplacePacks.count) runner pack\(snapshot.marketplacePacks.count == 1 ? "" : "s") and \(snapshot.marketplaceExperts.count) expert\(snapshot.marketplaceExperts.count == 1 ? "" : "s")",
                     systemImage: marketplaceAvailable ? "shippingbox.circle" : "shippingbox"
                 )
                 .font(.caption)
@@ -3192,7 +3196,7 @@ private struct AFMServicesPanelView: View {
                     .buttonStyle(.bordered)
                     .font(.caption)
                 }
-                Text("Local profile-adapter jobs prepare an expert persona and dataset contract. Production Apple Foundation Model fine-tune adapters are not configured yet.")
+                Text("Local training jobs produce deterministic adapter artifacts and can publish marketplace runner packs when the AFM marketplace service is configured.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if trainingJobs.isEmpty {
@@ -3201,16 +3205,30 @@ private struct AFMServicesPanelView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(trainingJobs.prefix(4)) { job in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(job.request.displayName)
-                                .font(.caption.weight(.semibold))
-                            Text(job.displaySummary)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text([job.outputRunnerID, job.request.policy.safetySummary].joined(separator: " / "))
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(job.request.displayName)
+                                    .font(.caption.weight(.semibold))
+                                Text(job.displaySummary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text([job.outputRunnerID, job.manifestHash, job.request.policy.safetySummary].compactMap { $0 }.joined(separator: " / "))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            if job.isPublishedToMarketplace {
+                                Label("Published", systemImage: "checkmark.seal")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color.green)
+                            } else if job.request.policy.publishToAFMarket {
+                                Button("Publish") {
+                                    onPublishTrainingJob(job)
+                                }
+                                .buttonStyle(.bordered)
+                                .font(.caption)
+                            }
                         }
                     }
                 }
@@ -3258,8 +3276,13 @@ private struct AFMServicesPanelView: View {
     }
 
     private var peerExperts: [AFMA2APeerExpert] {
-        (snapshot.peerExperts + trainingJobs.map(\.peerExpert))
+        uniquePeerExperts(snapshot.peerExperts + trainingJobs.map(\.peerExpert))
             .sorted { $0.displayName < $1.displayName }
+    }
+
+    private func uniquePeerExperts(_ experts: [AFMA2APeerExpert]) -> [AFMA2APeerExpert] {
+        var seen = Set<String>()
+        return experts.filter { seen.insert($0.id).inserted }
     }
 
     private func marketplacePackDetails(for pack: AFMPackSummary) -> [String] {

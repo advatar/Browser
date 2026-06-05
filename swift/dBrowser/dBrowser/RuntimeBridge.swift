@@ -298,6 +298,7 @@ protocol RuntimeBridge: AnyObject {
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
     func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob
+    func publishAFMExpertTrainingJob(_ id: UUID) async -> AFMExpertTrainingJob?
     func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult
     func createEmbeddedWallet(label: String) async -> WalletBridgeInfo
     func connectWallet() async -> WalletBridgeInfo
@@ -793,10 +794,53 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     }
 
     func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob {
-        let job = AFMExpertTrainingJob(request: request)
+        var job = AFMExpertTrainingJob(request: request)
+        do {
+            let marketplaceJob = try await afmServicesClient.createMarketplaceTrainingJob(request)
+            job = job.applyingMarketplaceJob(marketplaceJob)
+        } catch AFMServicesClientError.marketplaceNotConfigured {
+            job.marketplacePublishStatus = request.policy.publishToAFMarket ? "marketplace-not-configured" : "local-only"
+        } catch {
+            job.marketplacePublishStatus = request.policy.publishToAFMarket ? "marketplace-unavailable" : "local-only"
+            job.adapterStatus = "\(job.adapterStatus) Marketplace training service unavailable; retained local draft."
+        }
         afmTrainingJobs.insert(job, at: 0)
         refreshAFMTrainingFeatureState()
         return job
+    }
+
+    func publishAFMExpertTrainingJob(_ id: UUID) async -> AFMExpertTrainingJob? {
+        guard let index = afmTrainingJobs.firstIndex(where: { $0.id == id }) else { return nil }
+        var job = afmTrainingJobs[index]
+
+        do {
+            if job.marketplaceJobID == nil {
+                let marketplaceJob = try await afmServicesClient.createMarketplaceTrainingJob(job.request)
+                job = job.applyingMarketplaceJob(marketplaceJob)
+            }
+            guard let marketplaceJobID = job.marketplaceJobID else {
+                throw AFMServicesClientError.marketplaceNotConfigured
+            }
+            let publishResult = try await afmServicesClient.publishMarketplaceTrainingJob(id: marketplaceJobID)
+            job = job.applyingMarketplaceJob(publishResult.job)
+            afmTrainingJobs[index] = job
+            afmServiceSnapshot = await afmServicesClient.snapshot()
+            featureStates = Self.makeFeatureStates(
+                configuration: configuration,
+                afmSnapshot: afmServiceSnapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                chainTrustSnapshot: chainTrustSnapshot,
+                mcpServers: mcpServers
+            )
+            refreshAFMTrainingFeatureState()
+            return job
+        } catch {
+            job.marketplacePublishStatus = "publish-unavailable"
+            job.adapterStatus = "\(job.adapterStatus) Marketplace publish failed: \(error.localizedDescription)"
+            afmTrainingJobs[index] = job
+            refreshAFMTrainingFeatureState()
+            return job
+        }
     }
 
     func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult {
@@ -829,7 +873,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let summary: String
         switch expert.transport {
         case .localEmbedded:
-            summary = "Prepared local embedded expert preview for \(expert.displayName). Production Apple Foundation Model fine-tune execution is not configured."
+            summary = "Prepared local embedded expert preview for \(expert.displayName) using its local adapter artifact. Foundation Model weight export remains a future adapter boundary."
         case .registryIngest:
             summary = "Prepared A2A request envelope for \(expert.displayName). Production peer transport remains brokered by AFMarket routing."
         case .unavailable:
@@ -1513,10 +1557,16 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         guard let index = featureStates.firstIndex(where: { $0.feature == .afmServices }) else { return }
         let localExpertCount = afmTrainingJobs.count
         guard localExpertCount > 0 else { return }
-        let suffix = "\(localExpertCount) local expert training job\(localExpertCount == 1 ? "" : "s")"
-        if !featureStates[index].status.contains("local expert training") {
-            featureStates[index].status += ", \(suffix)"
+        let publishedCount = afmTrainingJobs.filter(\.isPublishedToMarketplace).count
+        let baseStatus = featureStates[index].status
+            .components(separatedBy: ", local expert training:")
+            .first ?? featureStates[index].status
+        var suffix = "local expert training: \(localExpertCount) job\(localExpertCount == 1 ? "" : "s")"
+        if publishedCount > 0 {
+            suffix += ", \(publishedCount) published"
         }
+        featureStates[index].status = "\(baseStatus), \(suffix)"
+        featureStates[index].mode = afmServiceSnapshot.allServicesAvailable ? .service : .local
         featureStates[index].isAvailable = true
     }
 

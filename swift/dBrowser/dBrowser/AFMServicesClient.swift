@@ -14,7 +14,7 @@ struct AFMServiceEndpointConfiguration: Equatable {
         registryBaseURL: URL(string: "http://127.0.0.1:4820")!,
         pipelinesBaseURL: URL(string: "http://127.0.0.1:4830")!,
         nodeBaseURL: URL(string: "http://127.0.0.1:4840")!,
-        marketplaceBaseURL: nil
+        marketplaceBaseURL: URL(string: "http://127.0.0.1:4850")!
     )
 }
 
@@ -28,6 +28,7 @@ struct AFMServiceSnapshot: Equatable {
     var registryPacks: [AFMPackSummary]
     var marketplacePacks: [AFMRunnerPack]
     var registryExperts: [AFMExpertRecord]
+    var marketplaceExperts: [AFMExpertRecord]
     var registryBundles: [AFMBundleRecord]
 
     static let unknown = AFMServiceSnapshot(
@@ -40,6 +41,7 @@ struct AFMServiceSnapshot: Equatable {
         registryPacks: [],
         marketplacePacks: [],
         registryExperts: [],
+        marketplaceExperts: [],
         registryBundles: []
     )
 
@@ -262,6 +264,32 @@ struct AFMRunnerPack: Decodable, Equatable, Identifiable {
         case ownerID = "owner_id"
         case createdAt = "created_at"
     }
+}
+
+struct AFMMarketplaceTrainingJob: Decodable, Equatable, Identifiable {
+    var id: String
+    var status: AFMExpertTrainingStatus?
+    var publishReadiness: AFMExpertPublishReadiness?
+    var publishStatus: String
+    var progress: Double
+    var localAdapterID: String
+    var outputRunnerID: String
+    var artifactBundleURL: String?
+    var manifestHash: String?
+    var trainingSummary: String?
+    var adapterStatus: String?
+    var runnerPack: AFMRunnerPack?
+    var peerExpert: AFMExpertRecord?
+}
+
+struct AFMMarketplaceTrainingJobResult: Decodable, Equatable {
+    var job: AFMMarketplaceTrainingJob
+}
+
+struct AFMMarketplaceTrainingPublishResult: Decodable, Equatable {
+    var job: AFMMarketplaceTrainingJob
+    var pack: AFMRunnerPack?
+    var expert: AFMExpertRecord?
 }
 
 struct AFMExpertRecord: Codable, Equatable, Identifiable {
@@ -1108,6 +1136,7 @@ private extension Data {
 enum AFMServicesClientError: Error, LocalizedError {
     case invalidResponse
     case httpStatus(Int)
+    case marketplaceNotConfigured
 
     var errorDescription: String? {
         switch self {
@@ -1115,11 +1144,15 @@ enum AFMServicesClientError: Error, LocalizedError {
             return "AFM service returned an invalid response."
         case .httpStatus(let status):
             return "AFM service returned HTTP \(status)."
+        case .marketplaceNotConfigured:
+            return "AFM marketplace endpoint is not configured."
         }
     }
 }
 
 final class AFMServicesClient {
+    private struct EmptyAFMServiceBody: Encodable {}
+
     private struct HealthResponse: Decodable {
         let ok: Bool
     }
@@ -1161,6 +1194,10 @@ final class AFMServicesClient {
     }
 
     private struct ExpertsResponse: Decodable {
+        let experts: [AFMExpertRecord]
+    }
+
+    private struct MarketplaceExpertsResponse: Decodable {
         let experts: [AFMExpertRecord]
     }
 
@@ -1318,7 +1355,33 @@ final class AFMServicesClient {
             registryPacks: registryPacks,
             marketplacePacks: marketplaceResult.packs,
             registryExperts: registryExperts,
+            marketplaceExperts: marketplaceResult.experts,
             registryBundles: registryBundles
+        )
+    }
+
+    func createMarketplaceTrainingJob(_ request: AFMExpertTrainingRequest) async throws -> AFMMarketplaceTrainingJob {
+        guard let marketplaceBaseURL = configuration.marketplaceBaseURL else {
+            throw AFMServicesClientError.marketplaceNotConfigured
+        }
+        let response: AFMMarketplaceTrainingJobResult = try await send(
+            method: "POST",
+            baseURL: marketplaceBaseURL,
+            path: "/api/training-jobs",
+            body: request
+        )
+        return response.job
+    }
+
+    func publishMarketplaceTrainingJob(id: String) async throws -> AFMMarketplaceTrainingPublishResult {
+        guard let marketplaceBaseURL = configuration.marketplaceBaseURL else {
+            throw AFMServicesClientError.marketplaceNotConfigured
+        }
+        return try await send(
+            method: "POST",
+            baseURL: marketplaceBaseURL,
+            path: "/api/training-jobs/\(id)/publish",
+            body: EmptyAFMServiceBody()
         )
     }
 
@@ -1501,9 +1564,9 @@ final class AFMServicesClient {
         return response.bundles
     }
 
-    private func marketplaceSnapshot() async -> (available: Bool?, packs: [AFMRunnerPack]) {
+    private func marketplaceSnapshot() async -> (available: Bool?, packs: [AFMRunnerPack], experts: [AFMExpertRecord]) {
         guard let marketplaceBaseURL = configuration.marketplaceBaseURL else {
-            return (nil, [])
+            return (nil, [], [])
         }
         do {
             let response: MarketplacePacksResponse = try await send(
@@ -1511,10 +1574,16 @@ final class AFMServicesClient {
                 baseURL: marketplaceBaseURL,
                 path: "/api/packs"
             )
-            return (true, response.packs)
+            let experts = (try? await marketplaceExperts(baseURL: marketplaceBaseURL)) ?? []
+            return (true, response.packs, experts)
         } catch {
-            return (false, [])
+            return (false, [], [])
         }
+    }
+
+    private func marketplaceExperts(baseURL: URL) async throws -> [AFMExpertRecord] {
+        let response: MarketplaceExpertsResponse = try await send(method: "GET", baseURL: baseURL, path: "/api/experts")
+        return response.experts
     }
 
     private static func routeMetadata(

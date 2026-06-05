@@ -153,6 +153,10 @@ struct AFMExpertTrainingJob: Codable, Equatable, Identifiable {
     var progress: Double
     var localAdapterID: String
     var outputRunnerID: String
+    var marketplaceJobID: String?
+    var marketplacePublishStatus: String
+    var artifactBundleURLString: String?
+    var manifestHash: String?
     var createdAt: Date
     var updatedAt: Date
     var trainingSummary: String
@@ -176,6 +180,10 @@ struct AFMExpertTrainingJob: Codable, Equatable, Identifiable {
         self.progress = 1.0
         self.localAdapterID = "afm-local-\(stable)"
         self.outputRunnerID = "afm-local-\(stable)@draft"
+        self.marketplaceJobID = nil
+        self.marketplacePublishStatus = request.policy.publishToAFMarket ? "local-draft" : "local-only"
+        self.artifactBundleURLString = nil
+        self.manifestHash = nil
         self.createdAt = createdAt
         self.updatedAt = createdAt
         self.trainingSummary = "Prepared \(request.policy.method.title.lowercased()) from \(request.sampleCount) approved example\(request.sampleCount == 1 ? "" : "s") for \(request.policy.baseModelID)."
@@ -183,11 +191,32 @@ struct AFMExpertTrainingJob: Codable, Equatable, Identifiable {
     }
 
     var displaySummary: String {
-        "\(request.displayName): \(status.title), \(publishReadiness.title). \(adapterStatus)"
+        "\(request.displayName): \(status.title), \(publishReadiness.title), \(marketplacePublishStatus). \(adapterStatus)"
     }
 
     var peerExpert: AFMA2APeerExpert {
         AFMA2APeerExpert(trainingJob: self)
+    }
+
+    var isPublishedToMarketplace: Bool {
+        marketplacePublishStatus == "published"
+    }
+
+    func applyingMarketplaceJob(_ marketplaceJob: AFMMarketplaceTrainingJob, updatedAt: Date = Date()) -> AFMExpertTrainingJob {
+        var job = self
+        job.marketplaceJobID = marketplaceJob.id
+        job.marketplacePublishStatus = marketplaceJob.publishStatus
+        job.status = marketplaceJob.status ?? status
+        job.publishReadiness = marketplaceJob.publishReadiness ?? publishReadiness
+        job.progress = marketplaceJob.progress
+        job.localAdapterID = marketplaceJob.localAdapterID
+        job.outputRunnerID = marketplaceJob.outputRunnerID
+        job.artifactBundleURLString = marketplaceJob.artifactBundleURL
+        job.manifestHash = marketplaceJob.manifestHash
+        job.trainingSummary = marketplaceJob.trainingSummary ?? trainingSummary
+        job.adapterStatus = marketplaceJob.adapterStatus ?? adapterStatus
+        job.updatedAt = updatedAt
+        return job
     }
 
     private static func stableID(for request: AFMExpertTrainingRequest) -> String {
@@ -330,7 +359,7 @@ struct AFMA2ACallResult: Codable, Equatable, Identifiable {
 
 extension AFMServiceSnapshot {
     var peerExperts: [AFMA2APeerExpert] {
-        registryExperts
+        (registryExperts + marketplaceExperts)
             .map(AFMA2APeerExpert.init(record:))
             .sorted { $0.displayName < $1.displayName }
     }

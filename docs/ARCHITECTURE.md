@@ -54,7 +54,7 @@ The current Swift app already has a usable shell:
 | Tabs/history/bookmarks | `BrowserViewModel.swift` manages in-memory tabs, history, bookmarks, autocomplete | Current |
 | URL resolution | `BrowserURLResolver` accepts HTTP/HTTPS, blocks unsupported schemes, delegates IPFS/IPNS/ENS to runtime bridge | Current |
 | Runtime status | `MobileRuntimeBridge` exposes feature states for browsing, decentralized protocols, AFM, Copilot, wallet, downloads | Current |
-| AFM service checks | `AFMServicesClient` checks router, registry, and pipelines health and calls `/route`, `/packs`, `/jobs` | Prototype |
+| AFM service checks | `AFMServicesClient` checks router, registry, pipelines, node, and local marketplace services; it calls route, pack, job, training, publish, and marketplace discovery APIs | Prototype |
 | Copilot | `runCopilot` routes through AFM services when available, otherwise returns deterministic local fallback | Prototype |
 | Wallet | Local typed policy simulator for connect/disconnect/spend decision | Prototype |
 | Downloads | Native `URLSession` download tracking with queued/downloading/completed/cancelled/failed states | Current |
@@ -146,7 +146,7 @@ Target Swift package:
 
 Required contracts:
 
-- Marketplace UI and pack API from `../AFMarket/afm-marketplace-starter`.
+- Local marketplace training and pack API from `apps/afm-marketplace`, plus compatibility with `../AFMarket/afm-marketplace-starter`.
 - Runner pack schemas from `../AFMarket/afm-marketplace-starter/lib/schema.ts` and `../AFMarket/pipelines/src/types.ts`.
 - Registry schemas from `../AFMarket/registry/src/schemas.ts`.
 - Router schemas from `../AFMarket/router/src/schemas.ts`.
@@ -159,7 +159,7 @@ Implementation plan:
 
 - Add AFMarket endpoint configuration for marketplace, registry, router, node agent, and settlement chain.
 - Add Codable models for packs, registry bundles, experts, router tasks, routes, node installs, result envelopes, proofs, and settlement metadata.
-- Add a marketplace surface for browsing and installing runner packs.
+- Maintain the Swift marketplace surface for browsing, publishing, and installing runner packs.
 - Install selected packs through `POST /packs/install`.
 - Route Copilot runs through AFMarket when a compatible pack is selected.
 - Reflect lease, dispatch, attestation, proof, and settlement status in Copilot activity.

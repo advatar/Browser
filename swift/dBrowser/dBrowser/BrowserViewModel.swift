@@ -133,7 +133,7 @@ final class BrowserViewModel: ObservableObject {
     }
 
     var afmPeerExperts: [AFMA2APeerExpert] {
-        (afmServiceSnapshot.peerExperts + afmTrainingJobs.map(\.peerExpert))
+        Self.uniquePeerExperts(afmServiceSnapshot.peerExperts + afmTrainingJobs.map(\.peerExpert))
             .sorted { $0.displayName < $1.displayName }
     }
 
@@ -402,6 +402,20 @@ final class BrowserViewModel: ObservableObject {
     @discardableResult
     func createDemoAFMExpertTrainingJob() async -> AFMExpertTrainingJob {
         await createAFMExpertTrainingJob(.demo)
+    }
+
+    @discardableResult
+    func publishAFMExpertTrainingJob(_ id: UUID) async -> AFMExpertTrainingJob? {
+        let job = await runtimeBridge.publishAFMExpertTrainingJob(id)
+        afmTrainingJobs = runtimeBridge.afmTrainingJobs
+        afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
+        runtimeFeatureStates = runtimeBridge.featureStates
+        llmModelOptions = LLMModelRegistry.models(
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot
+        )
+        normalizeSelectedLLMModelIfNeeded()
+        return job
     }
 
     @discardableResult
@@ -1557,5 +1571,10 @@ final class BrowserViewModel: ObservableObject {
             break
         }
         return text
+    }
+
+    private static func uniquePeerExperts(_ experts: [AFMA2APeerExpert]) -> [AFMA2APeerExpert] {
+        var seen = Set<String>()
+        return experts.filter { seen.insert($0.id).inserted }
     }
 }
