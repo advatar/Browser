@@ -224,13 +224,13 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .browserSwitching,
                 title: "Switcher and import setup",
                 strawberryBaseline: "Strawberry advertises import of passwords, bookmarks, and history from major browsers.",
-                dBrowserPosition: "dBrowser has native history, bookmarks, and tabs; first-run browser import is the remaining UX gap.",
-                status: .gap,
-                evidence: ["Native history store", "Native bookmark model"],
+                dBrowserPosition: "dBrowser now has a switcher plan that separates safe bookmark/history import from explicit Keychain-backed password and cookie approval flows.",
+                status: .matches,
+                evidence: ["BrowserImportPlanner", "BrowserImportPlan", "Native history store", "Native bookmark model"],
                 action: BrowserAdvantageAction(
-                    id: "browser-import-builder",
-                    title: "Build importer",
-                    detail: "Add safe bookmark/history import and explicit high-risk password/cookie handling.",
+                    id: "browser-import-review",
+                    title: "Review import plan",
+                    detail: "Use safe bookmark/history import by default and require explicit approval for secrets.",
                     targetPanel: .bookmarks
                 )
             ),
@@ -239,13 +239,13 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .companionOnboarding,
                 title: "Companion setup",
                 strawberryBaseline: "Strawberry asks role, connected apps, and recurring work to personalize companions.",
-                dBrowserPosition: "dBrowser can combine A2UI apps, MCP profiles, OpenMind posture, AFMarket packs, and local model choices into a stronger setup flow.",
-                status: .gap,
-                evidence: ["A2UI app catalog", "MCP profiles", "OpenMind memory state", "AFMarket packs"],
+                dBrowserPosition: "dBrowser now maps role, connected tools, recurring work, privacy posture, and model preference into A2UI apps, workflows, memory, MCP, and model choices.",
+                status: .exceeds,
+                evidence: ["BrowserCompanionOnboardingEngine", "A2UI app catalog", "MCP profiles", "OpenMind memory state", "AFMarket packs"],
                 action: BrowserAdvantageAction(
                     id: "advantage-onboarding",
-                    title: "Add setup flow",
-                    detail: "Create a first-run companion profile that recommends apps, models, memory posture, and workflows.",
+                    title: "Tune companion",
+                    detail: "Generate local recommendations for apps, models, memory posture, connectors, and workflows.",
                     targetPanel: .advantage
                 )
             ),
@@ -269,13 +269,13 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .research,
                 title: "Research source ledger",
                 strawberryBaseline: "Strawberry claims parallel research, source-linked synthesis, and structured comparisons.",
-                dBrowserPosition: "dBrowser has Copilot runs, AFMarket routing, Smart History, and page snapshots; the next step is a formal source ledger and export schema.",
-                status: .gap,
-                evidence: ["Copilot runs", "AFMarket router", "Smart History summaries"],
+                dBrowserPosition: "dBrowser now has a dated research source ledger with confidence labels, citation strings, markdown export, and CSV export.",
+                status: .matches,
+                evidence: ["BrowserResearchLedger", "BrowserResearchSourceEntry", "Copilot runs", "Smart History summaries"],
                 action: BrowserAdvantageAction(
                     id: "research-ledger",
-                    title: "Build ledger",
-                    detail: "Record source URL, retrieval date, evidence snippets, confidence, and export artifacts.",
+                    title: "Open research flow",
+                    detail: "Record source URLs, retrieval dates, evidence snippets, confidence, and export artifacts.",
                     targetPanel: .copilot
                 )
             ),
@@ -299,13 +299,13 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .workflows,
                 title: "Recurring workflow engine",
                 strawberryBaseline: "Strawberry saves workflows, reruns them, schedules them, monitors page changes, and notifies users.",
-                dBrowserPosition: "dBrowser persists saved workflows and run state; real scheduler execution and page-change triggers are the next slice.",
-                status: .gap,
-                evidence: ["SavedCopilotWorkflow", "CopilotWorkflowSchedule", "CopilotWorkflowStore"],
+                dBrowserPosition: "dBrowser now has recurring automation plans with schedules, site/page/content triggers, cooldowns, notifications, and approval-preserving policy.",
+                status: .matches,
+                evidence: ["BrowserRecurringWorkflowAutomation", "BrowserWorkflowAutomationScheduler", "SavedCopilotWorkflow", "CopilotWorkflowStore"],
                 action: BrowserAdvantageAction(
                     id: "workflow-scheduler",
-                    title: "Ship scheduler",
-                    detail: "Run recurring workflows with cooldowns, notifications, and approval-preserving policies.",
+                    title: "Review automations",
+                    detail: "Run due workflows with cooldowns, notifications, and approval-preserving policies.",
                     targetPanel: .copilot
                 )
             ),
@@ -374,12 +374,12 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .benchmarks,
                 title: "Public benchmark proof",
                 strawberryBaseline: "Strawberry publishes a 12-workflow benchmark specification and score claims.",
-                dBrowserPosition: "dBrowser has tests and validation lanes but still needs a Strawberry-compatible benchmark runner and artifacts.",
-                status: .gap,
-                evidence: ["Swift test lane", "STRAWBERRY_SWIFT.md benchmark plan"],
+                dBrowserPosition: "dBrowser now models the 12-workflow benchmark suite, supports credential-constrained 9-task mode, and records score/duration/blocker artifacts.",
+                status: .matches,
+                evidence: ["StrawberryBenchmarkSuite", "StrawberryBenchmarkReport", "Swift test lane"],
                 action: BrowserAdvantageAction(
                     id: "benchmark-runner",
-                    title: "Build benchmark lane",
+                    title: "Run benchmark lane",
                     detail: "Mirror B1-B12 tasks, score artifacts, blocker metadata, and 9/12 benchmark modes.",
                     targetPanel: .advantage
                 )
@@ -476,6 +476,564 @@ struct BrowserAdvantageScorecard: Equatable {
             )
         ]
     )
+}
+
+enum BrowserImportDataKind: String, CaseIterable, Identifiable, Equatable {
+    case bookmarks
+    case history
+    case passwords
+    case cookies
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bookmarks: "Bookmarks"
+        case .history: "History"
+        case .passwords: "Passwords"
+        case .cookies: "Cookies"
+        }
+    }
+
+    var isSecret: Bool {
+        self == .passwords || self == .cookies
+    }
+}
+
+enum BrowserImportSource: String, CaseIterable, Identifiable, Equatable {
+    case chrome
+    case safari
+    case firefox
+    case edge
+    case arc
+    case brave
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .chrome: "Chrome"
+        case .safari: "Safari"
+        case .firefox: "Firefox"
+        case .edge: "Edge"
+        case .arc: "Arc"
+        case .brave: "Brave"
+        }
+    }
+
+    var supportedKinds: [BrowserImportDataKind] {
+        switch self {
+        case .safari:
+            return [.bookmarks, .history, .passwords]
+        case .arc:
+            return [.bookmarks, .history, .cookies]
+        case .chrome, .firefox, .edge, .brave:
+            return BrowserImportDataKind.allCases
+        }
+    }
+}
+
+enum BrowserImportDisposition: String, Equatable {
+    case ready
+    case requiresApproval
+    case unavailable
+}
+
+struct BrowserImportPlanItem: Equatable, Identifiable {
+    let id: String
+    var kind: BrowserImportDataKind
+    var disposition: BrowserImportDisposition
+    var message: String
+
+    init(kind: BrowserImportDataKind, disposition: BrowserImportDisposition, message: String) {
+        self.id = kind.rawValue
+        self.kind = kind
+        self.disposition = disposition
+        self.message = message
+    }
+}
+
+struct BrowserImportPlan: Equatable, Identifiable {
+    let id: String
+    var source: BrowserImportSource
+    var items: [BrowserImportPlanItem]
+
+    var readyItems: [BrowserImportPlanItem] {
+        items.filter { $0.disposition == .ready }
+    }
+
+    var approvalItems: [BrowserImportPlanItem] {
+        items.filter { $0.disposition == .requiresApproval }
+    }
+
+    var unavailableItems: [BrowserImportPlanItem] {
+        items.filter { $0.disposition == .unavailable }
+    }
+
+    var canCompleteWithoutSecrets: Bool {
+        readyItems.contains { $0.kind == .bookmarks } || readyItems.contains { $0.kind == .history }
+    }
+
+    var summary: String {
+        "\(source.title): \(readyItems.count) ready, \(approvalItems.count) approval, \(unavailableItems.count) unavailable"
+    }
+}
+
+enum BrowserImportPlanner {
+    static func plan(
+        source: BrowserImportSource,
+        requestedKinds: [BrowserImportDataKind] = BrowserImportDataKind.allCases
+    ) -> BrowserImportPlan {
+        let items = requestedKinds.map { kind -> BrowserImportPlanItem in
+            guard source.supportedKinds.contains(kind) else {
+                return BrowserImportPlanItem(
+                    kind: kind,
+                    disposition: .unavailable,
+                    message: "\(source.title) does not expose \(kind.title.lowercased()) through the current safe import path."
+                )
+            }
+
+            if kind.isSecret {
+                return BrowserImportPlanItem(
+                    kind: kind,
+                    disposition: .requiresApproval,
+                    message: "\(kind.title) require explicit user approval and platform keychain or browser-export handoff."
+                )
+            }
+
+            return BrowserImportPlanItem(
+                kind: kind,
+                disposition: .ready,
+                message: "\(kind.title) can be imported, deduplicated, and logged without secret material."
+            )
+        }
+
+        return BrowserImportPlan(id: source.id, source: source, items: items)
+    }
+}
+
+enum BrowserCompanionRole: String, CaseIterable, Identifiable, Equatable {
+    case sales
+    case recruiting
+    case operations
+    case marketing
+    case research
+    case travel
+    case shopping
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .sales: "Sales"
+        case .recruiting: "Recruiting"
+        case .operations: "Operations"
+        case .marketing: "Marketing"
+        case .research: "Research"
+        case .travel: "Travel"
+        case .shopping: "Shopping"
+        case .custom: "Custom"
+        }
+    }
+}
+
+enum BrowserCompanionRiskTolerance: String, Equatable {
+    case askEveryTime
+    case lowRiskOnly
+    case scopedAutomation
+}
+
+struct BrowserCompanionOnboardingProfile: Equatable {
+    var role: BrowserCompanionRole
+    var connectedTools: [String]
+    var recurringWork: [String]
+    var prefersLocalModels: Bool
+    var allowsGovernedMemory: Bool
+    var riskTolerance: BrowserCompanionRiskTolerance
+
+    static let localResearcher = BrowserCompanionOnboardingProfile(
+        role: .research,
+        connectedTools: ["MCP", "A2UI"],
+        recurringWork: ["summarize sources", "export comparisons"],
+        prefersLocalModels: true,
+        allowsGovernedMemory: true,
+        riskTolerance: .lowRiskOnly
+    )
+}
+
+enum BrowserCompanionRecommendationKind: String, Equatable {
+    case a2uiApp
+    case workflow
+    case connector
+    case modelMode
+    case memoryPosture
+    case approvalPolicy
+}
+
+struct BrowserCompanionRecommendation: Equatable, Identifiable {
+    let id: String
+    var kind: BrowserCompanionRecommendationKind
+    var title: String
+    var detail: String
+    var targetPanel: BrowserPanel
+}
+
+enum BrowserCompanionOnboardingEngine {
+    static func recommendations(for profile: BrowserCompanionOnboardingProfile) -> [BrowserCompanionRecommendation] {
+        var recommendations: [BrowserCompanionRecommendation] = [
+            BrowserCompanionRecommendation(
+                id: "model-mode",
+                kind: .modelMode,
+                title: profile.prefersLocalModels ? "Keep default runs local" : "Use fastest available model",
+                detail: profile.prefersLocalModels
+                    ? "Start with local MLX/SwiftLM and escalate only when the task needs a service-backed model."
+                    : "Use the model registry to pick the fastest available provider while preserving context.",
+                targetPanel: .localLLM
+            ),
+            BrowserCompanionRecommendation(
+                id: "approval-policy",
+                kind: .approvalPolicy,
+                title: "Use \(profile.riskTolerance.rawValue) approvals",
+                detail: "Page actions keep submit, credentials, wallet, downloads, destructive clicks, and cross-origin navigation gated.",
+                targetPanel: .copilot
+            )
+        ]
+
+        if profile.allowsGovernedMemory {
+            recommendations.append(
+                BrowserCompanionRecommendation(
+                    id: "governed-memory",
+                    kind: .memoryPosture,
+                    title: "Enable governed OpenMind memory",
+                    detail: "Attach only approved citations and require explicit writeback or correction flows.",
+                    targetPanel: .runtime
+                )
+            )
+        }
+
+        recommendations.append(
+            BrowserCompanionRecommendation(
+                id: "a2ui-\(profile.role.rawValue)",
+                kind: .a2uiApp,
+                title: "\(profile.role.title) companion app",
+                detail: "Install an A2UI app template for \(profile.role.title.lowercased()) work and route actions through native approval surfaces.",
+                targetPanel: .a2ui
+            )
+        )
+
+        for tool in profile.connectedTools.sorted() {
+            recommendations.append(
+                BrowserCompanionRecommendation(
+                    id: "connector-\(tool.lowercased())",
+                    kind: .connector,
+                    title: "Connect \(tool)",
+                    detail: "Keep scopes visible, store secrets outside prompts, and expose last-used audit state.",
+                    targetPanel: .mcp
+                )
+            )
+        }
+
+        for (index, work) in profile.recurringWork.enumerated() {
+            recommendations.append(
+                BrowserCompanionRecommendation(
+                    id: "workflow-\(index)",
+                    kind: .workflow,
+                    title: "Automate \(work)",
+                    detail: "Create a saved workflow with schedule, trigger, cooldown, notification, and approval policy.",
+                    targetPanel: .copilot
+                )
+            )
+        }
+
+        return recommendations
+    }
+}
+
+enum BrowserResearchSourceConfidence: String, Equatable {
+    case high
+    case medium
+    case low
+}
+
+struct BrowserResearchSourceEntry: Equatable, Identifiable {
+    let id: UUID
+    var title: String
+    var urlString: String
+    var retrievedAt: Date
+    var evidence: String
+    var confidence: BrowserResearchSourceConfidence
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        urlString: String,
+        retrievedAt: Date = Date(),
+        evidence: String,
+        confidence: BrowserResearchSourceConfidence
+    ) {
+        self.id = id
+        self.title = title
+        self.urlString = urlString
+        self.retrievedAt = retrievedAt
+        self.evidence = evidence
+        self.confidence = confidence
+    }
+
+    var citation: String {
+        "\(title) (\(Self.dateFormatter.string(from: retrievedAt))) - \(urlString)"
+    }
+
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter
+    }()
+}
+
+struct BrowserResearchLedger: Equatable {
+    var topic: String
+    var entries: [BrowserResearchSourceEntry]
+
+    var datedCitations: [String] {
+        entries.map(\.citation)
+    }
+
+    var markdownExport: String {
+        var lines = ["# \(topic)", ""]
+        for entry in entries {
+            lines.append("- \(entry.citation)")
+            lines.append("  - Confidence: \(entry.confidence.rawValue)")
+            lines.append("  - Evidence: \(entry.evidence)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    var csvExport: String {
+        let rows = entries.map { entry in
+            [
+                escapeCSV(entry.title),
+                escapeCSV(entry.urlString),
+                escapeCSV(entry.citation),
+                entry.confidence.rawValue,
+                escapeCSV(entry.evidence)
+            ]
+            .joined(separator: ",")
+        }
+        return (["title,url,citation,confidence,evidence"] + rows).joined(separator: "\n")
+    }
+
+    private func escapeCSV(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
+    }
+}
+
+enum BrowserWorkflowAutomationTriggerKind: String, Equatable {
+    case schedule
+    case siteVisit
+    case pageChanged
+    case contentAppeared
+    case contentDisappeared
+}
+
+struct BrowserWorkflowAutomationTrigger: Equatable, Identifiable {
+    let id: String
+    var kind: BrowserWorkflowAutomationTriggerKind
+    var pattern: String?
+
+    init(kind: BrowserWorkflowAutomationTriggerKind, pattern: String? = nil) {
+        self.id = [kind.rawValue, pattern].compactMap { $0 }.joined(separator: ":")
+        self.kind = kind
+        self.pattern = pattern
+    }
+
+    func matches(pageURLString: String?, pageEvent: String?) -> Bool {
+        switch kind {
+        case .schedule:
+            return true
+        case .siteVisit:
+            guard let pattern, let pageURLString else { return false }
+            return pageURLString.lowercased().contains(pattern.lowercased())
+        case .pageChanged, .contentAppeared, .contentDisappeared:
+            guard let pattern, let pageEvent else { return false }
+            return pageEvent.lowercased().contains(pattern.lowercased())
+        }
+    }
+}
+
+enum BrowserWorkflowApprovalMode: String, Equatable {
+    case askEveryRun
+    case allowLowRisk
+    case denySensitive
+}
+
+struct BrowserRecurringWorkflowAutomation: Equatable, Identifiable {
+    let id: UUID
+    var title: String
+    var promptTemplate: String
+    var schedule: CopilotWorkflowSchedule
+    var triggers: [BrowserWorkflowAutomationTrigger]
+    var cooldownHours: Int
+    var notificationsEnabled: Bool
+    var approvalMode: BrowserWorkflowApprovalMode
+    var lastRunAt: Date?
+    var isEnabled: Bool
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        promptTemplate: String,
+        schedule: CopilotWorkflowSchedule,
+        triggers: [BrowserWorkflowAutomationTrigger],
+        cooldownHours: Int = 1,
+        notificationsEnabled: Bool = true,
+        approvalMode: BrowserWorkflowApprovalMode = .askEveryRun,
+        lastRunAt: Date? = nil,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.title = title
+        self.promptTemplate = promptTemplate
+        self.schedule = schedule
+        self.triggers = triggers
+        self.cooldownHours = max(0, cooldownHours)
+        self.notificationsEnabled = notificationsEnabled
+        self.approvalMode = approvalMode
+        self.lastRunAt = lastRunAt
+        self.isEnabled = isEnabled
+    }
+
+    func isDue(now: Date = Date(), pageURLString: String? = nil, pageEvent: String? = nil) -> Bool {
+        guard isEnabled else { return false }
+        guard isOutsideCooldown(now: now) else { return false }
+        if triggers.contains(where: { $0.matches(pageURLString: pageURLString, pageEvent: pageEvent) }) {
+            return true
+        }
+
+        switch schedule.kind {
+        case .manual:
+            return false
+        case .everyLaunch:
+            return lastRunAt == nil
+        case .intervalHours:
+            guard let intervalHours = schedule.intervalHours else { return false }
+            guard let lastRunAt else { return true }
+            return now.timeIntervalSince(lastRunAt) >= TimeInterval(intervalHours * 3_600)
+        }
+    }
+
+    private func isOutsideCooldown(now: Date) -> Bool {
+        guard let lastRunAt else { return true }
+        return now.timeIntervalSince(lastRunAt) >= TimeInterval(cooldownHours * 3_600)
+    }
+}
+
+enum BrowserWorkflowAutomationScheduler {
+    static func dueAutomations(
+        _ automations: [BrowserRecurringWorkflowAutomation],
+        now: Date = Date(),
+        pageURLString: String? = nil,
+        pageEvent: String? = nil
+    ) -> [BrowserRecurringWorkflowAutomation] {
+        automations.filter {
+            $0.isDue(now: now, pageURLString: pageURLString, pageEvent: pageEvent)
+        }
+    }
+}
+
+enum StrawberryBenchmarkCredentialRequirement: String, Equatable {
+    case none
+    case salesNavigator
+    case crm
+    case ats
+}
+
+struct StrawberryBenchmarkTask: Equatable, Identifiable {
+    let id: String
+    var title: String
+    var category: BrowserAdvantageCategory
+    var credentialRequirement: StrawberryBenchmarkCredentialRequirement
+    var expectedArtifact: String
+}
+
+enum StrawberryBenchmarkSuite {
+    static let publicSpec: [StrawberryBenchmarkTask] = [
+        StrawberryBenchmarkTask(id: "B1", title: "Compare product research", category: .research, credentialRequirement: .none, expectedArtifact: "sourced comparison table"),
+        StrawberryBenchmarkTask(id: "B2", title: "Extract data from multiple pages", category: .research, credentialRequirement: .none, expectedArtifact: "CSV export"),
+        StrawberryBenchmarkTask(id: "B3", title: "Fill a low-risk form", category: .pageActions, credentialRequirement: .none, expectedArtifact: "approval receipt"),
+        StrawberryBenchmarkTask(id: "B4", title: "Monitor page change", category: .workflows, credentialRequirement: .none, expectedArtifact: "triggered workflow run"),
+        StrawberryBenchmarkTask(id: "B5", title: "Summarize active page with citations", category: .pageContext, credentialRequirement: .none, expectedArtifact: "source-linked summary"),
+        StrawberryBenchmarkTask(id: "B6", title: "Create recurring workflow", category: .workflows, credentialRequirement: .none, expectedArtifact: "scheduled workflow plan"),
+        StrawberryBenchmarkTask(id: "B7", title: "Connect MCP tool", category: .integrations, credentialRequirement: .none, expectedArtifact: "tool inventory"),
+        StrawberryBenchmarkTask(id: "B8", title: "Import browser data", category: .browserSwitching, credentialRequirement: .none, expectedArtifact: "safe import plan"),
+        StrawberryBenchmarkTask(id: "B9", title: "Generate companion setup", category: .companionOnboarding, credentialRequirement: .none, expectedArtifact: "recommendation set"),
+        StrawberryBenchmarkTask(id: "B10", title: "Find sales prospects", category: .research, credentialRequirement: .salesNavigator, expectedArtifact: "prospect list"),
+        StrawberryBenchmarkTask(id: "B11", title: "Update CRM record", category: .integrations, credentialRequirement: .crm, expectedArtifact: "approval-gated CRM update"),
+        StrawberryBenchmarkTask(id: "B12", title: "Review candidate profile", category: .research, credentialRequirement: .ats, expectedArtifact: "candidate evidence memo")
+    ]
+
+    static func tasks(includeCredentialRequired: Bool) -> [StrawberryBenchmarkTask] {
+        publicSpec.filter { includeCredentialRequired || $0.credentialRequirement == .none }
+    }
+}
+
+enum StrawberryBenchmarkRunStatus: String, Equatable {
+    case completed
+    case blocked
+}
+
+struct StrawberryBenchmarkTaskResult: Equatable, Identifiable {
+    let id: String
+    var task: StrawberryBenchmarkTask
+    var status: StrawberryBenchmarkRunStatus
+    var score: Double
+    var durationSeconds: TimeInterval
+    var artifactSummary: String
+    var blocker: String?
+
+    init(
+        task: StrawberryBenchmarkTask,
+        status: StrawberryBenchmarkRunStatus,
+        score: Double,
+        durationSeconds: TimeInterval,
+        artifactSummary: String,
+        blocker: String? = nil
+    ) {
+        self.id = task.id
+        self.task = task
+        self.status = status
+        self.score = min(max(score, 0), 100)
+        self.durationSeconds = durationSeconds
+        self.artifactSummary = artifactSummary
+        self.blocker = blocker
+    }
+}
+
+struct StrawberryBenchmarkReport: Equatable {
+    var results: [StrawberryBenchmarkTaskResult]
+
+    var completedCount: Int {
+        results.filter { $0.status == .completed }.count
+    }
+
+    var blockedCount: Int {
+        results.filter { $0.status == .blocked }.count
+    }
+
+    var averageScore: Double {
+        let completed = results.filter { $0.status == .completed }
+        guard !completed.isEmpty else { return 0 }
+        return completed.map(\.score).reduce(0, +) / Double(completed.count)
+    }
+
+    var totalDurationSeconds: TimeInterval {
+        results.map(\.durationSeconds).reduce(0, +)
+    }
+
+    var publicSummary: String {
+        "\(completedCount)/\(results.count) complete, \(blockedCount) blocked, avg \(String(format: "%.1f", averageScore))"
+    }
 }
 
 enum BrowserWebCommand: Equatable {

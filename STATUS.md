@@ -24,11 +24,18 @@
 ## Swift Strawberry Gap Closure
 
 - [x] Create GitHub issue for closing the remaining Swift Strawberry UX gaps (#137).
-- [ ] Add Swift models for browser import/switcher, companion onboarding, research source ledgers, recurring workflow automation, and Strawberry-style benchmark proof.
-- [ ] Update the Advantage scorecard so the former Strawberry gap areas are matched or exceeded with concrete Swift evidence.
-- [ ] Add focused Swift tests for the closed gap models and no-gap Advantage scorecard.
-- [ ] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
+- [x] Add Swift models for browser import/switcher, companion onboarding, research source ledgers, recurring workflow automation, and Strawberry-style benchmark proof.
+- [x] Update the Advantage scorecard so the former Strawberry gap areas are matched or exceeded with concrete Swift evidence.
+- [x] Add focused Swift tests for the closed gap models and no-gap Advantage scorecard.
+- [x] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
 - [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-strawberry-gap-closure-tests -only-testing:dBrowserTests/advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline -only-testing:dBrowserTests/browserImportPlannerSeparatesSafeDataFromSecrets -only-testing:dBrowserTests/companionOnboardingRecommendsAppsMemoryConnectorsModelsAndWorkflows -only-testing:dBrowserTests/researchLedgerExportsDatedCitationsMarkdownAndCSV -only-testing:dBrowserTests/recurringWorkflowAutomationHandlesSchedulesTriggersCooldownsAndNotifications -only-testing:dBrowserTests/strawberryBenchmarkSuiteSupportsTwelveTaskAndCredentialConstrainedRuns` passed.
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- Changed-line non-ASCII scan passed for the scoped files.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-strawberry-gap-closure-build` passed.
 
 ## Local AFM Expert Training Marketplace
 

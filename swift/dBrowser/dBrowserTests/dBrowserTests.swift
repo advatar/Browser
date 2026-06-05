@@ -6200,7 +6200,6 @@ struct dBrowserTests {
     @Test func advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline() {
         let scorecard = BrowserAdvantageScorecard.current
         let baseline = Set(BrowserAdvantageCategory.strawberryBaseline)
-        let gapActions = scorecard.capabilities(with: .gap).compactMap(\.action)
 
         #expect(BrowserPanel.allCases.contains(.advantage))
         #expect(BrowserPanel.advantage.title == "Advantage")
@@ -6208,12 +6207,150 @@ struct dBrowserTests {
         #expect(BrowserPanel.browserSidebarPanels.contains(.advantage))
         #expect(scorecard.trackedStrawberryBaselineCategories == baseline)
         #expect(scorecard.capabilities.count > BrowserAdvantageCategory.strawberryBaseline.count)
-        #expect(scorecard.exceededCount > scorecard.gapCount)
+        #expect(scorecard.exceededCount > scorecard.matchedCount)
+        #expect(scorecard.gapCount == 0)
         #expect(scorecard.baselineCoverageText == "12/12 Strawberry areas tracked")
-        #expect(gapActions.count == scorecard.gapCount)
         #expect(scorecard.capabilities.contains { $0.id == "local-first-model-switching" && $0.status == .exceeds })
         #expect(scorecard.capabilities.contains { $0.id == "dweb-chain-trust" && $0.status == .exceeds })
-        #expect(scorecard.capabilities.contains { $0.id == "benchmarks-public-runner" && $0.action?.targetPanel == .advantage })
+        #expect(scorecard.capabilities.contains { $0.id == "browser-switch-import" && $0.status == .matches })
+        #expect(scorecard.capabilities.contains { $0.id == "companion-onboarding" && $0.status == .exceeds })
+        #expect(scorecard.capabilities.contains { $0.id == "research-source-ledger" && $0.status == .matches })
+        #expect(scorecard.capabilities.contains { $0.id == "workflow-recurring-automation" && $0.status == .matches })
+        #expect(scorecard.capabilities.contains { $0.id == "benchmarks-public-runner" && $0.status == .matches && $0.action?.targetPanel == .advantage })
+    }
+
+    @Test func browserImportPlannerSeparatesSafeDataFromSecrets() {
+        let chromePlan = BrowserImportPlanner.plan(source: .chrome)
+        let safariPlan = BrowserImportPlanner.plan(source: .safari)
+
+        #expect(chromePlan.readyItems.map(\.kind).contains(.bookmarks))
+        #expect(chromePlan.readyItems.map(\.kind).contains(.history))
+        #expect(chromePlan.approvalItems.map(\.kind).contains(.passwords))
+        #expect(chromePlan.approvalItems.map(\.kind).contains(.cookies))
+        #expect(chromePlan.canCompleteWithoutSecrets)
+        #expect(chromePlan.summary == "Chrome: 2 ready, 2 approval, 0 unavailable")
+        #expect(safariPlan.unavailableItems.map(\.kind).contains(.cookies))
+    }
+
+    @Test func companionOnboardingRecommendsAppsMemoryConnectorsModelsAndWorkflows() {
+        let profile = BrowserCompanionOnboardingProfile.localResearcher
+        let recommendations = BrowserCompanionOnboardingEngine.recommendations(for: profile)
+        let kinds = Set(recommendations.map(\.kind))
+        let targetPanels = Set(recommendations.map(\.targetPanel))
+
+        #expect(kinds.contains(.a2uiApp))
+        #expect(kinds.contains(.workflow))
+        #expect(kinds.contains(.connector))
+        #expect(kinds.contains(.modelMode))
+        #expect(kinds.contains(.memoryPosture))
+        #expect(targetPanels.contains(.a2ui))
+        #expect(targetPanels.contains(.mcp))
+        #expect(targetPanels.contains(.localLLM))
+        #expect(recommendations.contains { $0.title == "Keep default runs local" })
+    }
+
+    @Test func researchLedgerExportsDatedCitationsMarkdownAndCSV() {
+        let retrievedAt = Date(timeIntervalSince1970: 1_767_225_600)
+        let ledger = BrowserResearchLedger(
+            topic: "AI browser comparison",
+            entries: [
+                BrowserResearchSourceEntry(
+                    title: "Strawberry benchmarks",
+                    urlString: "https://strawberrybrowser.com/benchmarks/spec",
+                    retrievedAt: retrievedAt,
+                    evidence: "12 workflow benchmark specification",
+                    confidence: .high
+                ),
+                BrowserResearchSourceEntry(
+                    title: "dBrowser Advantage",
+                    urlString: "about:advantage",
+                    retrievedAt: retrievedAt,
+                    evidence: "Local scorecard, no open Strawberry gaps",
+                    confidence: .medium
+                )
+            ]
+        )
+
+        #expect(ledger.datedCitations.count == 2)
+        #expect(ledger.datedCitations.first?.contains("https://strawberrybrowser.com/benchmarks/spec") == true)
+        #expect(ledger.markdownExport.contains("# AI browser comparison"))
+        #expect(ledger.markdownExport.contains("Confidence: high"))
+        #expect(ledger.csvExport.contains("\"Local scorecard, no open Strawberry gaps\""))
+    }
+
+    @Test func recurringWorkflowAutomationHandlesSchedulesTriggersCooldownsAndNotifications() {
+        let now = Date(timeIntervalSince1970: 20_000)
+        let dueByInterval = BrowserRecurringWorkflowAutomation(
+            title: "Refresh comparison",
+            promptTemplate: "Check source changes",
+            schedule: .interval(hours: 2),
+            triggers: [],
+            cooldownHours: 1,
+            notificationsEnabled: true,
+            approvalMode: .allowLowRisk,
+            lastRunAt: now.addingTimeInterval(-3 * 3_600)
+        )
+        let blockedByCooldown = BrowserRecurringWorkflowAutomation(
+            title: "Cooldown",
+            promptTemplate: "Too soon",
+            schedule: .interval(hours: 1),
+            triggers: [.init(kind: .siteVisit, pattern: "example.com")],
+            cooldownHours: 2,
+            lastRunAt: now.addingTimeInterval(-30 * 60)
+        )
+        let dueByTrigger = BrowserRecurringWorkflowAutomation(
+            title: "Site trigger",
+            promptTemplate: "Summarize visit",
+            schedule: .manual,
+            triggers: [.init(kind: .siteVisit, pattern: "example.com")],
+            cooldownHours: 0
+        )
+
+        let due = BrowserWorkflowAutomationScheduler.dueAutomations(
+            [dueByInterval, blockedByCooldown, dueByTrigger],
+            now: now,
+            pageURLString: "https://example.com/pricing",
+            pageEvent: nil
+        )
+
+        #expect(due.map(\.title).contains("Refresh comparison"))
+        #expect(due.map(\.title).contains("Site trigger"))
+        #expect(!due.map(\.title).contains("Cooldown"))
+        #expect(dueByInterval.notificationsEnabled)
+        #expect(dueByInterval.approvalMode == .allowLowRisk)
+    }
+
+    @Test func strawberryBenchmarkSuiteSupportsTwelveTaskAndCredentialConstrainedRuns() {
+        let allTasks = StrawberryBenchmarkSuite.tasks(includeCredentialRequired: true)
+        let publicTasks = StrawberryBenchmarkSuite.tasks(includeCredentialRequired: false)
+        let results = publicTasks.map {
+            StrawberryBenchmarkTaskResult(
+                task: $0,
+                status: .completed,
+                score: 96,
+                durationSeconds: 120,
+                artifactSummary: $0.expectedArtifact
+            )
+        } + [
+            StrawberryBenchmarkTaskResult(
+                task: allTasks.first { $0.id == "B10" }!,
+                status: .blocked,
+                score: 0,
+                durationSeconds: 0,
+                artifactSummary: "Skipped",
+                blocker: "Sales Navigator credentials not configured"
+            )
+        ]
+        let report = StrawberryBenchmarkReport(results: results)
+
+        #expect(allTasks.count == 12)
+        #expect(publicTasks.count == 9)
+        #expect(publicTasks.allSatisfy { $0.credentialRequirement == .none })
+        #expect(report.completedCount == 9)
+        #expect(report.blockedCount == 1)
+        #expect(report.averageScore == 96)
+        #expect(report.totalDurationSeconds == 1_080)
+        #expect(report.publicSummary == "9/10 complete, 1 blocked, avg 96.0")
     }
 
     @MainActor
