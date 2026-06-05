@@ -21,6 +21,21 @@
 
 ## Active Task
 
+## Swift Strawberry Survey Renewal
+
+- [x] Create GitHub issue for renewing the Swift Strawberry parity survey (#134).
+- [x] Re-check current public Strawberry Browser progress and cite the inspected sources.
+- [x] Compare the renewed Strawberry baseline against the current Swift implementation state.
+- [x] Update `STRAWBERRY_SWIFT.md` with closed gaps, remaining gaps, and a prioritized gap-closure plan.
+- [x] Verify Markdown hygiene and the Swift/Xcode build locally.
+- [x] Commit and push only scoped documentation changes.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md STRAWBERRY_SWIFT.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md STRAWBERRY_SWIFT.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+
 ## Native Protocol Engine Bundling Plan
 
 - [x] Create a GitHub issue for bundling native decentralized protocol engines (#133).
