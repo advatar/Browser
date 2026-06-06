@@ -96,6 +96,7 @@ enum BrowserAdvantageCategory: String, CaseIterable, Identifiable, Equatable {
     case a2uiApps
     case decentralizedTrust
     case walletTrust
+    case identityPayments
 
     var id: String { rawValue }
 
@@ -119,6 +120,7 @@ enum BrowserAdvantageCategory: String, CaseIterable, Identifiable, Equatable {
         case .a2uiApps: "A2UI apps"
         case .decentralizedTrust: "DWeb trust"
         case .walletTrust: "Wallet trust"
+        case .identityPayments: "Identity payments"
         }
     }
 
@@ -471,6 +473,21 @@ struct BrowserAdvantageScorecard: Equatable {
                     id: "wallet-advantage",
                     title: "Open wallet",
                     detail: "Inspect chain trust, embedded wallet state, policy receipts, and transfer previews.",
+                    targetPanel: .wallet
+                )
+            ),
+            BrowserAdvantageCapability(
+                id: "eudi-agentic-payments",
+                category: .identityPayments,
+                title: "EUDI identity and agentic payments",
+                strawberryBaseline: "Strawberry public docs do not claim EUDI Wallet compatibility or agentic payment protocol receipts.",
+                dBrowserPosition: "dBrowser now models EUDI credential presentation, Visa Trusted Agent Protocol verification, ACP checkout, AP2 mandates, x402 requirements, Notabene TAP transfer authorization, recurring policy, and local payment receipts.",
+                status: .exceeds,
+                evidence: ["EUDIWalletProfile", "VisaTrustedAgentVerifier", "ACPCheckoutSession", "AP2Mandate", "X402PaymentRequirement", "NotabeneTransferRequest", "AgenticPaymentReceipt"],
+                action: BrowserAdvantageAction(
+                    id: "identity-payment-policy",
+                    title: "Review payments",
+                    detail: "Inspect identity disclosure, agent trust, cart binding, wallet policy, and payment receipts.",
                     targetPanel: .wallet
                 )
             )

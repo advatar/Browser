@@ -2877,6 +2877,8 @@ private struct WalletExplorerPanelView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            AgenticPaymentsStatusView()
+
             if portfolio.isConnected, let activeNetwork = portfolio.activeNetwork, let activeAccount = portfolio.activeAccount {
                 if let embeddedWallet = portfolio.embeddedWallet {
                     VStack(alignment: .leading, spacing: 4) {
@@ -3042,6 +3044,53 @@ private struct WalletExplorerPanelView: View {
         let signed = await browser.signWalletTransfer(request)
         receipt = signed
         preview = await browser.previewWalletTransfer(request)
+    }
+}
+
+private struct AgenticPaymentsStatusView: View {
+    private let eudiProfile = EUDIWalletProfile.dbrowserReference
+    private let protocolStates = [
+        ("Visa TAP", "Trusted-agent verification"),
+        ("ACP", "Checkout and token references"),
+        ("AP2", "Intent/cart/payment mandates"),
+        ("x402", "HTTP payment requirements"),
+        ("Notabene TAP", "Transfer authorization")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Identity & Agentic Payments", systemImage: "person.text.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(eudiProfile.mode.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(eudiProfile.canUseForProductionWalletProviderClaim ? Color.green : Color.secondary)
+            }
+            Text(eudiProfile.certificationNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 8)], spacing: 8) {
+                ForEach(protocolStates, id: \.0) { state in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(state.0)
+                            .font(.caption.weight(.semibold))
+                        Text(state.1)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("agentic-payments-status")
     }
 }
 

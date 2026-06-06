@@ -6217,6 +6217,7 @@ struct dBrowserTests {
         #expect(scorecard.capabilities.contains { $0.id == "research-source-ledger" && $0.status == .matches })
         #expect(scorecard.capabilities.contains { $0.id == "workflow-recurring-automation" && $0.status == .matches })
         #expect(scorecard.capabilities.contains { $0.id == "benchmarks-public-runner" && $0.status == .matches && $0.action?.targetPanel == .advantage })
+        #expect(scorecard.capabilities.contains { $0.id == "eudi-agentic-payments" && $0.status == .exceeds && $0.action?.targetPanel == .wallet })
     }
 
     @Test func browserImportPlannerSeparatesSafeDataFromSecrets() {
@@ -6351,6 +6352,253 @@ struct dBrowserTests {
         #expect(report.averageScore == 96)
         #expect(report.totalDurationSeconds == 1_080)
         #expect(report.publicSummary == "9/10 complete, 1 blocked, avg 96.0")
+    }
+
+    @Test func eudiWalletPresentationRequiresStepUpAndMinimizesDisclosure() {
+        let request = AgenticPaymentFixtures.eudiRequest
+        let document = AgenticPaymentFixtures.eudiDocument
+        let unauthenticated = EUDIWalletDecisionEngine.decide(
+            request: request,
+            documents: [document],
+            approvedClaimNames: ["age_over_18"],
+            userAuthenticated: false,
+            now: AgenticPaymentFixtures.now
+        )
+        let approved = EUDIWalletDecisionEngine.decide(
+            request: request,
+            documents: [document],
+            approvedClaimNames: ["age_over_18"],
+            userAuthenticated: true,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(EUDIWalletProfile.dbrowserReference.mode == .walletCompatibleClient)
+        #expect(!EUDIWalletProfile.dbrowserReference.canUseForProductionWalletProviderClaim)
+        #expect(unauthenticated.state == .stepUpRequired)
+        #expect(approved.state == .approved)
+        #expect(approved.disclosedClaims == ["age_over_18": "true"])
+        #expect(approved.omittedClaims.contains("country"))
+        #expect(!approved.receiptHash.isEmpty)
+    }
+
+    @Test func visaTrustedAgentVerifierChecksKeysHeadersAlgorithmsAndPaymentContext() {
+        let request = AgenticPaymentFixtures.visaRequest
+        let verified = VisaTrustedAgentVerifier.verify(
+            request,
+            trustedKeyIDs: ["visa-key-1"],
+            now: AgenticPaymentFixtures.now
+        )
+        var missingPaymentContext = request
+        missingPaymentContext.paymentContainerHash = nil
+        let missingPayment = VisaTrustedAgentVerifier.verify(
+            missingPaymentContext,
+            trustedKeyIDs: ["visa-key-1"],
+            now: AgenticPaymentFixtures.now
+        )
+        var unsupportedAlgorithm = request
+        unsupportedAlgorithm.signature.algorithm = "hmac-sha256"
+        let unsupported = VisaTrustedAgentVerifier.verify(
+            unsupportedAlgorithm,
+            trustedKeyIDs: ["visa-key-1"],
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(verified.status == .verified)
+        #expect(verified.isVerified)
+        #expect(VisaTrustedAgentVerifier.verify(request, trustedKeyIDs: [], now: AgenticPaymentFixtures.now).status == .unknownKey)
+        #expect(missingPayment.status == .missingPaymentContext)
+        #expect(unsupported.status == .unsupportedAlgorithm)
+    }
+
+    @Test func acpCheckoutBindsBasketAndDoesNotStoreRawPaymentCredentials() {
+        let checkout = AgenticPaymentFixtures.acpCheckout
+
+        #expect(checkout.totalMinorUnits == 1_999)
+        #expect(checkout.isReadyForPayment)
+        #expect(checkout.delegatedPaymentToken?.basketHash == checkout.basketHash)
+        #expect(checkout.delegatedPaymentToken?.storesRawPaymentCredential == false)
+    }
+
+    @Test func agenticPaymentPolicyRequiresUserApprovalBeforeReceiptApproval() {
+        let eudiDecision = EUDIWalletDecisionEngine.decide(
+            request: AgenticPaymentFixtures.eudiRequest,
+            documents: [AgenticPaymentFixtures.eudiDocument],
+            approvedClaimNames: ["age_over_18"],
+            userAuthenticated: true,
+            now: AgenticPaymentFixtures.now
+        )
+        let trustedAgent = VisaTrustedAgentVerifier.verify(
+            AgenticPaymentFixtures.visaRequest,
+            trustedKeyIDs: ["visa-key-1"],
+            now: AgenticPaymentFixtures.now
+        )
+        let review = AgenticPaymentReview(
+            id: "review-acp",
+            intent: AgenticPaymentFixtures.intent,
+            eudiDecision: eudiDecision,
+            visaTrustedAgent: trustedAgent,
+            acpCheckout: AgenticPaymentFixtures.acpCheckout,
+            ap2Mandates: [],
+            x402Requirement: nil,
+            x402Payload: nil,
+            notabeneTransfer: nil,
+            userApproved: false
+        )
+        var approvedReview = review
+        approvedReview.userApproved = true
+
+        let ask = AgenticPaymentPolicyEngine.evaluate(review, now: AgenticPaymentFixtures.now)
+        let allow = AgenticPaymentPolicyEngine.evaluate(approvedReview, now: AgenticPaymentFixtures.now)
+        let receipt = AgenticPaymentPolicyEngine.receipt(for: approvedReview, decision: allow, now: AgenticPaymentFixtures.now)
+
+        #expect(ask.kind == .askUser)
+        #expect(ask.requiredApprovalLabels.contains("ACP basket"))
+        #expect(allow.kind == .allow)
+        #expect(receipt.status == .approved)
+        #expect(receipt.identityDisclosureHash == eudiDecision.receiptHash)
+        #expect(receipt.bindingHashes.contains(AgenticPaymentFixtures.acpCheckout.basketHash))
+        #expect(!receipt.storesRawPaymentCredential)
+    }
+
+    @Test func ap2MandatesMustIncludeIntentCartAndPaymentBinding() {
+        let intentMandate = Self.ap2Mandate(id: "ap2-intent", kind: .intent, prior: [])
+        let cartMandate = Self.ap2Mandate(id: "ap2-cart", kind: .cart, prior: [intentMandate.mandateHash])
+        let paymentMandate = Self.ap2Mandate(id: "ap2-payment", kind: .payment, prior: [intentMandate.mandateHash, cartMandate.mandateHash])
+        let intent = AgenticPaymentIntent(
+            id: "ap2-intent",
+            objective: "Buy approved cart",
+            merchantID: "merchant.example",
+            counterpartyID: nil,
+            amountMinorUnits: 1_999,
+            currencyOrAsset: "USD",
+            protocolName: .agentPaymentsProtocol,
+            risk: .medium,
+            pageSnapshotHash: "page-hash",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(600),
+            recurringPolicy: nil
+        )
+        let review = AgenticPaymentReview(
+            id: "review-ap2",
+            intent: intent,
+            eudiDecision: nil,
+            visaTrustedAgent: nil,
+            acpCheckout: nil,
+            ap2Mandates: [intentMandate, cartMandate, paymentMandate],
+            x402Requirement: nil,
+            x402Payload: nil,
+            notabeneTransfer: nil,
+            userApproved: true
+        )
+        var incompleteReview = review
+        incompleteReview.ap2Mandates = [intentMandate, cartMandate]
+
+        #expect(cartMandate.binds(to: intentMandate))
+        #expect(paymentMandate.binds(to: intentMandate))
+        #expect(paymentMandate.binds(to: cartMandate))
+        #expect(AgenticPaymentPolicyEngine.evaluate(review, now: AgenticPaymentFixtures.now).kind == .allow)
+        #expect(AgenticPaymentPolicyEngine.evaluate(incompleteReview, now: AgenticPaymentFixtures.now).kind == .revise)
+    }
+
+    @Test func x402AndNotabeneTransfersBindToIntentBeforeApproval() {
+        let requirement = X402PaymentRequirement(
+            id: "x402-req",
+            resourceURLString: "https://api.example.test/research",
+            amountMinorUnits: 125,
+            asset: "USDC",
+            network: "base",
+            payTo: "0xmerchant",
+            facilitatorURLString: "https://facilitator.example.test",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300)
+        )
+        let payload = X402PaymentPayload(
+            requirementHash: requirement.requirementHash,
+            walletAccount: "0xwallet",
+            transactionReference: "tx-fixture",
+            signatureReference: "sig-fixture"
+        )
+        let x402Intent = AgenticPaymentIntent(
+            id: "x402-intent",
+            objective: "Pay for API research result",
+            merchantID: "api.example.test",
+            counterpartyID: nil,
+            amountMinorUnits: 125,
+            currencyOrAsset: "USDC",
+            protocolName: .x402,
+            risk: .low,
+            pageSnapshotHash: "page-hash",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300),
+            recurringPolicy: nil
+        )
+        let x402Review = AgenticPaymentReview(
+            id: "review-x402",
+            intent: x402Intent,
+            eudiDecision: nil,
+            visaTrustedAgent: nil,
+            acpCheckout: nil,
+            ap2Mandates: [],
+            x402Requirement: requirement,
+            x402Payload: payload,
+            notabeneTransfer: nil,
+            userApproved: true
+        )
+        let transfer = NotabeneTransferRequest(
+            id: "tap-transfer",
+            originatorPartyID: "wallet-user",
+            beneficiaryPartyID: "merchant.example",
+            asset: "USDC",
+            network: "ethereum",
+            amountMinorUnits: 500,
+            destinationAddressHash: "destination-hash",
+            encryptedMessageReference: "encrypted-message",
+            state: .authorized,
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300)
+        )
+        let tapIntent = AgenticPaymentIntent(
+            id: "tap-intent",
+            objective: "Authorize blockchain transfer",
+            merchantID: nil,
+            counterpartyID: "merchant.example",
+            amountMinorUnits: 500,
+            currencyOrAsset: "USDC",
+            protocolName: .notabeneTransactionAuthorization,
+            risk: .high,
+            pageSnapshotHash: "page-hash",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300),
+            recurringPolicy: nil
+        )
+        let tapReview = AgenticPaymentReview(
+            id: "review-tap",
+            intent: tapIntent,
+            eudiDecision: nil,
+            visaTrustedAgent: nil,
+            acpCheckout: nil,
+            ap2Mandates: [],
+            x402Requirement: nil,
+            x402Payload: nil,
+            notabeneTransfer: transfer,
+            userApproved: true
+        )
+
+        #expect(AgenticPaymentPolicyEngine.evaluate(x402Review, now: AgenticPaymentFixtures.now).kind == .allow)
+        #expect(x402Review.bindingHashes.contains(requirement.requirementHash))
+        #expect(AgenticPaymentPolicyEngine.evaluate(tapReview, now: AgenticPaymentFixtures.now).kind == .allow)
+        #expect(tapReview.bindingHashes.contains(transfer.transferHash))
+    }
+
+    private static func ap2Mandate(id: String, kind: AP2MandateKind, prior: [String]) -> AP2Mandate {
+        AP2Mandate(
+            id: id,
+            kind: kind,
+            signerID: "wallet-user",
+            subjectID: "merchant.example",
+            scopeHash: "scope-hash-\(kind.rawValue)",
+            amountMinorUnits: 1_999,
+            currencyOrAsset: "USD",
+            priorMandateHashes: prior,
+            signatureReference: "sig-\(id)",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(600),
+            revokedAt: nil
+        )
     }
 
     @MainActor

@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## Swift EUDI Wallet And Agentic Payments Foundation
+
+- [x] Re-check official Visa Trusted Agent Protocol, OpenAI/Stripe ACP, EUDI Wallet Kit, and related payment protocol sources.
+- [x] Create GitHub issue for implementing the Swift EUDI Wallet and agentic payments foundation (#139).
+- [x] Add Swift models for EUDI credential presentation, Visa Trusted Agent Protocol, ACP checkout, AP2 mandates, x402 payments, Notabene TAP transfer authorization, and payment receipts.
+- [x] Add policy engine fixtures that prevent models from spending or disclosing identity without typed approval.
+- [x] Surface EUDI/payment capabilities in the wallet/advantage architecture without claiming provider certification.
+- [x] Add focused Swift unit tests for identity disclosure, trusted-agent signatures, ACP checkout, mandate binding, x402, TAP, recurrence, revocation, and receipts.
+- [x] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-eudi-agentic-payments-tests -only-testing:dBrowserTests/eudiWalletPresentationRequiresStepUpAndMinimizesDisclosure -only-testing:dBrowserTests/visaTrustedAgentVerifierChecksKeysHeadersAlgorithmsAndPaymentContext -only-testing:dBrowserTests/acpCheckoutBindsBasketAndDoesNotStoreRawPaymentCredentials -only-testing:dBrowserTests/agenticPaymentPolicyRequiresUserApprovalBeforeReceiptApproval -only-testing:dBrowserTests/ap2MandatesMustIncludeIntentCartAndPaymentBinding -only-testing:dBrowserTests/x402AndNotabeneTransfersBindToIntentBeforeApproval -only-testing:dBrowserTests/advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline` passed.
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift || true` produced only existing author-name comment matches in Swift files.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-eudi-agentic-payments-build` passed.
+
 ## Web3 AI Browser Strategy Refresh
 
 - [x] Research current primary sources for EUDI Wallet reference implementation, AP2/A2P, TAP, ACP, x402, Mastercard Agent Pay, and related agentic payment rails.
