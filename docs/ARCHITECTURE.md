@@ -30,6 +30,8 @@ The migration rule is simple: if Swift cannot call it through a Swift package or
 
 dBrowser is a native Swift browser and agent surface for decentralized browsing, local-first AI, governed personal memory, AFMarket task execution, and chain-verified wallet/protocol state.
 
+The strategic north star is to make dBrowser the Web3 and AI browser to beat: a native browser where AI agents can research, negotiate, prepare forms, compare carts, call tools, and coordinate payment flows, but cannot move money or disclose identity without typed policy, verified identity context, explicit user approval, and a durable local receipt.
+
 The app should:
 
 - Load normal web pages in `WKWebView`.
@@ -42,6 +44,122 @@ The app should:
 - Retrieve and write personal memory only through BrIAn/OpenMind MCP policy gates.
 - Keep wallet signing, spend policy, memory writeback, downloads, and destructive page actions behind explicit user approval.
 - Surface proof, attestation, settlement, and light-client trust state in the UI.
+- Support EUDI Wallet-compatible identity and attestation flows as a user-controlled credential boundary.
+- Support agentic payment protocols only through typed intents, signed/hashed authorization artifacts, revocation, and approval receipts.
+
+## EUDI Wallet And Agentic Payments Plan
+
+Tracker: https://github.com/advatar/Browser/issues/138
+
+Primary sources inspected on 2026-06-06:
+
+- European Commission European Digital Identity overview: https://commission.europa.eu/topics/digital-economy-and-society/european-digital-identity_en
+- EUDI Wallet Architecture and Reference Framework: https://eudi.dev/latest/architecture-and-reference-framework-main/
+- EUDI Wallet ARF repository: https://github.com/eu-digital-identity-wallet/eudi-doc-architecture-and-reference-framework
+- EUDI iOS Wallet Kit: https://github.com/eu-digital-identity-wallet/eudi-lib-ios-wallet-kit
+- Google AP2 announcement and repository: https://cloud.google.com/blog/products/ai-machine-learning/announcing-agents-to-payments-ap2-protocol and https://github.com/google-agentic-commerce/AP2
+- Visa Trusted Agent Protocol overview and specification: https://developer.visa.com/capabilities/trusted-agent-protocol/overview and https://developer.visa.com/capabilities/trusted-agent-protocol/trusted-agent-protocol-specifications/
+- Notabene Transaction Authorization Protocol: https://notabene.id/tap
+- Stripe/OpenAI Agentic Commerce Protocol: https://docs.stripe.com/agentic-commerce/acp and https://github.com/agentic-commerce-protocol/agentic-commerce-protocol
+- x402 payment standard and docs: https://www.x402.org/ and https://docs.x402.org/introduction
+- Mastercard Agent Pay and agentic commerce standards notes: https://www.mastercard.com/us/en/news-and-trends/press/2025/april/mastercard-unveils-agent-pay-pioneering-agentic-payments-technology-to-power-commerce-in-the-age-of-ai.html and https://www.mastercard.com/us/en/news-and-trends/stories/2026/agentic-commerce-rules-of-the-road.html
+
+Terminology:
+
+- "A2P" appears in market commentary, but the canonical Google artifact is AP2, the Agent Payments Protocol.
+- "TAP" is overloaded. Visa Trusted Agent Protocol handles agent recognition and merchant verification. Notabene Transaction Authorization Protocol handles blockchain pre-settlement authorization between counterparties.
+- EUDI Wallet is an identity and attestation wallet framework, not a payment wallet by itself. It matters because agentic payments need strong identity, user authentication, selective disclosure, signatures, and revocable delegation.
+
+Protocol map:
+
+| Layer | Source | What It Gives dBrowser | First Adapter |
+| --- | --- | --- | --- |
+| EU identity and attestations | EUDI Wallet ARF and iOS Wallet Kit | PID, attestations, OpenID4VCI issuance, OpenID4VP presentation, ISO 18013-5 proximity flows, SD-JWT VC, pseudonyms, and strong user authentication use cases | `EUDIIdentityKit` |
+| Agent payment authorization | Google AP2 | Intent/cart/payment mandate models, signed authorization artifacts, hashes, expiry, budget, credential source, and audit trail | `AgentPaymentMandateKit` |
+| Agent recognition | Visa Trusted Agent Protocol | Request signatures, key discovery, agent recognition, consumer/device identity object, and payment container verification for merchant interactions | `TrustedAgentKit` |
+| Agent checkout | ACP | Agent-presented checkout, merchant order handoff, shared payment token and delegated payment flows | `AgenticCommerceKit` |
+| Machine-to-machine Web3 payments | x402 | HTTP 402 payment negotiation, buyer/server/facilitator model, API/content micropayment receipts, crypto-native settlement | `X402PaymentsKit` |
+| Blockchain pre-settlement authorization | Notabene TAP | Signed transfer requests, encrypted counterparty messages, authorization before blockchain settlement | `BlockchainAuthorizationKit` |
+| Card-network agent payments | Mastercard Agent Pay, Visa Intelligent Commerce | Network tokenization, verifiable intent, payment passkeys, issuer/processor policy integration | `NetworkAgentPayKit` |
+| Tool and agent coordination | MCP, A2A, A2UI, AFMarket | Tool discovery, agent-to-agent calls, native app surfaces, proof-backed runner packs, settlement evidence | Existing MCP/A2UI/AFMarket surfaces |
+
+The policy architecture:
+
+```mermaid
+graph TD
+  User["User"] --> Approval["dBrowser Approval And Receipt UI"]
+  Page["WKWebView Page Context"] --> Copilot["Copilot / A2UI / MCP Agent"]
+  Copilot --> Policy["Agent Payment Policy Engine"]
+  Approval --> Policy
+  Policy --> Identity["EUDIIdentityKit"]
+  Policy --> Wallet["WalletPolicyKit / ChainTrustKit"]
+  Policy --> Mandates["AgentPaymentMandateKit AP2"]
+  Mandates --> Commerce["ACP / NetworkAgentPayKit"]
+  Mandates --> X402["X402PaymentsKit"]
+  Mandates --> TAP["TrustedAgentKit / BlockchainAuthorizationKit"]
+  Wallet --> Chains["Light Clients / WalletConnect / Secure Enclave"]
+  Identity --> EUDI["EUDI Wallet Kit / Relying Party Flows"]
+  Commerce --> Merchant["Merchant / PSP / Card Network"]
+  X402 --> Service["Paid API / Content Server / Facilitator"]
+  TAP --> Counterparty["Merchant / Exchange / Smart Contract Counterparty"]
+  Policy --> Receipt["Local Receipt Ledger"]
+```
+
+Safety invariants:
+
+- No model can directly spend, sign, submit, broadcast, tokenize, or disclose identity.
+- Every payment-capable action must have a typed intent, merchant or counterparty, amount or maximum amount, currency or asset, expiry, recurrence state, credential source, and revocation path.
+- Every approval must bind to page snapshot hash, cart or transfer hash, mandate hash, wallet/account, chain/network, identity credential, model, tool, connector, and user action.
+- Recurring or autonomous payments require explicit opt-in, spend caps, cooldowns, failure backoff, next-run preview, and one-click revocation.
+- Payment approvals must be invalidated by cart mutation, recipient mutation, price increase beyond policy, chain/network change, credential change, or prompt-injection risk.
+- Secrets stay in Keychain, Secure Enclave, WalletConnect, certified wallet flows, or approved provider vaults. dBrowser should not store card PANs.
+- Mock, fixture, sandbox, local, gateway, provider, verified, revoked, and failed states must be distinct in models and UI.
+
+Initial Swift models:
+
+- `AgentPaymentIntent`: objective normalized into amount, merchant/counterparty, allowed categories, currency/asset, expiry, recurrence, and risk posture.
+- `AgentPaymentCart`: item, price, tax, shipping, merchant, refund, delivery, checkout, and source-page hash.
+- `AgentPaymentMandate`: AP2-style intent/cart/payment mandate envelope with signer, hash, expiry, scope, credential reference, and revocation state.
+- `AgentPaymentProtocol`: `ap2`, `acp`, `x402`, `visaTrustedAgent`, `notabeneTap`, `mastercardAgentPay`, `manualApproval`.
+- `EUDICredentialPresentation`: relying party, requested attributes, purpose, legal basis text, selective-disclosure result, pseudonym mode, and wallet approval state.
+- `AgentTrustAttestation`: agent identifier, request signature, key source, payment scheme, verification result, and failure reason.
+- `PaymentPolicyDecision`: allow, ask, deny, step-up, revise, revoke, or expired.
+- `PaymentReceipt`: local immutable receipt binding identity, wallet, page, model, connector, mandate, cart, transaction, and user approval metadata.
+- `RecurringPaymentPolicy`: cap, cadence, merchant allowlist, revocation, cooldown, last-run, next-run, failure, and notification state.
+
+Product surface:
+
+- Wallet panel becomes "Wallet, Identity & Payments" or gains an adjacent Identity/Payments tab.
+- Copilot and A2UI apps can propose payment intents, but they open a review sheet instead of submitting checkout directly.
+- Review sheet shows merchant/counterparty, amount, asset/currency, recurrence, identity attributes requested, model/tool provenance, page/cart hash, network trust, and exact approval consequence.
+- Receipt ledger shows approved, denied, expired, revoked, failed, refunded, and settled states.
+- MCP/A2UI apps declare payment capability requirements in the same style as wallet and chain grants.
+
+Implementation phases:
+
+1. Add Swift-only protocol models and fixtures for EUDI credential requests, AP2 mandates, ACP checkout drafts, x402 payment requirements, Visa TAP signatures, Notabene TAP transfer requests, and network-agent-pay abstractions.
+2. Add tests for normalization, redaction, hash binding, policy decisions, recurring limits, expiry, revocation, and receipt generation.
+3. Add a payment intent review surface in the Wallet panel and Copilot flow.
+4. Spike `EUDIIdentityKit` with EUDI iOS Wallet Kit where licensing and platform targets fit; keep certification status explicit.
+5. Implement local AP2, ACP, x402, Visa TAP, Notabene TAP, and Mastercard Agent Pay fixtures before any provider or sandbox integration.
+6. Add sandbox-only clients where developer access is available; avoid real payment method collection unless handled by a certified or PCI-ready provider flow.
+7. Add an agentic payments benchmark lane covering EUDI presentation, AP2 human-present cart approval, AP2 capped budget approval/denial, x402 paid API access, and Notabene TAP-style transfer authorization.
+
+Compliance notes:
+
+- Until certification and national wallet-provider requirements are understood, dBrowser should present EUDI support as relying-party/client integration and test harness work, not certified wallet-provider status.
+- Card-network and PSP integrations must avoid storing PANs and must use provider-hosted, tokenized, or certified flows.
+- Blockchain payment flows need sanctions, Travel Rule, counterparty, and fraud policy hooks where applicable.
+- Prompt injection is a financial risk. Payment policy must trust typed artifacts, hashes, signatures, and user approvals over model claims.
+- Provider terms can limit signing, key publication, and merchant simulation. Each adapter needs a terms/availability state before production use.
+
+Open decisions:
+
+- Whether dBrowser should become an EUDI wallet provider, a wallet-compatible relying-party client, or both.
+- Whether a Windows shell is required for public "at or above Strawberry" claims.
+- Which payment sandboxes are available first: AP2, ACP, x402, Visa, Mastercard, Notabene, or provider-specific rails.
+- Whether recurring autonomous payments should launch with deny-by-default policy only, or with scoped allowlists for low-risk paid APIs.
+- How much of the payment receipt ledger should be exportable for enterprise compliance without leaking private page, identity, or wallet data.
 
 ## Current Swift App
 
@@ -63,13 +181,25 @@ The current Swift app already has a usable shell:
 
 Current limitations:
 
-- No typed `WKWebView` automation bridge yet.
-- No DOM snapshot, click/type/scroll/wait action channel yet.
-- Copilot run state is a single result, not a conversation-first streamed/cancellable run ledger.
-- No model registry or mid-conversation model switching yet.
-- History/bookmarks/workflows are in-memory.
-- Decentralized storage protocols use direct gateways where safe, then localhost native adapter handlers. Arbitrary bytes for heavy protocols still require the corresponding local daemon or backend to be configured behind `services/storage-adapters`.
-- Wallet and chain trust are policy simulators until Swift light clients and signing are integrated.
+- Typed `WKWebView` automation, DOM snapshots, page actions, Copilot run state,
+  model switching, saved workflows, Smart History, wallet/explorer state, and
+  the Strawberry parity scorecard are implemented in Swift, but still need
+  deeper production UX, fixture-backed UI coverage, and public benchmark
+  artifacts.
+- Browser import/switcher, companion onboarding, research source ledger,
+  recurring workflow automation, and benchmark proof currently exist as tested
+  Swift models; first-run UI, scheduler execution, and exported benchmark lanes
+  remain product work.
+- Decentralized storage protocols use direct gateways where safe, then localhost
+  native adapter handlers. Arbitrary bytes for heavy protocols still require the
+  corresponding local daemon or backend to be configured behind
+  `services/storage-adapters` until native protocol engine bundling is complete.
+- Wallet and chain trust have typed policy/explorer surfaces and chain-family
+  models; production signing, Secure Enclave policies, WalletConnect, and full
+  Swift light-client integration remain staged work.
+- EUDI Wallet, AP2, ACP, x402, Visa TAP, Notabene TAP, and Mastercard Agent Pay
+  support is planned under #138 and is not yet implemented beyond this
+  architecture plan.
 
 ## Swift System Map
 
@@ -116,6 +246,12 @@ Create Swift packages under `swift/Packages` as capabilities move out of old Rus
 | `TendermintLightClientKit` | Cosmos SDK and Tendermint client verification | New Swift package |
 | `SubstrateLightClientKit` | Polkadot/Substrate verification, likely through Swift-compatible smoldot integration | Old Substrate ideas |
 | `WalletPolicyKit` | Local keys, Secure Enclave, WalletConnect, spend/signature policy, approvals | Old walletd and wallet store concepts |
+| `EUDIIdentityKit` | EUDI Wallet credential presentation, OpenID4VCI/OpenID4VP, ISO 18013-5, SD-JWT VC, pseudonym labels, relying-party fixtures | EUDI Wallet reference implementation and ARF |
+| `AgentPaymentMandateKit` | AP2-style intent/cart/payment mandates, payment policy decisions, hashes, expiry, revocation, and local receipts | Google AP2 and dBrowser approval policy |
+| `TrustedAgentKit` | Visa Trusted Agent Protocol request-signature verification, key-source metadata, agent recognition state, and merchant-facing trust labels | Visa TAP and HTTP message signature concepts |
+| `AgenticCommerceKit` | ACP checkout drafts, merchant order handoff, shared-payment-token placeholders, and checkout receipt models | Stripe/OpenAI ACP |
+| `X402PaymentsKit` | HTTP 402 payment requirements, buyer/server/facilitator fixtures, wallet policy binding, and API/content micropayment receipts | x402 |
+| `BlockchainAuthorizationKit` | Notabene TAP-style transfer requests, encrypted counterparty-message metadata, pre-settlement approval receipts | Notabene Transaction Authorization Protocol |
 | `DecentralizedContentKit` | IPFS/IPNS resolution, content verification, gateway fallback labels, future embedded node | Old IPFS/p2p concepts |
 | `BundledLLMKit` | Local MLX model discovery, loading, inference, token accounting | Current `BundledLLM.swift` extracted into package |
 | `LLMGatewayKit` | ZeroK/LLM Gateway encrypted envelopes, token-class padding, usage tickets, provider boundary labels | ZeroK/LLM Gateway contracts |

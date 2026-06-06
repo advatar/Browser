@@ -21,6 +21,21 @@
 
 ## Active Task
 
+## Web3 AI Browser Strategy Refresh
+
+- [x] Research current primary sources for EUDI Wallet reference implementation, AP2/A2P, TAP, ACP, x402, Mastercard Agent Pay, and related agentic payment rails.
+- [x] Create GitHub issue for the Web3/AI browser strategy refresh and agentic payments plan (#138).
+- [x] Refresh the Swift Strawberry survey so it reflects closed parity gaps and the new Web3/AI browser ambition.
+- [x] Add a dedicated architecture section for EUDI Wallet and agentic payment protocol integration.
+- [x] Verify Markdown hygiene and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped documentation changes.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md STRAWBERRY_SWIFT.md docs/ARCHITECTURE.md || true` produced no non-ASCII matches.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-web3-ai-strategy-build` passed.
+
 ## Swift Strawberry Gap Closure
 
 - [x] Create GitHub issue for closing the remaining Swift Strawberry UX gaps (#137).

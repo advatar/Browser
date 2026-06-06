@@ -1,17 +1,27 @@
-# Swift Strawberry Parity Survey
+# Swift Strawberry Parity And Web3 AI Browser Strategy
 
-Renewed: 2026-06-05
-Tracker: https://github.com/advatar/Browser/issues/134
+Renewed: 2026-06-06
+Trackers:
+
+- Survey renewal: https://github.com/advatar/Browser/issues/134
+- Closed Swift UX gaps: https://github.com/advatar/Browser/issues/137
+- Web3 AI browser and agentic payments plan: https://github.com/advatar/Browser/issues/138
 
 This survey keeps the Swift app at or above Strawberry Browser in browser-agent
-features and user experience. It replaces the older "missing primitives" plan:
-the Swift app now has many of the original Strawberry-equivalence foundations,
-so the remaining work is mostly product polish, benchmark proof, integration
-hardening, and recurring automation UX.
+features and user experience. The original "missing primitives" plan is closed:
+the Swift app now tracks all 12 public Strawberry baseline areas, reports zero
+scorecard gaps, and has focused tests for the closed UX models.
 
-## Goal
+Strawberry is now a comparison baseline, not the ceiling. The next strategy is
+to make dBrowser the Web3 and AI browser to beat: a native browser that combines
+page automation, local-first model choice, governed memory, AFMarket execution,
+A2UI apps, EUDI Wallet identity, approval-gated wallet policy, chain trust, and
+agentic payment protocols under one auditable user-control surface.
 
-Stay competitive with Strawberry on the capabilities users can feel:
+## Leadership Goal
+
+Keep Strawberry parity as a permanent baseline while pushing beyond it on
+capabilities users can feel:
 
 - The assistant can understand the current page and relevant browser context.
 - The assistant can research, cite, compare, and export structured work.
@@ -24,11 +34,16 @@ Stay competitive with Strawberry on the capabilities users can feel:
   what ran, what it cost, and what data left the device.
 - The browser remains a strong browser first: import, tabs, history, bookmarks,
   downloads, default-browser ergonomics, and cross-platform availability matter.
+- Identity, wallet, and payments are first-class browser capabilities: an agent
+  may propose a transaction, but only typed policy, verified identity, explicit
+  approval, and auditable receipts can authorize one.
 
 dBrowser should also keep its differentiators visible: local MLX/SwiftLM model
 paths, context-preserving model switching, governed OpenMind memory, AFMarket
 runner packs, A2UI apps, decentralized protocol handling, wallet capabilities,
-and chain-trust verification.
+chain-trust verification, EUDI Wallet credential presentation, AP2 mandates,
+ACP checkout, x402 machine payments, Visa Trusted Agent Protocol, Notabene TAP,
+and Mastercard Agent Pay style network-token flows.
 
 ## Public Strawberry Progress Checked
 
@@ -105,6 +120,11 @@ The Swift app has closed the original low-level Strawberry gap list:
   conversation ledger, model-switch events, per-message model identity, page
   snapshot attachments, memory citations, context compression, local MLX, LLM
   router, AFMarket, and LLM Gateway model profiles.
+- `swift/dBrowser/dBrowser/BrowserModels.swift` now contains the no-gap
+  Advantage scorecard plus browser import/switcher planning, companion
+  onboarding recommendations, research source ledgers, recurring workflow
+  automation plans, and a Strawberry-compatible 12-task benchmark suite with
+  credential-constrained 9-task mode.
 - `swift/dBrowser/dBrowser/MCPServers.swift` supports editable HTTP, WebSocket,
   and stdio MCP server profiles with discovered tool state.
 - `swift/dBrowser/dBrowser/OpenMindMemoryClient.swift` implements governed
@@ -121,24 +141,27 @@ The Swift app has closed the original low-level Strawberry gap list:
   primitives: URL resolution, runtime features, automation contracts, Copilot
   runs, cancellation, workflows, Smart History, MCP, OpenMind, AFMarket, LLM
   conversation persistence/model switching, local LLM management, wallet, and
-  chain-trust behavior.
+  chain-trust behavior. The focused Strawberry lane also asserts 12/12 tracked
+  baseline coverage and `gapCount == 0`.
 
-## Parity Matrix
+## Closed Parity Matrix
 
-| Area | Strawberry 2026 public baseline | dBrowser Swift state | Remaining gap |
+| Area | Strawberry 2026 public baseline | dBrowser Swift state | Next leadership work |
 | --- | --- | --- | --- |
-| Distribution | Open beta for macOS and Windows. | Native Swift app targets Apple platforms. | Windows parity is absent unless a separate shell is declared or built. |
-| Browser switching | Imports passwords, bookmarks, and history from major browsers and can run alongside them. | Tabs, history, bookmarks, protocol handling, and native shell exist. | First-run import, default-browser setup, and switcher UX are not documented as complete. |
-| Companion onboarding | Role/app/workflow onboarding creates a personalized companion. | OpenMind memory, local profile state, A2UI apps, and Copilot exist. | Need a first-run assistant setup that suggests workflows and learns preferences explicitly. |
-| Page context | Current page, structure, conversation memory, and other tabs when relevant. | Active-page snapshot, bounded DOM extraction, transcript ledger, memory citations. | Need relevance-scored multi-tab context and video/transcript handling. |
-| Research | Parallel research, multi-source synthesis, dated/source-linked outputs. | Copilot runs, model routing, AFMarket, page snapshots, local Smart History. | Need a research planner, parallel tab/run orchestration, source ledger, and export schema. |
-| Page actions | Click, fill, scroll, navigate, select, submit, download, and end-to-end workflows. | Typed click, type, focus, submit, scroll, navigate, wait, stop with approval policy. | Need richer recovery, download handling, select/menu actions, and controlled UI/end-to-end automation tests. |
-| Workflows | Save, rerun, schedule, trigger, monitor changes, and notify. | Saved workflow persistence, run/rerun, schedule metadata, run registry. | Need real scheduler, page-change triggers, notifications, recurrence limits, and pause/resume controls. |
-| Integrations | Built-in app integrations plus MCP. | MCP profiles, A2UI app store, AFMarket, OpenMind, wallet capability contracts. | Need production OAuth connectors, credential storage, revocation, and built-in app catalog UX. |
-| Safety | Approval before important actions, stop/takeover, activity history. | Approval reasons, run events, Stop, cancellation on invalidating navigation/tab close. | Need longer-lived audit history, approval policy presets such as "allow all", and user-visible risk explanations. |
-| Privacy | Local chats/passwords/history/cookies, Smart History disabled by default. | Local stores and governed memory exist; Smart History summaries are local. | Need explicit Smart History opt-in/default controls and per-provider data-egress labels for every run. |
-| Credits | Browsing is free; credits only for companion chat/browsing. | Browser operation zero-cost model and estimated model usage exist. | Need exact provider token passthrough where available, plan/balance UI, and run-level billing receipts. |
-| Benchmarks | Publishes 12-workflow spec and claimed scores. | No comparable benchmark runner or public score artifact in the Swift tree. | Need a reproducible dBrowser benchmark lane and published result artifacts. |
+| Distribution | Open beta for macOS and Windows. | Native Swift app targets Apple platforms and matches the baseline for the current product boundary. | Decide whether a Windows shell is a product goal or document the Apple-native trade. |
+| Browser switching | Imports passwords, bookmarks, and history from major browsers and can run alongside them. | `BrowserImportPlanner` separates safe bookmark/history import from explicit password/cookie approval flows. | Build the first-run UI and platform-specific import adapters. |
+| Companion onboarding | Role/app/workflow onboarding creates a personalized companion. | `BrowserCompanionOnboardingEngine` maps role, tools, recurring work, privacy posture, and model preference into recommendations. | Promote onboarding into the first-launch flow. |
+| Page context | Current page, structure, conversation memory, and other tabs when relevant. | Active-page snapshots, bounded DOM extraction, transcript ledger, memory citations, and redaction are implemented. | Add relevance-ranked multi-tab context and video/transcript support. |
+| Research | Parallel research, multi-source synthesis, dated/source-linked outputs. | `BrowserResearchLedger` records dated citations, evidence, confidence, markdown export, and CSV export. | Add planner-driven parallel tab/run orchestration. |
+| Page actions | Click, fill, scroll, navigate, select, submit, download, and end-to-end workflows. | Typed click, type, focus, submit, scroll, navigate, wait, and stop run through audited `WKWebView` automation. | Expand select/menu/download/new-tab/upload coverage with fixture-backed UI tests. |
+| Workflows | Save, rerun, schedule, trigger, monitor changes, and notify. | `BrowserRecurringWorkflowAutomation` models schedules, triggers, cooldowns, notifications, and approval-preserving policy. | Wire production scheduler execution and notification delivery. |
+| Integrations | Built-in app integrations plus MCP. | MCP, A2UI, AFMarket, OpenMind, wallet capability contracts, and local marketplace surfaces exceed the baseline. | Harden OAuth connectors, credential storage, revocation, and app catalog UX. |
+| Safety | Approval before important actions, stop/takeover, activity history. | dBrowser gates form submit, credentials, cross-origin navigation, destructive clicks, downloads, wallet/signing, and cancels on takeover. | Add policy presets, longer-lived audit history, and user-visible risk explanations. |
+| Privacy | Local chats/passwords/history/cookies, Smart History disabled by default. | Local stores, redacted snapshots, governed OpenMind citations, and context commitments exceed the baseline. | Ship explicit Smart History modes and per-run data-egress receipts. |
+| Credits | Browsing is free; credits only for companion chat/browsing. | Browser operations are zero-cost and model/provider usage is recorded per run. | Pass through exact provider usage and add plan/balance receipts. |
+| Benchmarks | Publishes 12-workflow spec and claimed scores. | `StrawberryBenchmarkSuite` models B1-B12 plus 9-task credential-constrained mode and report artifacts. | Build the runnable public benchmark lane and publish fixtures. |
+| Web3 trust | Strawberry does not publicly claim decentralized protocol loading, chain verification, or wallet policy receipts. | dBrowser has wallet/explorer coverage, chain-trust registries, A2UI wallet policy apps, AFMarket proof/settlement state, and decentralized protocol plans. | Bundle native protocol engines and unify proof, identity, wallet, and payment receipts. |
+| AI execution | Strawberry focuses on companions. | dBrowser combines local MLX/SwiftLM, model switching, LLM Router, AFMarket, OpenMind memory, MCP, and A2UI native app surfaces. | Make run modes, trust/cost/performance tradeoffs, and agentic payment boundaries headline UX. |
 
 ## Historical Issue Map
 
@@ -165,112 +188,82 @@ traceability:
 - #133 remains active for native decentralized protocol engine bundling; it is a
   dBrowser differentiator rather than a Strawberry parity requirement.
 
-## Prioritized Gap-Closure Plan
+## Leadership Roadmap After Parity
 
-### P0 - Prove and Package Parity
+### P0 - Prove And Package The Baseline
 
-1. Build a Strawberry benchmark runner for dBrowser.
-   - Mirror Strawberry B1-B12 inputs, output schema, timing metadata, blockers,
-     and LLM-as-judge prompt.
-   - Allow 9-benchmark mode without Sales Navigator/CRM/ATS access and 12-benchmark
-     mode when test credentials are configured.
-   - Persist markdown/CSV outputs plus score artifacts under a repo-owned
-     validation path.
-   - Add tests for benchmark spec parsing, output validation, and scoring-input
-     generation.
+1. Ship the runnable dBrowser benchmark lane.
+   - Use `StrawberryBenchmarkSuite` as the B1-B12 source of truth.
+   - Persist markdown, CSV, score, blocker, duration, and credential-mode
+     artifacts under a repo-owned validation path.
+   - Keep 9-task public mode separate from 12-task credentialed mode.
 
-2. Add first-run companion onboarding.
-   - Ask for role, common tools, preferred outputs, risk tolerance, and recurring
-     browser work.
-   - Suggest A2UI apps, MCP profiles, AFMarket packs, OpenMind memory posture,
-     and starter workflows.
-   - Store the resulting profile locally and make every learned preference
-     editable or removable.
-   - Add unit tests for profile persistence, workflow suggestions, and reset.
+2. Promote the closed gap models into product UX.
+   - First-run switcher/import flow.
+   - Companion onboarding.
+   - Research source ledger export.
+   - Recurring workflow scheduler and notification surfaces.
 
-3. Build browser import and switcher UX.
-   - Import bookmarks and history from Chrome, Safari, Firefox, Edge, Arc, and
-     Brave where platform APIs allow it.
-   - Treat password and cookie import as explicit, high-risk flows backed by
-     platform keychain APIs and clear non-support states where import is blocked.
-   - Add a "use alongside existing browser" onboarding path and default-browser
-     setup guidance.
-   - Add tests for import parsing, dedupe, error states, and no-secret logging.
+3. Refresh public positioning.
+   - Treat Strawberry parity as a tested baseline.
+   - Lead with local-first model choice, A2UI apps, AFMarket proof execution,
+     governed memory, chain trust, wallet policy, and agentic payment safety.
 
-4. Turn workflow metadata into real recurring automation.
-   - Add scheduler execution, page-change monitoring, content-appears/disappears
-     triggers, notification delivery, recurrence limits, and cooldowns.
-   - Keep submit/download/wallet/signing/destructive actions approval-gated even
-     for recurring workflows unless an explicit scoped policy allows them.
-   - Add pause/resume, last-run detail, next-run preview, and failure backoff.
-   - Add unit tests for triggers, schedules, cooldowns, approvals, and cancellation.
+### P1 - Make Web3 And Agentic Payments Native
 
-### P1 - Close UX Depth Gaps
+4. Implement the EUDI Wallet and agentic payments plan in
+   `docs/ARCHITECTURE.md`.
+   - EUDI Wallet adapters for credential presentation, OpenID4VCI/OpenID4VP,
+     ISO 18013-5, SD-JWT VC, pseudonyms, and strong user authentication use
+     cases.
+   - AP2 mandate models for intent, cart, payment, hashes, signatures, expiry,
+     budget, and revocation.
+   - ACP checkout adapters for agent-presented commerce flows.
+   - x402 buyer/server/facilitator models for API and content micropayments.
+   - Visa Trusted Agent Protocol support for agent recognition signatures.
+   - Notabene TAP support for blockchain transfer requests and encrypted
+     pre-settlement authorization.
+   - Mastercard Agent Pay style network-token and verifiable-intent policy
+     abstractions.
 
-5. Add a research planner and source ledger.
-   - Let Copilot split research into parallel tab/run groups.
-   - Record source URL, title, retrieval date, confidence, and extracted evidence.
-   - Export markdown, CSV, and A2UI table outputs.
-   - Add tests for source dedupe, source dating, confidence labels, and export
-     schema validation.
+5. Build one approval and receipt surface.
+   - Bind page snapshot, cart hash, mandate hash, wallet/account, identity
+     credential, chain/network, merchant/counterparty, model, tool, and user
+     approval into a local receipt.
+   - Make revocation, recurring budgets, cooldowns, and failure backoff visible.
+   - Never let a model directly spend, sign, submit, or broadcast.
 
-6. Harden integrations and MCP for production use.
-   - Add built-in connector profiles for Google Workspace/Gmail, Microsoft 365,
-     Slack, Notion, CRM/ATS, calendar, notes, and email.
-   - Store secrets in Keychain or the existing encrypted MCP profile service.
-   - Expose scopes, tool allowlists, revocation, connection test results, and
-     last-used audit state.
-   - Add tests for redacted persistence, revocation, disabled tools, and failed
-     connector states.
+### P2 - Turn The Advantage Into A Product System
 
-7. Expand page action coverage and resilience.
-   - Add select/menu, download, file-pick/upload metadata, new-tab handling,
-     retry/recovery, and better affected-element summaries.
-   - Add controlled `WKWebView` HTML fixtures or UI tests for visible action
-     effects on forms, menus, pagination, downloads, and navigation.
-   - Keep arbitrary model-provided JavaScript out of the bridge.
+6. Promote A2UI apps into installable agent templates for research, shopping,
+   operations, recruiting, sales, extraction, travel, forms, monitoring, wallet
+   policy, and dweb publishing.
 
-8. Make privacy and credit posture explicit.
-   - Ship Smart History as an explicit opt-in with local-only, provider-assisted,
-     and disabled modes clearly labeled.
-   - Show a per-run data-egress receipt: model/provider, page snapshot, memory
-     citations, connector tools, and omitted context commitments.
-   - Use exact token/credit values when providers return them; otherwise show
-     deterministic estimates with reason labels.
-   - Add tests for opt-in defaults, egress receipts, provider usage passthrough,
-     and estimator fallbacks.
+7. Make local-first model switching a headline control.
+   - Present local MLX, SwiftLM, LLM Router, AFMarket, and LLM Gateway choices
+     as a trust, cost, latency, and proof control.
+   - Keep context continuity, compression, and model-switch events visible.
 
-### P2 - Exceed Strawberry Where dBrowser Is Unique
+8. Keep decentralized and chain trust advantages visible everywhere money or
+   identity moves.
+   - Tie protocol loading, EUDI credential presentation, wallet actions, AP2,
+     ACP, x402, TAP, AFMarket settlement, and chain-trust state into one evidence
+     model.
+   - Show verified, proof-checked, RPC fallback, mock, unavailable, and revoked
+     states as distinct UI states.
 
-9. Promote A2UI apps into companion templates.
-   - Package sales, recruiting, operations, marketing, data extraction, research,
-     travel, shopping, forms, and monitoring flows as installable companion apps.
-   - Let each template declare required capabilities, connectors, page actions,
-     approval policy, runtime profile, and benchmark coverage.
-
-10. Make local-first model switching a headline UX.
-    - Present local MLX, SwiftLM, LLM Router, AFMarket, and LLM Gateway choices
-      as a trust/cost/performance control, not only a picker.
-    - Keep model-switch context continuity and compression events visible.
-    - Add "keep this local" and "fastest available" run modes.
-
-11. Keep decentralized and chain trust advantages visible.
-    - Tie A2UI apps, wallet actions, protocol loading, AFMarket settlement, and
-      chain-trust status into one approval and evidence surface.
-    - Make verified, proof-checked, RPC fallback, and unavailable states obvious
-      wherever browser-agent work touches crypto or decentralized content.
-
-12. Decide Windows parity explicitly.
-    - If "at or above Strawberry" requires Windows, create a separate shell plan
-      for Windows rather than pretending Swift covers it.
-    - If Windows is not a product goal, document the trade: macOS/iOS native
-      integration plus local MLX, wallet, A2UI, and decentralized capabilities.
+9. Decide Windows parity explicitly.
+   - If "at or above Strawberry" requires Windows, create a separate shell plan.
+   - If Windows is not a product goal, document the trade: macOS/iOS native
+     integration plus local MLX, wallet, identity, A2UI, and decentralized
+     capabilities.
 
 ## Verification Baseline
 
-For this documentation-only renewal:
+For this documentation and strategy refresh:
 
-- Run Markdown hygiene checks on `STATUS.md` and `STRAWBERRY_SWIFT.md`.
+- Run Markdown hygiene checks on `STATUS.md`, `STRAWBERRY_SWIFT.md`, and
+  `docs/ARCHITECTURE.md`.
 - Run a local Swift/Xcode build to prove the project still loads.
 - Commit and push only the scoped documentation files.
 
