@@ -2779,7 +2779,7 @@ private struct WalletPanelView: View {
                 PanelHeaderView(
                     title: "Wallet",
                     systemImage: BrowserPanel.wallet.systemImage,
-                    subtitle: "Accounts, chain trust, explorers, and approval-gated transfer receipts."
+                    subtitle: "Human wallet roots, delegated agent wallets, chain trust, explorers, and approval-gated receipts."
                 )
 
                 WalletExplorerPanelView(browser: browser)
@@ -2878,6 +2878,7 @@ private struct WalletExplorerPanelView: View {
                 .foregroundStyle(.secondary)
 
             AgenticPaymentsStatusView()
+            WalletControlPlaneView(snapshot: portfolio.controlPlane)
 
             if portfolio.isConnected, let activeNetwork = portfolio.activeNetwork, let activeAccount = portfolio.activeAccount {
                 if let embeddedWallet = portfolio.embeddedWallet {
@@ -3091,6 +3092,180 @@ private struct AgenticPaymentsStatusView: View {
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .accessibilityIdentifier("agentic-payments-status")
+    }
+}
+
+private struct WalletControlPlaneView: View {
+    let snapshot: WalletControlPlaneSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Wallet Control Plane", systemImage: "person.2.badge.key")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(snapshot.policySummary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 8)], spacing: 8) {
+                ForEach(snapshot.principals) { principal in
+                    WalletPrincipalCard(principal: principal, snapshot: snapshot)
+                }
+            }
+
+            if !snapshot.grants.isEmpty {
+                Text("Capability Grants")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], spacing: 8) {
+                    ForEach(snapshot.grants) { grant in
+                        WalletCapabilityGrantCard(grant: grant, snapshot: snapshot)
+                    }
+                }
+            }
+
+            if !snapshot.receipts.isEmpty {
+                Text("Control-Plane Receipts")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(snapshot.receipts.prefix(3)) { receipt in
+                    WalletControlPlaneReceiptRow(receipt: receipt, snapshot: snapshot)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("wallet-control-plane")
+    }
+}
+
+private struct WalletPrincipalCard: View {
+    let principal: WalletPrincipal
+    let snapshot: WalletControlPlaneSnapshot
+
+    private var tint: Color {
+        principal.kind == .human ? .blue : .purple
+    }
+
+    private var parentName: String? {
+        principal.parentPrincipalID.flatMap { snapshot.principal(id: $0)?.displayName }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(principal.displayName)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(principal.kind.title)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(tint)
+            }
+            Text(parentName.map { "Delegated by \($0)" } ?? principal.delegationSummary)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            FlowPillRow(items: principal.vaults.map(\.title), tint: tint)
+            if let profile = principal.agentProfile {
+                Text("\(profile.trustStatus.title) / \(profile.allowedProtocols.map(\.title).joined(separator: ", "))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WalletCapabilityGrantCard: View {
+    let grant: CapabilityGrant
+    let snapshot: WalletControlPlaneSnapshot
+
+    private var principalName: String {
+        snapshot.principal(id: grant.principalID)?.displayName ?? grant.principalID
+    }
+
+    private var scopeLabels: [String] {
+        let merchants = grant.merchantAllowlist
+        let protocols = grant.protocolAllowlist.map(\.title)
+        let chains = grant.chainAllowlist
+        let claims = grant.identityClaimAllowlist.map { "claim:\($0)" }
+        let labels = merchants + protocols + chains + claims
+        return labels.isEmpty ? ["No scope labels"] : labels
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(grant.capability.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(grant.statusTitle())
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(grant.isActive() ? Color.green : Color.secondary)
+            }
+            Text("\(grant.capability.vault.title) / \(principalName)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Text(grant.budgetSummary())
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+            FlowPillRow(items: scopeLabels, tint: .green)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WalletControlPlaneReceiptRow: View {
+    let receipt: WalletReceipt
+    let snapshot: WalletControlPlaneSnapshot
+
+    private var principalName: String {
+        snapshot.principal(id: receipt.principalID)?.displayName ?? receipt.principalID
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: receipt.exposesRootCredential ? "exclamationmark.triangle" : "checkmark.seal")
+                .foregroundStyle(receipt.exposesRootCredential ? Color.red : Color.green)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(receipt.kind.title)
+                        .font(.caption.weight(.semibold))
+                    Text(receipt.status.rawValue)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                Text("\(principalName): \(receipt.summary)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Text(receipt.receiptHash)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

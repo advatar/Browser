@@ -367,6 +367,7 @@ struct WalletPortfolioSnapshot: Codable, Equatable {
     var networks: [WalletNetwork]
     var accounts: [WalletAccount]
     var recentReceipts: [WalletTransferReceipt]
+    var controlPlane: WalletControlPlaneSnapshot
     var policySummary: String
     var productionSigningStatus: String
 
@@ -379,6 +380,7 @@ struct WalletPortfolioSnapshot: Codable, Equatable {
             networks: WalletNetwork.defaultNetworks(),
             accounts: [],
             recentReceipts: [],
+            controlPlane: .defaultDelegation(),
             policySummary: "Create an embedded wallet or connect an external wallet before signing or spending.",
             productionSigningStatus: "Production signing adapters are not configured."
         )

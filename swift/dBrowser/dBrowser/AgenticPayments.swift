@@ -617,6 +617,528 @@ struct AgenticPaymentReceipt: Codable, Equatable, Identifiable {
     var summary: String
 }
 
+enum WalletPrincipalKind: String, CaseIterable, Codable, Equatable {
+    case human
+    case agent
+
+    var title: String {
+        switch self {
+        case .human: "Human wallet"
+        case .agent: "Agent wallet"
+        }
+    }
+}
+
+enum WalletCapabilityVault: String, CaseIterable, Codable, Equatable, Identifiable {
+    case identity
+    case payment
+    case crypto
+    case browsing
+    case signing
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .identity: "Identity vault"
+        case .payment: "Payment vault"
+        case .crypto: "Crypto vault"
+        case .browsing: "Browsing vault"
+        case .signing: "Signing vault"
+        }
+    }
+}
+
+enum DelegatedCapability: String, CaseIterable, Codable, Equatable, Identifiable {
+    case identityPresentation
+    case paymentAuthorization
+    case cryptoSessionKey
+    case browsingAutomation
+    case messageSigning
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .identityPresentation: "Selective identity proof"
+        case .paymentAuthorization: "Delegated payment"
+        case .cryptoSessionKey: "Scoped crypto session"
+        case .browsingAutomation: "Browsing automation"
+        case .messageSigning: "Message signing"
+        }
+    }
+
+    var vault: WalletCapabilityVault {
+        switch self {
+        case .identityPresentation: .identity
+        case .paymentAuthorization: .payment
+        case .cryptoSessionKey: .crypto
+        case .browsingAutomation: .browsing
+        case .messageSigning: .signing
+        }
+    }
+}
+
+enum AgentWalletTrustStatus: String, Codable, Equatable {
+    case trusted
+    case limited
+    case untrusted
+    case revoked
+
+    var title: String {
+        switch self {
+        case .trusted: "Trusted"
+        case .limited: "Limited"
+        case .untrusted: "Untrusted"
+        case .revoked: "Revoked"
+        }
+    }
+}
+
+struct AgentWalletProfile: Codable, Equatable, Identifiable {
+    var id: String
+    var agentDID: String
+    var providerID: String
+    var trustStatus: AgentWalletTrustStatus
+    var identityAttestations: [String]
+    var allowedProtocols: [AgenticPaymentProtocol]
+    var createdAt: Date
+
+    var isUsable: Bool {
+        trustStatus == .trusted || trustStatus == .limited
+    }
+}
+
+struct WalletPrincipal: Codable, Equatable, Identifiable {
+    let id: String
+    var kind: WalletPrincipalKind
+    var displayName: String
+    var parentPrincipalID: String?
+    var vaults: [WalletCapabilityVault]
+    var agentProfile: AgentWalletProfile?
+    var attestationLabels: [String]
+
+    var isRootAuthority: Bool {
+        kind == .human && parentPrincipalID == nil
+    }
+
+    var delegationSummary: String {
+        switch kind {
+        case .human:
+            return isRootAuthority ? "Root authority" : "Human delegated wallet"
+        case .agent:
+            return parentPrincipalID.map { "Delegated by \($0)" } ?? "Agent wallet without root"
+        }
+    }
+}
+
+struct CapabilityGrant: Codable, Equatable, Identifiable {
+    let id: String
+    var authorityPrincipalID: String
+    var principalID: String
+    var capability: DelegatedCapability
+    var budgetMinorUnits: Int?
+    var spentMinorUnits: Int
+    var currencyOrAsset: String?
+    var merchantAllowlist: [String]
+    var protocolAllowlist: [AgenticPaymentProtocol]
+    var chainAllowlist: [String]
+    var identityClaimAllowlist: [String]
+    var sessionKeyReference: String?
+    var mandateReference: String?
+    var issuedAt: Date
+    var expiresAt: Date
+    var revokedAt: Date?
+    var approvalLabel: String
+
+    var remainingBudgetMinorUnits: Int? {
+        budgetMinorUnits.map { max(0, $0 - spentMinorUnits) }
+    }
+
+    func isActive(now: Date = Date()) -> Bool {
+        revokedAt == nil && expiresAt > now
+    }
+
+    func statusTitle(now: Date = Date()) -> String {
+        if revokedAt != nil { return "Revoked" }
+        if expiresAt <= now { return "Expired" }
+        return "Active"
+    }
+
+    func budgetSummary() -> String {
+        guard let budgetMinorUnits else { return "No spend budget" }
+        let remaining = max(0, budgetMinorUnits - spentMinorUnits)
+        return "\(remaining)/\(budgetMinorUnits) \(currencyOrAsset ?? "minor units") remaining"
+    }
+
+    func coversScope(_ request: WalletCapabilityRequest) -> Bool {
+        guard principalID == request.principalID, capability == request.capability else {
+            return false
+        }
+        if let protocolName = request.protocolName, !protocolAllowlist.isEmpty, !protocolAllowlist.contains(protocolName) {
+            return false
+        }
+        if let merchantID = request.merchantID, !merchantAllowlist.isEmpty, !merchantAllowlist.contains(merchantID) {
+            return false
+        }
+        if !request.requestedIdentityClaims.isEmpty {
+            let allowedClaims = Set(identityClaimAllowlist)
+            guard Set(request.requestedIdentityClaims).isSubset(of: allowedClaims) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    func allowsBudget(_ amountMinorUnits: Int?) -> Bool {
+        guard let amountMinorUnits, let remainingBudgetMinorUnits else {
+            return true
+        }
+        return amountMinorUnits <= remainingBudgetMinorUnits
+    }
+}
+
+enum WalletReceiptKind: String, Codable, Equatable {
+    case identityDisclosure
+    case paymentAuthorization
+    case cryptoSignature
+    case protocolProof
+    case grantRevocation
+
+    var title: String {
+        switch self {
+        case .identityDisclosure: "Identity disclosure"
+        case .paymentAuthorization: "Payment authorization"
+        case .cryptoSignature: "Crypto signature"
+        case .protocolProof: "Protocol proof"
+        case .grantRevocation: "Grant revocation"
+        }
+    }
+}
+
+enum WalletReceiptStatus: String, Codable, Equatable {
+    case recorded
+    case approved
+    case denied
+    case expired
+    case revoked
+}
+
+struct WalletReceipt: Codable, Equatable, Identifiable {
+    let id: String
+    var kind: WalletReceiptKind
+    var status: WalletReceiptStatus
+    var principalID: String
+    var authorityPrincipalID: String
+    var grantID: String?
+    var protocolName: AgenticPaymentProtocol?
+    var merchantID: String?
+    var amountMinorUnits: Int?
+    var currencyOrAsset: String?
+    var selectiveDisclosureClaims: [String]
+    var bindingHashes: [String]
+    var createdAt: Date
+    var summary: String
+    var storesRawPaymentCredential: Bool
+    var exposesRootCredential: Bool
+
+    var receiptHash: String {
+        AgenticPaymentHash.stable([
+            id,
+            kind.rawValue,
+            status.rawValue,
+            principalID,
+            authorityPrincipalID,
+            grantID ?? "",
+            protocolName?.rawValue ?? "",
+            merchantID ?? "",
+            amountMinorUnits.map(String.init) ?? "",
+            currencyOrAsset ?? "",
+            selectiveDisclosureClaims.joined(separator: "|"),
+            bindingHashes.joined(separator: "|"),
+            storesRawPaymentCredential ? "raw-payment" : "tokenized",
+            exposesRootCredential ? "root" : "delegated"
+        ])
+    }
+}
+
+struct WalletControlPlaneSnapshot: Codable, Equatable {
+    var principals: [WalletPrincipal]
+    var grants: [CapabilityGrant]
+    var receipts: [WalletReceipt]
+
+    var humanPrincipals: [WalletPrincipal] {
+        principals.filter { $0.kind == .human }
+    }
+
+    var agentPrincipals: [WalletPrincipal] {
+        principals.filter { $0.kind == .agent }
+    }
+
+    var activeGrants: [CapabilityGrant] {
+        grants.filter { $0.isActive() }
+    }
+
+    var policySummary: String {
+        "\(humanPrincipals.count) human, \(agentPrincipals.count) agent, \(activeGrants.count) active grant\(activeGrants.count == 1 ? "" : "s")"
+    }
+
+    func principal(id: String) -> WalletPrincipal? {
+        principals.first { $0.id == id }
+    }
+
+    func grants(for principalID: String) -> [CapabilityGrant] {
+        grants.filter { $0.principalID == principalID }
+    }
+
+    func receipts(for principalID: String) -> [WalletReceipt] {
+        receipts.filter { $0.principalID == principalID }
+    }
+
+    func delegationChain(for principalID: String) -> [WalletPrincipal] {
+        var chain = [WalletPrincipal]()
+        var currentID: String? = principalID
+        var seen = Set<String>()
+
+        while let id = currentID, !seen.contains(id), let principal = principal(id: id) {
+            seen.insert(id)
+            chain.append(principal)
+            currentID = principal.parentPrincipalID
+        }
+
+        return chain
+    }
+
+    static func defaultDelegation(rootWalletFingerprint: String? = nil) -> WalletControlPlaneSnapshot {
+        let issuedAt = Date(timeIntervalSince1970: 1_798_200_000)
+        let expiresAt = Date(timeIntervalSince1970: 4_102_444_800)
+        let humanID = "principal-human-root"
+        let agentID = "principal-agent-travel"
+        let fingerprintLabel = rootWalletFingerprint.map { "Embedded wallet fingerprint \($0)" }
+        let human = WalletPrincipal(
+            id: humanID,
+            kind: .human,
+            displayName: "Personal dBrowser wallet",
+            parentPrincipalID: nil,
+            vaults: [.identity, .payment, .crypto, .signing],
+            agentProfile: nil,
+            attestationLabels: [
+                "EUDI wallet-compatible client",
+                "Root payment instruments stay tokenized",
+                "Full crypto recovery retained by user"
+            ] + [fingerprintLabel].compactMap { $0 }
+        )
+        let agentProfile = AgentWalletProfile(
+            id: "agent-profile-travel",
+            agentDID: "did:dbrowser:agent:travel-concierge",
+            providerID: "dbrowser.local",
+            trustStatus: .limited,
+            identityAttestations: [
+                "App attestation fixture",
+                "Visa TAP trust material fixture"
+            ],
+            allowedProtocols: [.visaTrustedAgent, .agenticCommerceProtocol, .agentPaymentsProtocol, .x402],
+            createdAt: issuedAt
+        )
+        let agent = WalletPrincipal(
+            id: agentID,
+            kind: .agent,
+            displayName: "Travel concierge agent",
+            parentPrincipalID: humanID,
+            vaults: [.identity, .payment, .crypto, .browsing],
+            agentProfile: agentProfile,
+            attestationLabels: [
+                "Child principal",
+                "No raw EUDI credential access",
+                "No root payment instrument access"
+            ]
+        )
+        let identityGrant = CapabilityGrant(
+            id: "grant-age-proof",
+            authorityPrincipalID: humanID,
+            principalID: agentID,
+            capability: .identityPresentation,
+            budgetMinorUnits: nil,
+            spentMinorUnits: 0,
+            currencyOrAsset: nil,
+            merchantAllowlist: ["merchant.example"],
+            protocolAllowlist: [.visaTrustedAgent, .agenticCommerceProtocol, .agentPaymentsProtocol],
+            chainAllowlist: [],
+            identityClaimAllowlist: ["age_over_18"],
+            sessionKeyReference: nil,
+            mandateReference: "eudi-presentation-receipt-only",
+            issuedAt: issuedAt,
+            expiresAt: expiresAt,
+            revokedAt: nil,
+            approvalLabel: "Use age-over-18 proof at merchant.example"
+        )
+        let paymentGrant = CapabilityGrant(
+            id: "grant-merchant-payment",
+            authorityPrincipalID: humanID,
+            principalID: agentID,
+            capability: .paymentAuthorization,
+            budgetMinorUnits: 5_000,
+            spentMinorUnits: 1_999,
+            currencyOrAsset: "USD cents",
+            merchantAllowlist: ["merchant.example"],
+            protocolAllowlist: [.agenticCommerceProtocol, .agentPaymentsProtocol, .visaTrustedAgent],
+            chainAllowlist: [],
+            identityClaimAllowlist: [],
+            sessionKeyReference: nil,
+            mandateReference: "ap2-mandate-ref-merchant-example",
+            issuedAt: issuedAt,
+            expiresAt: expiresAt,
+            revokedAt: nil,
+            approvalLabel: "Spend up to USD 50.00 at merchant.example"
+        )
+        let cryptoGrant = CapabilityGrant(
+            id: "grant-x402-session",
+            authorityPrincipalID: humanID,
+            principalID: agentID,
+            capability: .cryptoSessionKey,
+            budgetMinorUnits: 500,
+            spentMinorUnits: 125,
+            currencyOrAsset: "USDC cents",
+            merchantAllowlist: ["api.example.test"],
+            protocolAllowlist: [.x402],
+            chainAllowlist: ["base-sepolia"],
+            identityClaimAllowlist: [],
+            sessionKeyReference: "session-key:x402:base-sepolia",
+            mandateReference: "x402-allowance-api-example",
+            issuedAt: issuedAt,
+            expiresAt: expiresAt,
+            revokedAt: nil,
+            approvalLabel: "Pay x402 API calls up to 500 USDC cents/day"
+        )
+        let receipts = [
+            WalletReceipt(
+                id: "wallet-receipt-age-proof",
+                kind: .identityDisclosure,
+                status: .approved,
+                principalID: agentID,
+                authorityPrincipalID: humanID,
+                grantID: identityGrant.id,
+                protocolName: .agenticCommerceProtocol,
+                merchantID: "merchant.example",
+                amountMinorUnits: nil,
+                currencyOrAsset: nil,
+                selectiveDisclosureClaims: ["age_over_18"],
+                bindingHashes: ["eudi-selective-proof-hash"],
+                createdAt: issuedAt,
+                summary: "Agent received an age-over-18 proof receipt, not the PID credential.",
+                storesRawPaymentCredential: false,
+                exposesRootCredential: false
+            ),
+            WalletReceipt(
+                id: "wallet-receipt-acp-payment",
+                kind: .paymentAuthorization,
+                status: .approved,
+                principalID: agentID,
+                authorityPrincipalID: humanID,
+                grantID: paymentGrant.id,
+                protocolName: .agenticCommerceProtocol,
+                merchantID: "merchant.example",
+                amountMinorUnits: 1_999,
+                currencyOrAsset: "USD cents",
+                selectiveDisclosureClaims: [],
+                bindingHashes: ["acp-basket-hash", "ap2-mandate-ref-merchant-example"],
+                createdAt: issuedAt,
+                summary: "Agent used an ACP delegated payment token bound to the approved basket.",
+                storesRawPaymentCredential: false,
+                exposesRootCredential: false
+            )
+        ]
+
+        return WalletControlPlaneSnapshot(
+            principals: [human, agent],
+            grants: [identityGrant, paymentGrant, cryptoGrant],
+            receipts: receipts
+        )
+    }
+}
+
+struct WalletCapabilityRequest: Equatable {
+    var principalID: String
+    var capability: DelegatedCapability
+    var protocolName: AgenticPaymentProtocol?
+    var merchantID: String?
+    var amountMinorUnits: Int?
+    var requestedIdentityClaims: [String]
+    var requiresRootCredentialAccess: Bool
+}
+
+enum WalletControlPlaneDecisionKind: String, Equatable {
+    case allow
+    case deny
+    case expired
+    case revoked
+    case overBudget
+}
+
+struct WalletControlPlaneDecision: Equatable {
+    var kind: WalletControlPlaneDecisionKind
+    var grantID: String?
+    var reasons: [String]
+
+    var isAllowed: Bool {
+        kind == .allow
+    }
+}
+
+enum WalletControlPlanePolicyEngine {
+    static func evaluate(
+        _ request: WalletCapabilityRequest,
+        snapshot: WalletControlPlaneSnapshot,
+        now: Date = Date()
+    ) -> WalletControlPlaneDecision {
+        guard let principal = snapshot.principal(id: request.principalID) else {
+            return WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Unknown wallet principal"])
+        }
+
+        if principal.kind == .agent && request.requiresRootCredentialAccess {
+            return WalletControlPlaneDecision(
+                kind: .deny,
+                grantID: nil,
+                reasons: ["Agent principals cannot receive root human credentials, raw payment instruments, or unrestricted signing authority"]
+            )
+        }
+
+        if principal.kind == .agent, principal.agentProfile?.trustStatus == .revoked {
+            return WalletControlPlaneDecision(kind: .revoked, grantID: nil, reasons: ["Agent wallet trust is revoked"])
+        }
+
+        if principal.kind == .human && principal.isRootAuthority {
+            return WalletControlPlaneDecision(kind: .allow, grantID: nil, reasons: ["Human root authority controls the wallet vaults"])
+        }
+
+        let scopedGrants = snapshot.grants.filter { $0.coversScope(request) }
+        guard !scopedGrants.isEmpty else {
+            return WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["No delegated capability grant covers this request"])
+        }
+
+        if let activeGrant = scopedGrants.first(where: { $0.isActive(now: now) }) {
+            guard activeGrant.allowsBudget(request.amountMinorUnits) else {
+                return WalletControlPlaneDecision(
+                    kind: .overBudget,
+                    grantID: activeGrant.id,
+                    reasons: ["Requested amount exceeds delegated budget"]
+                )
+            }
+            return WalletControlPlaneDecision(
+                kind: .allow,
+                grantID: activeGrant.id,
+                reasons: ["Delegated capability grant covers the requested vault action"]
+            )
+        }
+
+        if let revokedGrant = scopedGrants.first(where: { $0.revokedAt != nil }) {
+            return WalletControlPlaneDecision(kind: .revoked, grantID: revokedGrant.id, reasons: ["Delegated capability grant is revoked"])
+        }
+
+        return WalletControlPlaneDecision(kind: .expired, grantID: scopedGrants.first?.id, reasons: ["Delegated capability grant is expired"])
+    }
+}
+
 enum AgenticPaymentPolicyEngine {
     static func evaluate(_ review: AgenticPaymentReview, now: Date = Date()) -> AgenticPaymentPolicyDecision {
         var reasons = [String]()

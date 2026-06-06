@@ -21,6 +21,25 @@
 
 ## Active Task
 
+## Unified Wallet Control Plane And Agent Principals
+
+- [x] Assess the current Swift wallet, EUDI, and agentic payments foundation.
+- [x] Create GitHub issue for the unified wallet control plane and isolated agent principals (#140).
+- [x] Add Swift models for human and agent wallet principals, agent wallet profiles, delegated capabilities, grants, revocation, and wallet receipts.
+- [x] Enforce policy boundaries so agents receive scoped identity/payment/crypto capabilities rather than root human credentials, raw payment instruments, or unrestricted signing authority.
+- [x] Surface human wallets and agent wallets side by side in the Wallet panel with visible delegation chains, capability vaults, grants, and receipts.
+- [x] Add focused Swift unit tests for principal isolation, grant budgets, protocol scopes, revocation, and runtime/UI state.
+- [x] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-wallet-control-plane-tests -only-testing:dBrowserTests/walletControlPlaneSeparatesHumanRootAndAgentChildVaults -only-testing:dBrowserTests/walletControlPlaneGrantBudgetsProtocolsAndRevocationAreEnforced -only-testing:dBrowserTests/walletControlPlaneReceiptsExposeSelectiveProofsAndDelegatedTokensOnly -only-testing:dBrowserTests/runtimeBridgeSurfacesWalletControlPlanePrincipalsAndGrants` passed.
+- A focused regression lane passed with `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-wallet-control-plane-tests` and `-only-testing` filters for wallet control-plane, EUDI/payment, AP2/ACP/x402/TAP, and wallet explorer policy tests.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-wallet-control-plane-build` passed.
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/WalletExplorer.swift swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/WalletExplorer.swift swift/dBrowser/dBrowser/RuntimeBridge.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift || true` reported only existing author-name comments in Swift files.
+
 ## Swift EUDI Wallet And Agentic Payments Foundation
 
 - [x] Re-check official Visa Trusted Agent Protocol, OpenAI/Stripe ACP, EUDI Wallet Kit, and related payment protocol sources.

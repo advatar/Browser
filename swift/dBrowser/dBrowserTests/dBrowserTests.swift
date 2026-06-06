@@ -6419,6 +6419,129 @@ struct dBrowserTests {
         #expect(checkout.delegatedPaymentToken?.storesRawPaymentCredential == false)
     }
 
+    @Test func walletControlPlaneSeparatesHumanRootAndAgentChildVaults() {
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let human = snapshot.humanPrincipals.first,
+              let agent = snapshot.agentPrincipals.first else {
+            Issue.record("Expected one human and one agent principal")
+            return
+        }
+        let rootRequest = WalletCapabilityRequest(
+            principalID: agent.id,
+            capability: .paymentAuthorization,
+            protocolName: .agenticCommerceProtocol,
+            merchantID: "merchant.example",
+            amountMinorUnits: 1_000,
+            requestedIdentityClaims: [],
+            requiresRootCredentialAccess: true
+        )
+        let rootDecision = WalletControlPlanePolicyEngine.evaluate(
+            rootRequest,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(human.isRootAuthority)
+        #expect(agent.parentPrincipalID == human.id)
+        #expect(agent.agentProfile?.trustStatus == .limited)
+        #expect(agent.vaults.contains(.identity))
+        #expect(agent.vaults.contains(.payment))
+        #expect(agent.vaults.contains(.crypto))
+        #expect(snapshot.delegationChain(for: agent.id).map(\.id) == [agent.id, human.id])
+        #expect(rootDecision.kind == .deny)
+        #expect(rootDecision.reasons.joined(separator: " ").contains("root human credentials"))
+    }
+
+    @Test func walletControlPlaneGrantBudgetsProtocolsAndRevocationAreEnforced() {
+        var snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let agent = snapshot.agentPrincipals.first,
+              let paymentGrantIndex = snapshot.grants.firstIndex(where: { $0.capability == .paymentAuthorization }) else {
+            Issue.record("Expected delegated agent payment grant")
+            return
+        }
+        let allowedPayment = WalletCapabilityRequest(
+            principalID: agent.id,
+            capability: .paymentAuthorization,
+            protocolName: .agenticCommerceProtocol,
+            merchantID: "merchant.example",
+            amountMinorUnits: 2_000,
+            requestedIdentityClaims: [],
+            requiresRootCredentialAccess: false
+        )
+        var overBudgetPayment = allowedPayment
+        overBudgetPayment.amountMinorUnits = 3_500
+        var wrongProtocolPayment = allowedPayment
+        wrongProtocolPayment.protocolName = .x402
+
+        let allowed = WalletControlPlanePolicyEngine.evaluate(
+            allowedPayment,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+        let overBudget = WalletControlPlanePolicyEngine.evaluate(
+            overBudgetPayment,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+        let wrongProtocol = WalletControlPlanePolicyEngine.evaluate(
+            wrongProtocolPayment,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+        snapshot.grants[paymentGrantIndex].revokedAt = AgenticPaymentFixtures.now
+        let revoked = WalletControlPlanePolicyEngine.evaluate(
+            allowedPayment,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(allowed.kind == .allow)
+        #expect(allowed.grantID == "grant-merchant-payment")
+        #expect(overBudget.kind == .overBudget)
+        #expect(wrongProtocol.kind == .deny)
+        #expect(revoked.kind == .revoked)
+    }
+
+    @Test func walletControlPlaneReceiptsExposeSelectiveProofsAndDelegatedTokensOnly() {
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let identityReceipt = snapshot.receipts.first(where: { $0.kind == .identityDisclosure }),
+              let paymentReceipt = snapshot.receipts.first(where: { $0.kind == .paymentAuthorization }) else {
+            Issue.record("Expected identity and payment control-plane receipts")
+            return
+        }
+
+        #expect(identityReceipt.selectiveDisclosureClaims == ["age_over_18"])
+        #expect(identityReceipt.summary.contains("not the PID credential"))
+        #expect(!identityReceipt.exposesRootCredential)
+        #expect(!paymentReceipt.storesRawPaymentCredential)
+        #expect(!paymentReceipt.exposesRootCredential)
+        #expect(paymentReceipt.bindingHashes.contains("ap2-mandate-ref-merchant-example"))
+        #expect(!identityReceipt.receiptHash.isEmpty)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeSurfacesWalletControlPlanePrincipalsAndGrants() async {
+        let bridge = MobileRuntimeBridge()
+        let initialWalletFeature = bridge.featureStates.first { $0.feature == .wallet }
+
+        #expect(bridge.walletPortfolio.controlPlane.humanPrincipals.count == 1)
+        #expect(bridge.walletPortfolio.controlPlane.agentPrincipals.count == 1)
+        #expect(initialWalletFeature?.status.contains("1 human, 1 agent") == true)
+
+        _ = await bridge.createEmbeddedWallet(label: "Control plane wallet")
+        let connectedWalletFeature = bridge.featureStates.first { $0.feature == .wallet }
+        let fingerprint = bridge.walletPortfolio.embeddedWallet?.seedFingerprint
+        let humanLabels = bridge.walletPortfolio.controlPlane.humanPrincipals.first?.attestationLabels ?? []
+
+        #expect(bridge.walletPortfolio.controlPlane.activeGrants.count == 3)
+        #expect(connectedWalletFeature?.status.contains("Native embedded wallet") == true)
+        #expect(connectedWalletFeature?.status.contains("3 active grants") == true)
+        #expect(fingerprint != nil)
+        #expect(humanLabels.contains { label in
+            fingerprint.map { label.contains($0) } ?? false
+        })
+    }
+
     @Test func agenticPaymentPolicyRequiresUserApprovalBeforeReceiptApproval() {
         let eudiDecision = EUDIWalletDecisionEngine.decide(
             request: AgenticPaymentFixtures.eudiRequest,

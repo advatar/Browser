@@ -477,6 +477,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         )
         self.walletInfo = .disconnected
         self.walletPortfolio = .disconnected.withChainTrust(configuration.chainTrustRegistry)
+        refreshWalletFeatureState()
     }
 
     func refreshStatus() async -> [RuntimeFeatureState] {
@@ -522,6 +523,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             chainTrustSnapshot: chainTrustSnapshot,
             mcpServers: mcpServers
         )
+        refreshWalletFeatureState()
         refreshAFMTrainingFeatureState()
         return featureStates
     }
@@ -614,6 +616,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     chainTrustSnapshot: chainTrustSnapshot,
                     mcpServers: mcpServers
                 )
+                refreshWalletFeatureState()
                 guard routerSnapshot.isModelAvailable(provider: .appleFoundation) else {
                     throw LLMRouterServiceClientError.invalidResponse
                 }
@@ -666,6 +669,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
+            refreshWalletFeatureState()
 
             let route = try await afmServicesClient.route(
                 skill: "summarize",
@@ -777,6 +781,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
+            refreshWalletFeatureState()
         }
 
         return CopilotRunResult(
@@ -832,6 +837,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
+            refreshWalletFeatureState()
             refreshAFMTrainingFeatureState()
             return job
         } catch {
@@ -909,6 +915,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             networks: networks,
             accounts: accounts,
             recentReceipts: walletPortfolio.recentReceipts,
+            controlPlane: .defaultDelegation(rootWalletFingerprint: profile.seedFingerprint),
             policySummary: "Native embedded wallet active. Apps and MCP servers receive only brokered wallet capabilities; signing and broadcast stay approval-gated.",
             productionSigningStatus: "Embedded wallet can create local policy receipts. Production chain signing and broadcast adapters are not configured."
         ).withChainTrust(chainTrustSnapshot)
@@ -1338,6 +1345,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             chainTrustSnapshot: chainTrustSnapshot,
             mcpServers: mcpServers
         )
+        refreshWalletFeatureState()
         return update
     }
 
@@ -1546,9 +1554,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
     private func refreshWalletFeatureState() {
         guard let index = featureStates.firstIndex(where: { $0.feature == .wallet }) else { return }
+        let controlPlaneSummary = walletPortfolio.controlPlane.policySummary
         featureStates[index].status = walletPortfolio.isConnected
-            ? "\(walletPortfolio.connectionKind.title): \(walletPortfolio.activeNetwork?.displayName ?? "Wallet")"
-            : "Embedded wallet available"
+            ? "\(walletPortfolio.connectionKind.title): \(walletPortfolio.activeNetwork?.displayName ?? "Wallet"), \(controlPlaneSummary)"
+            : "Embedded wallet available, \(controlPlaneSummary)"
         featureStates[index].mode = .local
         featureStates[index].isAvailable = true
     }
