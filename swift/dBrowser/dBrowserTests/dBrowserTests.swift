@@ -6381,6 +6381,133 @@ struct dBrowserTests {
         #expect(!approved.receiptHash.isEmpty)
     }
 
+    @Test func eudiEmailCredentialImporterAcceptsCliwalletVerifiedEmailForHumanWallet() {
+        let rawImport = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            now: AgenticPaymentFixtures.now
+        )
+        let responseImport = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: AgenticPaymentFixtures.cliwalletVerifiedEmailResponseJSON,
+            now: AgenticPaymentFixtures.now
+        )
+        let jwtOnlyImport = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data("header.payload.signature".utf8),
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(EUDIWalletProfile.dbrowserReference.supportedCredentialKinds.contains(.verifiedEmail))
+        #expect(rawImport.status == .imported)
+        #expect(rawImport.document?.kind == .verifiedEmail)
+        #expect(rawImport.document?.claims["email"] == "johan.sellstrom@iproov.com")
+        #expect(rawImport.document?.claims["email_verified"] == "true")
+        #expect(rawImport.document?.claims["subject_type"] == "user")
+        #expect(rawImport.document?.claims["source_credential_hash"]?.isEmpty == false)
+        #expect(responseImport.status == .imported)
+        #expect(responseImport.document?.id == rawImport.document?.id)
+        #expect(jwtOnlyImport.status == .unsupportedFormat)
+    }
+
+    @Test func eudiWalletIdentityIssuerIssuesScopedVerifiedEmailToAgent() {
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let human = snapshot.humanPrincipals.first,
+              let agent = snapshot.agentPrincipals.first,
+              let sourceCredential = snapshot.verifiedEmailCredentials.first else {
+            Issue.record("Expected human, agent, and verified email credential")
+            return
+        }
+        let request = EUDIAgentIdentityIssuanceRequest(
+            id: "unit-agent-email",
+            humanPrincipalID: human.id,
+            agentPrincipalID: agent.id,
+            sourceCredentialID: sourceCredential.id,
+            requestedClaims: ["email", "email_verified"],
+            relyingPartyID: "dbrowser.local",
+            relyingPartyName: "dBrowser Wallet Control Plane",
+            protocolName: .manualApproval,
+            purpose: "Agent identity bootstrap",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(600),
+            requiresRootCredentialAccess: false
+        )
+
+        let result = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            request,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.state == .issued)
+        #expect(result.isIssued)
+        #expect(result.decision.grantID == "grant-agent-verified-email")
+        #expect(result.credential?.claims == ["email": "johan.sellstrom@iproov.com", "email_verified": "true"])
+        #expect(result.credential?.claims["holder_did"] == nil)
+        #expect(result.credential?.exposesRootCredential == false)
+        #expect(result.receipt.status == .approved)
+        #expect(result.receipt.selectiveDisclosureClaims == ["email", "email_verified"])
+        #expect(!result.receipt.exposesRootCredential)
+        #expect(result.receipt.summary.contains("not the human email VC"))
+    }
+
+    @Test func eudiWalletIdentityIssuerDeniesMissingOrRevokedVerifiedEmailGrant() {
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let human = snapshot.humanPrincipals.first,
+              let agent = snapshot.agentPrincipals.first,
+              let sourceCredential = snapshot.verifiedEmailCredentials.first else {
+            Issue.record("Expected human, agent, and verified email credential")
+            return
+        }
+        let request = EUDIAgentIdentityIssuanceRequest(
+            id: "unit-agent-email-denied",
+            humanPrincipalID: human.id,
+            agentPrincipalID: agent.id,
+            sourceCredentialID: sourceCredential.id,
+            requestedClaims: ["email", "email_verified"],
+            relyingPartyID: "dbrowser.local",
+            relyingPartyName: "dBrowser Wallet Control Plane",
+            protocolName: .manualApproval,
+            purpose: "Agent identity bootstrap",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(600),
+            requiresRootCredentialAccess: false
+        )
+        let missingGrantSnapshot = WalletControlPlaneSnapshot(
+            principals: snapshot.principals,
+            grants: snapshot.grants.filter { $0.id != "grant-agent-verified-email" },
+            receipts: snapshot.receipts,
+            humanIdentityCredentials: snapshot.humanIdentityCredentials,
+            agentIdentityCredentials: snapshot.agentIdentityCredentials
+        )
+        var revokedSnapshot = snapshot
+        if let grantIndex = revokedSnapshot.grants.firstIndex(where: { $0.id == "grant-agent-verified-email" }) {
+            revokedSnapshot.grants[grantIndex].revokedAt = AgenticPaymentFixtures.now
+        }
+        var rootCredentialRequest = request
+        rootCredentialRequest.requiresRootCredentialAccess = true
+
+        let missingGrant = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            request,
+            snapshot: missingGrantSnapshot,
+            now: AgenticPaymentFixtures.now
+        )
+        let revokedGrant = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            request,
+            snapshot: revokedSnapshot,
+            now: AgenticPaymentFixtures.now
+        )
+        let rootCredential = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            rootCredentialRequest,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(missingGrant.state == .denied)
+        #expect(missingGrant.decision.kind == .deny)
+        #expect(missingGrant.receipt.status == .denied)
+        #expect(revokedGrant.state == .revoked)
+        #expect(revokedGrant.receipt.status == .revoked)
+        #expect(rootCredential.state == .rootAccessDenied)
+        #expect(rootCredential.receipt.status == .denied)
+        #expect(rootCredential.credential == nil)
+    }
+
     @Test func visaTrustedAgentVerifierChecksKeysHeadersAlgorithmsAndPaymentContext() {
         let request = AgenticPaymentFixtures.visaRequest
         let verified = VisaTrustedAgentVerifier.verify(
@@ -6519,6 +6646,25 @@ struct dBrowserTests {
         #expect(!identityReceipt.receiptHash.isEmpty)
     }
 
+    @Test func walletControlPlaneSurfacesVerifiedEmailAndAgentIdentityCredentials() {
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let verifiedEmail = snapshot.verifiedEmailCredentials.first,
+              let agentIdentity = snapshot.activeAgentIdentityCredentials.first else {
+            Issue.record("Expected verified email and delegated agent identity credentials")
+            return
+        }
+
+        #expect(snapshot.policySummary.contains("1 verified email"))
+        #expect(snapshot.policySummary.contains("1 agent identity"))
+        #expect(verifiedEmail.claims["email_verified"] == "true")
+        #expect(agentIdentity.claims["email"] == verifiedEmail.claims["email"])
+        #expect(agentIdentity.sourceCredentialID == verifiedEmail.id)
+        #expect(!agentIdentity.exposesRootCredential)
+        #expect(snapshot.receipts.contains { receipt in
+            receipt.id == agentIdentity.receiptID && receipt.summary.contains("not the human email VC")
+        })
+    }
+
     @MainActor
     @Test func runtimeBridgeSurfacesWalletControlPlanePrincipalsAndGrants() async {
         let bridge = MobileRuntimeBridge()
@@ -6533,9 +6679,13 @@ struct dBrowserTests {
         let fingerprint = bridge.walletPortfolio.embeddedWallet?.seedFingerprint
         let humanLabels = bridge.walletPortfolio.controlPlane.humanPrincipals.first?.attestationLabels ?? []
 
-        #expect(bridge.walletPortfolio.controlPlane.activeGrants.count == 3)
+        #expect(bridge.walletPortfolio.controlPlane.activeGrants.count == 4)
+        #expect(bridge.walletPortfolio.controlPlane.verifiedEmailCredentials.count == 1)
+        #expect(bridge.walletPortfolio.controlPlane.activeAgentIdentityCredentials.count == 1)
         #expect(connectedWalletFeature?.status.contains("Native embedded wallet") == true)
-        #expect(connectedWalletFeature?.status.contains("3 active grants") == true)
+        #expect(connectedWalletFeature?.status.contains("4 active grants") == true)
+        #expect(connectedWalletFeature?.status.contains("1 verified email") == true)
+        #expect(connectedWalletFeature?.status.contains("1 agent identity") == true)
         #expect(fingerprint != nil)
         #expect(humanLabels.contains { label in
             fingerprint.map { label.contains($0) } ?? false

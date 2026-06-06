@@ -25,6 +25,7 @@ enum EUDICredentialKind: String, CaseIterable, Codable, Equatable {
     case qualifiedAttribute
     case pseudonym
     case paymentAuthentication
+    case verifiedEmail
 
     var title: String {
         switch self {
@@ -33,6 +34,7 @@ enum EUDICredentialKind: String, CaseIterable, Codable, Equatable {
         case .qualifiedAttribute: "Qualified attribute"
         case .pseudonym: "Pseudonym"
         case .paymentAuthentication: "Payment authentication"
+        case .verifiedEmail: "Verified email"
         }
     }
 }
@@ -66,7 +68,7 @@ struct EUDIWalletProfile: Codable, Equatable {
     static let dbrowserReference = EUDIWalletProfile(
         mode: .walletCompatibleClient,
         supportedProtocols: [.openID4VP, .openID4VCI, .iso18013Proximity, .sdJWTVC, .pseudonym],
-        supportedCredentialKinds: [.personIdentificationData, .mobileDrivingLicence, .qualifiedAttribute, .pseudonym, .paymentAuthentication],
+        supportedCredentialKinds: [.personIdentificationData, .mobileDrivingLicence, .qualifiedAttribute, .pseudonym, .paymentAuthentication, .verifiedEmail],
         usesKeychainStorage: true,
         usesSecureEnclave: true,
         certificationNote: "Wallet-compatible client and fixture support; not a certified EUDI wallet provider."
@@ -89,6 +91,371 @@ struct EUDICredentialDocument: Codable, Equatable, Identifiable {
 
     var isUsable: Bool {
         !isRevoked && expiresAt.map { $0 > Date() } != false
+    }
+}
+
+enum EUDIEmailCredentialSubjectType: String, Codable, Equatable {
+    case user
+    case agent
+}
+
+struct EUDIEmailCredentialHolderBinding: Codable, Equatable {
+    var holderDID: String
+    var holderPublicKeyJWK: [String: String]
+    var holderJWKThumbprint: String
+
+    enum CodingKeys: String, CodingKey {
+        case holderDID = "holder_did"
+        case holderPublicKeyJWK = "holder_public_key_jwk"
+        case holderJWKThumbprint = "holder_jwk_thumbprint"
+    }
+}
+
+struct EUDIEmailCredentialAgentBinding: Codable, Equatable {
+    var agentInstanceID: String?
+    var agentClass: String?
+    var operatorHint: String?
+
+    enum CodingKeys: String, CodingKey {
+        case agentInstanceID = "agent_instance_id"
+        case agentClass = "agent_class"
+        case operatorHint = "operator_hint"
+    }
+}
+
+struct EUDIEmailCredentialSubject: Codable, Equatable {
+    var id: String
+    var email: String
+    var emailNormalized: String
+    var emailVerified: Bool
+    var subjectType: EUDIEmailCredentialSubjectType
+    var holder: EUDIEmailCredentialHolderBinding
+    var agent: EUDIEmailCredentialAgentBinding?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case emailNormalized = "email_normalized"
+        case emailVerified = "email_verified"
+        case subjectType = "subject_type"
+        case holder
+        case agent
+    }
+}
+
+struct EUDIEmailCredentialEvidence: Codable, Equatable {
+    var method: String
+    var challengeID: String?
+    var nonceHash: String?
+    var emailHash: String?
+    var verifiedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case method
+        case challengeID = "challenge_id"
+        case nonceHash = "nonce_hash"
+        case emailHash = "email_hash"
+        case verifiedAt = "verified_at"
+    }
+
+    init(method: String, challengeID: String? = nil, nonceHash: String? = nil, emailHash: String? = nil, verifiedAt: Date? = nil) {
+        self.method = method
+        self.challengeID = challengeID
+        self.nonceHash = nonceHash
+        self.emailHash = emailHash
+        self.verifiedAt = verifiedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        method = try container.decode(String.self, forKey: .method)
+        challengeID = try container.decodeIfPresent(String.self, forKey: .challengeID)
+        nonceHash = try container.decodeIfPresent(String.self, forKey: .nonceHash)
+        emailHash = try container.decodeIfPresent(String.self, forKey: .emailHash)
+        if let verifiedAtString = try container.decodeIfPresent(String.self, forKey: .verifiedAt) {
+            verifiedAt = EUDIEmailCredentialDateCoding.date(from: verifiedAtString)
+        } else {
+            verifiedAt = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(method, forKey: .method)
+        try container.encodeIfPresent(challengeID, forKey: .challengeID)
+        try container.encodeIfPresent(nonceHash, forKey: .nonceHash)
+        try container.encodeIfPresent(emailHash, forKey: .emailHash)
+        if let verifiedAt {
+            try container.encode(EUDIEmailCredentialDateCoding.string(from: verifiedAt), forKey: .verifiedAt)
+        }
+    }
+}
+
+struct EUDIEmailAddressCredential: Codable, Equatable, Identifiable {
+    let id: String
+    var context: [String]
+    var types: [String]
+    var issuer: String
+    var validFrom: Date
+    var validUntil: Date
+    var credentialSubject: EUDIEmailCredentialSubject
+    var evidence: [EUDIEmailCredentialEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case context = "@context"
+        case id
+        case types = "type"
+        case issuer
+        case validFrom
+        case validUntil
+        case credentialSubject
+        case evidence
+    }
+
+    init(
+        id: String,
+        context: [String],
+        types: [String],
+        issuer: String,
+        validFrom: Date,
+        validUntil: Date,
+        credentialSubject: EUDIEmailCredentialSubject,
+        evidence: [EUDIEmailCredentialEvidence]
+    ) {
+        self.id = id
+        self.context = context
+        self.types = types
+        self.issuer = issuer
+        self.validFrom = validFrom
+        self.validUntil = validUntil
+        self.credentialSubject = credentialSubject
+        self.evidence = evidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        context = try container.decode([String].self, forKey: .context)
+        types = try container.decode([String].self, forKey: .types)
+        issuer = try container.decode(String.self, forKey: .issuer)
+        let validFromString = try container.decode(String.self, forKey: .validFrom)
+        let validUntilString = try container.decode(String.self, forKey: .validUntil)
+        guard let decodedValidFrom = EUDIEmailCredentialDateCoding.date(from: validFromString),
+              let decodedValidUntil = EUDIEmailCredentialDateCoding.date(from: validUntilString) else {
+            throw DecodingError.dataCorruptedError(forKey: .validUntil, in: container, debugDescription: "Email credential dates must be ISO 8601 strings.")
+        }
+        validFrom = decodedValidFrom
+        validUntil = decodedValidUntil
+        credentialSubject = try container.decode(EUDIEmailCredentialSubject.self, forKey: .credentialSubject)
+        evidence = try container.decodeIfPresent([EUDIEmailCredentialEvidence].self, forKey: .evidence) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(context, forKey: .context)
+        try container.encode(id, forKey: .id)
+        try container.encode(types, forKey: .types)
+        try container.encode(issuer, forKey: .issuer)
+        try container.encode(EUDIEmailCredentialDateCoding.string(from: validFrom), forKey: .validFrom)
+        try container.encode(EUDIEmailCredentialDateCoding.string(from: validUntil), forKey: .validUntil)
+        try container.encode(credentialSubject, forKey: .credentialSubject)
+        if !evidence.isEmpty {
+            try container.encode(evidence, forKey: .evidence)
+        }
+    }
+
+    var credentialHash: String {
+        AgenticPaymentHash.stable([
+            id,
+            issuer,
+            credentialSubject.id,
+            credentialSubject.emailNormalized,
+            credentialSubject.holder.holderDID,
+            credentialSubject.holder.holderJWKThumbprint
+        ])
+    }
+}
+
+private enum EUDIEmailCredentialDateCoding {
+    private static let internetFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static func date(from string: String) -> Date? {
+        internetFormatter.date(from: string) ?? fractionalFormatter.date(from: string)
+    }
+
+    static func string(from date: Date) -> String {
+        internetFormatter.string(from: date)
+    }
+}
+
+enum EUDIEmailCredentialImportStatus: String, Codable, Equatable {
+    case imported
+    case unsupportedFormat
+    case invalidCredential
+    case unverifiedEmail
+    case nonHumanSubject
+    case expired
+}
+
+struct EUDIEmailCredentialImportResult: Equatable {
+    var status: EUDIEmailCredentialImportStatus
+    var sourceCredential: EUDIEmailAddressCredential?
+    var document: EUDICredentialDocument?
+    var reasons: [String]
+
+    var isImported: Bool {
+        status == .imported && document != nil
+    }
+}
+
+enum EUDIEmailCredentialImportError: Error, Equatable {
+    case compactJWTRequiresVerification
+    case invalidJSONEnvelope
+    case missingCredentialObject
+    case invalidCredentialJSON(String)
+}
+
+enum EUDIEmailCredentialEnvelopeDecoder {
+    static func decodeCredential(from data: Data) throws -> EUDIEmailAddressCredential {
+        let trimmed = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.hasPrefix("{") && trimmed.split(separator: ".").count == 3 {
+            throw EUDIEmailCredentialImportError.compactJWTRequiresVerification
+        }
+
+        let jsonObject: Any
+        do {
+            jsonObject = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw EUDIEmailCredentialImportError.invalidCredentialJSON(error.localizedDescription)
+        }
+        guard let envelope = jsonObject as? [String: Any] else {
+            throw EUDIEmailCredentialImportError.invalidJSONEnvelope
+        }
+
+        if envelope["credentialSubject"] is [String: Any] {
+            return try decodeCredentialObject(data)
+        }
+        if let credentialObject = envelope["credential"] as? [String: Any] {
+            let credentialData = try JSONSerialization.data(withJSONObject: credentialObject, options: [])
+            return try decodeCredentialObject(credentialData)
+        }
+        if let vcJWT = envelope["vc_jwt"] as? String, !vcJWT.isEmpty {
+            throw EUDIEmailCredentialImportError.compactJWTRequiresVerification
+        }
+
+        throw EUDIEmailCredentialImportError.missingCredentialObject
+    }
+
+    private static func decodeCredentialObject(_ data: Data) throws -> EUDIEmailAddressCredential {
+        do {
+            return try JSONDecoder().decode(EUDIEmailAddressCredential.self, from: data)
+        } catch {
+            throw EUDIEmailCredentialImportError.invalidCredentialJSON(error.localizedDescription)
+        }
+    }
+}
+
+enum EUDIEmailCredentialImporter {
+    static func importHumanVerifiedEmail(from data: Data, now: Date = Date()) -> EUDIEmailCredentialImportResult {
+        do {
+            return importHumanVerifiedEmail(try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: data), now: now)
+        } catch EUDIEmailCredentialImportError.compactJWTRequiresVerification {
+            return EUDIEmailCredentialImportResult(
+                status: .unsupportedFormat,
+                sourceCredential: nil,
+                document: nil,
+                reasons: ["Compact VC-JWT input requires issuer metadata and JWKS verification before import."]
+            )
+        } catch {
+            return EUDIEmailCredentialImportResult(
+                status: .invalidCredential,
+                sourceCredential: nil,
+                document: nil,
+                reasons: ["Email credential JSON could not be decoded: \(error.localizedDescription)"]
+            )
+        }
+    }
+
+    static func importHumanVerifiedEmail(_ credential: EUDIEmailAddressCredential, now: Date = Date()) -> EUDIEmailCredentialImportResult {
+        guard credential.types.contains("EmailAddressCredential") else {
+            return EUDIEmailCredentialImportResult(
+                status: .invalidCredential,
+                sourceCredential: credential,
+                document: nil,
+                reasons: ["Credential type does not include EmailAddressCredential."]
+            )
+        }
+        guard credential.credentialSubject.emailVerified else {
+            return EUDIEmailCredentialImportResult(
+                status: .unverifiedEmail,
+                sourceCredential: credential,
+                document: nil,
+                reasons: ["Email credential is not marked as verified."]
+            )
+        }
+        guard credential.credentialSubject.subjectType == .user else {
+            return EUDIEmailCredentialImportResult(
+                status: .nonHumanSubject,
+                sourceCredential: credential,
+                document: nil,
+                reasons: ["Human wallet import requires subject_type=user."]
+            )
+        }
+        guard credential.validUntil > now else {
+            return EUDIEmailCredentialImportResult(
+                status: .expired,
+                sourceCredential: credential,
+                document: nil,
+                reasons: ["Email credential is expired."]
+            )
+        }
+        guard credential.credentialSubject.id == credential.credentialSubject.holder.holderDID else {
+            return EUDIEmailCredentialImportResult(
+                status: .invalidCredential,
+                sourceCredential: credential,
+                document: nil,
+                reasons: ["Credential subject is not bound to the holder DID."]
+            )
+        }
+
+        let subject = credential.credentialSubject
+        let document = EUDICredentialDocument(
+            id: credential.id,
+            kind: .verifiedEmail,
+            issuer: credential.issuer,
+            subjectHint: subject.emailNormalized,
+            claims: [
+                "email": subject.email,
+                "email_normalized": subject.emailNormalized,
+                "email_verified": subject.emailVerified ? "true" : "false",
+                "holder_did": subject.holder.holderDID,
+                "holder_jwk_thumbprint": subject.holder.holderJWKThumbprint,
+                "source_credential_id": credential.id,
+                "source_credential_hash": credential.credentialHash,
+                "subject_type": subject.subjectType.rawValue
+            ],
+            issuedAt: credential.validFrom,
+            expiresAt: credential.validUntil,
+            isRevoked: false
+        )
+
+        return EUDIEmailCredentialImportResult(
+            status: .imported,
+            sourceCredential: credential,
+            document: document,
+            reasons: ["Verified email credential imported into the human identity vault."]
+        )
     }
 }
 
@@ -862,10 +1229,290 @@ struct WalletReceipt: Codable, Equatable, Identifiable {
     }
 }
 
+enum EUDIAgentIdentityIssuanceState: String, Codable, Equatable {
+    case issued
+    case denied
+    case expired
+    case revoked
+    case missingHumanCredential
+    case missingAgentPrincipal
+    case rootAccessDenied
+}
+
+struct EUDIAgentIdentityIssuanceRequest: Equatable, Identifiable {
+    let id: String
+    var humanPrincipalID: String
+    var agentPrincipalID: String
+    var sourceCredentialID: String
+    var requestedClaims: [String]
+    var relyingPartyID: String?
+    var relyingPartyName: String?
+    var protocolName: AgenticPaymentProtocol?
+    var purpose: String
+    var expiresAt: Date
+    var requiresRootCredentialAccess: Bool
+
+    var requestHash: String {
+        AgenticPaymentHash.stable([
+            id,
+            humanPrincipalID,
+            agentPrincipalID,
+            sourceCredentialID,
+            requestedClaims.sorted().joined(separator: "|"),
+            relyingPartyID ?? "",
+            protocolName?.rawValue ?? "",
+            purpose
+        ])
+    }
+}
+
+struct EUDIAgentIdentityCredential: Codable, Equatable, Identifiable {
+    let id: String
+    var agentPrincipalID: String
+    var authorityPrincipalID: String
+    var sourceCredentialID: String
+    var sourceCredentialHash: String
+    var issuer: String
+    var subjectDID: String
+    var claims: [String: String]
+    var protocolName: AgenticPaymentProtocol?
+    var relyingPartyID: String?
+    var grantID: String
+    var issuedAt: Date
+    var expiresAt: Date
+    var receiptID: String
+    var exposesRootCredential: Bool
+
+    var isUsable: Bool {
+        expiresAt > Date() && !exposesRootCredential
+    }
+
+    var claimNames: [String] {
+        claims.keys.sorted()
+    }
+}
+
+struct EUDIAgentIdentityIssuanceResult: Equatable {
+    var state: EUDIAgentIdentityIssuanceState
+    var decision: WalletControlPlaneDecision
+    var credential: EUDIAgentIdentityCredential?
+    var receipt: WalletReceipt
+    var reasons: [String]
+
+    var isIssued: Bool {
+        state == .issued && credential != nil
+    }
+}
+
+enum EUDIWalletIdentityIssuer {
+    static func issueAgentIdentity(
+        _ request: EUDIAgentIdentityIssuanceRequest,
+        snapshot: WalletControlPlaneSnapshot,
+        now: Date = Date()
+    ) -> EUDIAgentIdentityIssuanceResult {
+        guard let humanPrincipal = snapshot.principal(id: request.humanPrincipalID),
+              humanPrincipal.kind == .human,
+              humanPrincipal.isRootAuthority else {
+            return deniedResult(
+                state: .missingHumanCredential,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Human root wallet principal is missing."]),
+                reason: "Human root wallet principal is missing.",
+                now: now
+            )
+        }
+        guard let agentPrincipal = snapshot.principal(id: request.agentPrincipalID),
+              agentPrincipal.kind == .agent else {
+            return deniedResult(
+                state: .missingAgentPrincipal,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Agent wallet principal is missing."]),
+                reason: "Agent wallet principal is missing.",
+                now: now
+            )
+        }
+        guard !request.requiresRootCredentialAccess else {
+            return deniedResult(
+                state: .rootAccessDenied,
+                request: request,
+                decision: WalletControlPlaneDecision(
+                    kind: .deny,
+                    grantID: nil,
+                    reasons: ["Agent identity issuance cannot expose the human root credential."]
+                ),
+                reason: "Agent identity issuance cannot expose the human root credential.",
+                now: now
+            )
+        }
+        guard request.expiresAt > now else {
+            return deniedResult(
+                state: .expired,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .expired, grantID: nil, reasons: ["Agent identity issuance request is expired."]),
+                reason: "Agent identity issuance request is expired.",
+                now: now
+            )
+        }
+        guard let sourceCredential = snapshot.humanIdentityCredentials.first(where: { $0.id == request.sourceCredentialID && $0.kind == .verifiedEmail && $0.isUsable }) else {
+            return deniedResult(
+                state: .missingHumanCredential,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Usable verified email credential is missing from the human identity vault."]),
+                reason: "Usable verified email credential is missing from the human identity vault.",
+                now: now
+            )
+        }
+
+        let requestedClaimSet = Set(request.requestedClaims)
+        let availableClaimSet = Set(sourceCredential.claims.keys)
+        guard !requestedClaimSet.isEmpty, requestedClaimSet.isSubset(of: availableClaimSet) else {
+            return deniedResult(
+                state: .denied,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Requested identity claims are not available in the source credential."]),
+                reason: "Requested identity claims are not available in the source credential.",
+                now: now
+            )
+        }
+
+        let capabilityRequest = WalletCapabilityRequest(
+            principalID: agentPrincipal.id,
+            capability: .identityPresentation,
+            protocolName: request.protocolName,
+            merchantID: request.relyingPartyID,
+            amountMinorUnits: nil,
+            requestedIdentityClaims: request.requestedClaims,
+            requiresRootCredentialAccess: false
+        )
+        let decision = WalletControlPlanePolicyEngine.evaluate(capabilityRequest, snapshot: snapshot, now: now)
+        guard decision.isAllowed, let grantID = decision.grantID else {
+            return deniedResult(
+                state: state(for: decision),
+                request: request,
+                decision: decision,
+                reason: decision.reasons.joined(separator: " "),
+                now: now
+            )
+        }
+
+        let disclosedClaims = sourceCredential.claims.filter { requestedClaimSet.contains($0.key) }
+        let sourceHash = sourceCredential.claims["source_credential_hash"] ?? AgenticPaymentHash.stable([
+            sourceCredential.id,
+            sourceCredential.issuer,
+            sourceCredential.subjectHint
+        ])
+        let receiptID = "wallet-receipt-agent-identity-\(request.id)"
+        let credential = EUDIAgentIdentityCredential(
+            id: "agent-identity-\(request.id)",
+            agentPrincipalID: agentPrincipal.id,
+            authorityPrincipalID: humanPrincipal.id,
+            sourceCredentialID: sourceCredential.id,
+            sourceCredentialHash: sourceHash,
+            issuer: "dBrowser delegated identity issuer",
+            subjectDID: agentPrincipal.agentProfile?.agentDID ?? agentPrincipal.id,
+            claims: disclosedClaims,
+            protocolName: request.protocolName,
+            relyingPartyID: request.relyingPartyID,
+            grantID: grantID,
+            issuedAt: now,
+            expiresAt: min(request.expiresAt, sourceCredential.expiresAt ?? request.expiresAt),
+            receiptID: receiptID,
+            exposesRootCredential: false
+        )
+        let receipt = WalletReceipt(
+            id: receiptID,
+            kind: .identityDisclosure,
+            status: .approved,
+            principalID: agentPrincipal.id,
+            authorityPrincipalID: humanPrincipal.id,
+            grantID: grantID,
+            protocolName: request.protocolName,
+            merchantID: request.relyingPartyID,
+            amountMinorUnits: nil,
+            currencyOrAsset: nil,
+            selectiveDisclosureClaims: credential.claimNames,
+            bindingHashes: [sourceHash, request.requestHash],
+            createdAt: now,
+            summary: "Agent received a delegated verified-email identity credential, not the human email VC.",
+            storesRawPaymentCredential: false,
+            exposesRootCredential: false
+        )
+        return EUDIAgentIdentityIssuanceResult(
+            state: .issued,
+            decision: decision,
+            credential: credential,
+            receipt: receipt,
+            reasons: ["Delegated identity credential issued from a human-approved grant."]
+        )
+    }
+
+    private static func state(for decision: WalletControlPlaneDecision) -> EUDIAgentIdentityIssuanceState {
+        switch decision.kind {
+        case .allow:
+            .issued
+        case .expired:
+            .expired
+        case .revoked:
+            .revoked
+        case .deny, .overBudget:
+            .denied
+        }
+    }
+
+    private static func deniedResult(
+        state: EUDIAgentIdentityIssuanceState,
+        request: EUDIAgentIdentityIssuanceRequest,
+        decision: WalletControlPlaneDecision,
+        reason: String,
+        now: Date
+    ) -> EUDIAgentIdentityIssuanceResult {
+        let receipt = WalletReceipt(
+            id: "wallet-receipt-agent-identity-\(request.id)",
+            kind: .identityDisclosure,
+            status: receiptStatus(for: state),
+            principalID: request.agentPrincipalID,
+            authorityPrincipalID: request.humanPrincipalID,
+            grantID: decision.grantID,
+            protocolName: request.protocolName,
+            merchantID: request.relyingPartyID,
+            amountMinorUnits: nil,
+            currencyOrAsset: nil,
+            selectiveDisclosureClaims: request.requestedClaims.sorted(),
+            bindingHashes: [request.requestHash],
+            createdAt: now,
+            summary: reason,
+            storesRawPaymentCredential: false,
+            exposesRootCredential: false
+        )
+        return EUDIAgentIdentityIssuanceResult(
+            state: state,
+            decision: decision,
+            credential: nil,
+            receipt: receipt,
+            reasons: [reason]
+        )
+    }
+
+    private static func receiptStatus(for state: EUDIAgentIdentityIssuanceState) -> WalletReceiptStatus {
+        switch state {
+        case .issued:
+            .approved
+        case .expired:
+            .expired
+        case .revoked:
+            .revoked
+        case .denied, .missingHumanCredential, .missingAgentPrincipal, .rootAccessDenied:
+            .denied
+        }
+    }
+}
+
 struct WalletControlPlaneSnapshot: Codable, Equatable {
     var principals: [WalletPrincipal]
     var grants: [CapabilityGrant]
     var receipts: [WalletReceipt]
+    var humanIdentityCredentials: [EUDICredentialDocument]
+    var agentIdentityCredentials: [EUDIAgentIdentityCredential]
 
     var humanPrincipals: [WalletPrincipal] {
         principals.filter { $0.kind == .human }
@@ -879,8 +1526,18 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
         grants.filter { $0.isActive() }
     }
 
+    var verifiedEmailCredentials: [EUDICredentialDocument] {
+        humanIdentityCredentials.filter { $0.kind == .verifiedEmail && $0.isUsable }
+    }
+
+    var activeAgentIdentityCredentials: [EUDIAgentIdentityCredential] {
+        agentIdentityCredentials.filter(\.isUsable)
+    }
+
     var policySummary: String {
-        "\(humanPrincipals.count) human, \(agentPrincipals.count) agent, \(activeGrants.count) active grant\(activeGrants.count == 1 ? "" : "s")"
+        let emailCount = verifiedEmailCredentials.count
+        let agentIdentityCount = activeAgentIdentityCredentials.count
+        return "\(humanPrincipals.count) human, \(agentPrincipals.count) agent, \(activeGrants.count) active grant\(activeGrants.count == 1 ? "" : "s"), \(emailCount) verified email\(emailCount == 1 ? "" : "s"), \(agentIdentityCount) agent identit\(agentIdentityCount == 1 ? "y" : "ies")"
     }
 
     func principal(id: String) -> WalletPrincipal? {
@@ -915,6 +1572,32 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
         let humanID = "principal-human-root"
         let agentID = "principal-agent-travel"
         let fingerprintLabel = rootWalletFingerprint.map { "Embedded wallet fingerprint \($0)" }
+        let verifiedEmailCredentialID = "https://verifiedemail.showntell.dev/credentials/email/human-dbrowser-fixture"
+        let verifiedEmailSourceHash = AgenticPaymentHash.stable([
+            verifiedEmailCredentialID,
+            "https://verifiedemail.showntell.dev",
+            "johan.sellstrom@iproov.com",
+            "did:dbrowser:human:johan"
+        ])
+        let verifiedEmailDocument = EUDICredentialDocument(
+            id: verifiedEmailCredentialID,
+            kind: .verifiedEmail,
+            issuer: "https://verifiedemail.showntell.dev",
+            subjectHint: "johan.sellstrom@iproov.com",
+            claims: [
+                "email": "johan.sellstrom@iproov.com",
+                "email_normalized": "johan.sellstrom@iproov.com",
+                "email_verified": "true",
+                "holder_did": "did:dbrowser:human:johan",
+                "holder_jwk_thumbprint": "human-email-jwk-thumbprint",
+                "source_credential_id": verifiedEmailCredentialID,
+                "source_credential_hash": verifiedEmailSourceHash,
+                "subject_type": "user"
+            ],
+            issuedAt: issuedAt,
+            expiresAt: expiresAt,
+            isRevoked: false
+        )
         let human = WalletPrincipal(
             id: humanID,
             kind: .human,
@@ -925,7 +1608,8 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
             attestationLabels: [
                 "EUDI wallet-compatible client",
                 "Root payment instruments stay tokenized",
-                "Full crypto recovery retained by user"
+                "Full crypto recovery retained by user",
+                "Verified email from cliwallet-compatible issuer"
             ] + [fingerprintLabel].compactMap { $0 }
         )
         let agentProfile = AgentWalletProfile(
@@ -971,6 +1655,25 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
             expiresAt: expiresAt,
             revokedAt: nil,
             approvalLabel: "Use age-over-18 proof at merchant.example"
+        )
+        let emailIdentityGrant = CapabilityGrant(
+            id: "grant-agent-verified-email",
+            authorityPrincipalID: humanID,
+            principalID: agentID,
+            capability: .identityPresentation,
+            budgetMinorUnits: nil,
+            spentMinorUnits: 0,
+            currencyOrAsset: nil,
+            merchantAllowlist: ["dbrowser.local"],
+            protocolAllowlist: [.manualApproval],
+            chainAllowlist: [],
+            identityClaimAllowlist: ["email", "email_verified"],
+            sessionKeyReference: nil,
+            mandateReference: "human-email-vc-selective-agent-identity",
+            issuedAt: issuedAt,
+            expiresAt: expiresAt,
+            revokedAt: nil,
+            approvalLabel: "Issue verified email identity to the travel agent"
         )
         let paymentGrant = CapabilityGrant(
             id: "grant-merchant-payment",
@@ -1049,11 +1752,36 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
             )
         ]
 
-        return WalletControlPlaneSnapshot(
+        var snapshot = WalletControlPlaneSnapshot(
             principals: [human, agent],
-            grants: [identityGrant, paymentGrant, cryptoGrant],
-            receipts: receipts
+            grants: [identityGrant, emailIdentityGrant, paymentGrant, cryptoGrant],
+            receipts: receipts,
+            humanIdentityCredentials: [verifiedEmailDocument],
+            agentIdentityCredentials: []
         )
+        let issuanceRequest = EUDIAgentIdentityIssuanceRequest(
+            id: "verified-email-travel-agent",
+            humanPrincipalID: humanID,
+            agentPrincipalID: agentID,
+            sourceCredentialID: verifiedEmailCredentialID,
+            requestedClaims: ["email", "email_verified"],
+            relyingPartyID: "dbrowser.local",
+            relyingPartyName: "dBrowser Wallet Control Plane",
+            protocolName: .manualApproval,
+            purpose: "Agent identity bootstrap",
+            expiresAt: expiresAt,
+            requiresRootCredentialAccess: false
+        )
+        let issuanceResult = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            issuanceRequest,
+            snapshot: snapshot,
+            now: issuedAt
+        )
+        if let credential = issuanceResult.credential {
+            snapshot.agentIdentityCredentials.append(credential)
+        }
+        snapshot.receipts.append(issuanceResult.receipt)
+        return snapshot
     }
 }
 
@@ -1287,6 +2015,95 @@ enum AgenticPaymentFixtures {
             transactionDataHash: "txn-age-hash",
             expiresAt: now.addingTimeInterval(600)
         )
+    }
+
+    static var cliwalletVerifiedEmailCredentialJSON: Data {
+        """
+        {
+          "@context": [
+            "https://www.w3.org/ns/credentials/v2",
+            "https://schemas.wauth.dev/contexts/email-address-credential-v0.1.jsonld"
+          ],
+          "id": "https://verifiedemail.showntell.dev/credentials/email/human-test",
+          "type": ["VerifiableCredential", "EmailAddressCredential"],
+          "issuer": "https://verifiedemail.showntell.dev",
+          "validFrom": "2026-01-01T00:00:00Z",
+          "validUntil": "2100-01-01T00:00:00Z",
+          "credentialSubject": {
+            "id": "did:key:z6MkiHumanWallet",
+            "email": "johan.sellstrom@iproov.com",
+            "email_normalized": "johan.sellstrom@iproov.com",
+            "email_verified": true,
+            "subject_type": "user",
+            "holder": {
+              "holder_did": "did:key:z6MkiHumanWallet",
+              "holder_public_key_jwk": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "human-email-public-key",
+                "kid": "human-email-key"
+              },
+              "holder_jwk_thumbprint": "human-email-thumbprint"
+            }
+          },
+          "evidence": [
+            {
+              "method": "email_code_challenge",
+              "challenge_id": "01234567-89ab-cdef-0123-456789abcdef",
+              "nonce_hash": "sha256:noncehash",
+              "email_hash": "sha256:emailhash",
+              "verified_at": "2026-01-01T00:00:00Z"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+    }
+
+    static var cliwalletVerifiedEmailResponseJSON: Data {
+        """
+        {
+          "credential_id": "https://verifiedemail.showntell.dev/credentials/email/human-test",
+          "format": "vc+json",
+          "vc_jwt": null,
+          "credential": {
+            "@context": [
+              "https://www.w3.org/ns/credentials/v2",
+              "https://schemas.wauth.dev/contexts/email-address-credential-v0.1.jsonld"
+            ],
+            "id": "https://verifiedemail.showntell.dev/credentials/email/human-test",
+            "type": ["VerifiableCredential", "EmailAddressCredential"],
+            "issuer": "https://verifiedemail.showntell.dev",
+            "validFrom": "2026-01-01T00:00:00Z",
+            "validUntil": "2100-01-01T00:00:00Z",
+            "credentialSubject": {
+              "id": "did:key:z6MkiHumanWallet",
+              "email": "johan.sellstrom@iproov.com",
+              "email_normalized": "johan.sellstrom@iproov.com",
+              "email_verified": true,
+              "subject_type": "user",
+              "holder": {
+                "holder_did": "did:key:z6MkiHumanWallet",
+                "holder_public_key_jwk": {
+                  "kty": "OKP",
+                  "crv": "Ed25519",
+                  "x": "human-email-public-key",
+                  "kid": "human-email-key"
+                },
+                "holder_jwk_thumbprint": "human-email-thumbprint"
+              }
+            },
+            "evidence": [
+              {
+                "method": "email_code_challenge",
+                "challenge_id": "01234567-89ab-cdef-0123-456789abcdef",
+                "nonce_hash": "sha256:noncehash",
+                "email_hash": "sha256:emailhash",
+                "verified_at": "2026-01-01T00:00:00Z"
+              }
+            ]
+          }
+        }
+        """.data(using: .utf8)!
     }
 
     static var visaRequest: VisaTrustedAgentRequest {

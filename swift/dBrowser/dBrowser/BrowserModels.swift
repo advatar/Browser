@@ -481,9 +481,9 @@ struct BrowserAdvantageScorecard: Equatable {
                 category: .identityPayments,
                 title: "EUDI identity and agentic payments",
                 strawberryBaseline: "Strawberry public docs do not claim EUDI Wallet compatibility or agentic payment protocol receipts.",
-                dBrowserPosition: "dBrowser now models EUDI credential presentation, Visa Trusted Agent Protocol verification, ACP checkout, AP2 mandates, x402 requirements, Notabene TAP transfer authorization, recurring policy, and local payment receipts.",
+                dBrowserPosition: "dBrowser now models EUDI credential presentation, verified email import, delegated agent identity issuance, Visa Trusted Agent Protocol verification, ACP checkout, AP2 mandates, x402 requirements, Notabene TAP transfer authorization, recurring policy, and local payment receipts.",
                 status: .exceeds,
-                evidence: ["EUDIWalletProfile", "VisaTrustedAgentVerifier", "ACPCheckoutSession", "AP2Mandate", "X402PaymentRequirement", "NotabeneTransferRequest", "AgenticPaymentReceipt"],
+                evidence: ["EUDIWalletProfile", "EUDIEmailCredentialImporter", "EUDIWalletIdentityIssuer", "VisaTrustedAgentVerifier", "ACPCheckoutSession", "AP2Mandate", "X402PaymentRequirement", "NotabeneTransferRequest", "AgenticPaymentReceipt"],
                 action: BrowserAdvantageAction(
                     id: "identity-payment-policy",
                     title: "Review payments",

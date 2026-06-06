@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## EUDI Agent Identity Issuance And Verified Email
+
+- [x] Assess the current Swift EUDI wallet/control-plane foundation and the local `cliwallet` verified email VC format.
+- [x] Create GitHub issue for completing EUDI agent identity issuance and verified email credential import (#141).
+- [x] Add Swift models for importing `EmailAddressCredential` verified email VCs into the human wallet.
+- [x] Add scoped agent identity issuance so child agent principals receive derived identity credentials and receipts, not root human credentials.
+- [x] Surface verified email and delegated agent identity state in the wallet control-plane UI.
+- [x] Add focused Swift unit tests for email VC import, successful delegated agent identity issuance, missing-grant denial, revocation denial, and runtime/UI state.
+- [x] Verify focused Swift tests, hygiene, and the macOS Swift/Xcode build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-eudi-agent-identity-tests -only-testing:dBrowserTests/eudiEmailCredentialImporterAcceptsCliwalletVerifiedEmailForHumanWallet -only-testing:dBrowserTests/eudiWalletIdentityIssuerIssuesScopedVerifiedEmailToAgent -only-testing:dBrowserTests/eudiWalletIdentityIssuerDeniesMissingOrRevokedVerifiedEmailGrant -only-testing:dBrowserTests/walletControlPlaneSurfacesVerifiedEmailAndAgentIdentityCredentials -only-testing:dBrowserTests/runtimeBridgeSurfacesWalletControlPlanePrincipalsAndGrants` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-eudi-agent-identity-build` passed.
+- `git diff --check -- STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md swift/dBrowser/dBrowser/AgenticPayments.swift swift/dBrowser/dBrowser/BrowserModels.swift swift/dBrowser/dBrowser/ContentView.swift swift/dBrowser/dBrowserTests/dBrowserTests.swift || true` reported only existing author-name comments in Swift files.
+
 ## Unified Wallet Control Plane And Agent Principals
 
 - [x] Assess the current Swift wallet, EUDI, and agentic payments foundation.

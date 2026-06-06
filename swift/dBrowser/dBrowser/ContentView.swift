@@ -3051,6 +3051,7 @@ private struct WalletExplorerPanelView: View {
 private struct AgenticPaymentsStatusView: View {
     private let eudiProfile = EUDIWalletProfile.dbrowserReference
     private let protocolStates = [
+        ("Verified email", "cliwallet EmailAddressCredential import"),
         ("Visa TAP", "Trusted-agent verification"),
         ("ACP", "Checkout and token references"),
         ("AP2", "Intent/cart/payment mandates"),
@@ -3112,6 +3113,28 @@ private struct WalletControlPlaneView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 8)], spacing: 8) {
                 ForEach(snapshot.principals) { principal in
                     WalletPrincipalCard(principal: principal, snapshot: snapshot)
+                }
+            }
+
+            if !snapshot.humanIdentityCredentials.isEmpty {
+                Text("Human Identity Credentials")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], spacing: 8) {
+                    ForEach(snapshot.humanIdentityCredentials) { credential in
+                        WalletIdentityCredentialCard(document: credential)
+                    }
+                }
+            }
+
+            if !snapshot.agentIdentityCredentials.isEmpty {
+                Text("Agent Identity Credentials")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 8)], spacing: 8) {
+                    ForEach(snapshot.agentIdentityCredentials) { credential in
+                        WalletAgentIdentityCredentialCard(credential: credential, snapshot: snapshot)
+                    }
                 }
             }
 
@@ -3180,6 +3203,89 @@ private struct WalletPrincipalCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WalletIdentityCredentialCard: View {
+    let document: EUDICredentialDocument
+
+    private var claimLabels: [String] {
+        let preferred = ["email", "email_verified", "email_normalized"]
+        let preferredLabels = preferred.compactMap { key in
+            document.claims[key].map { "\(key):\($0)" }
+        }
+        let remaining = document.claims.keys
+            .filter { !preferred.contains($0) }
+            .sorted()
+            .prefix(2)
+            .map { "claim:\($0)" }
+        return preferredLabels + remaining
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(document.kind.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(document.isUsable ? "Usable" : "Blocked")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(document.isUsable ? Color.green : Color.secondary)
+            }
+            Text(document.subjectHint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(document.issuer)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            FlowPillRow(items: claimLabels, tint: .blue)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct WalletAgentIdentityCredentialCard: View {
+    let credential: EUDIAgentIdentityCredential
+    let snapshot: WalletControlPlaneSnapshot
+
+    private var agentName: String {
+        snapshot.principal(id: credential.agentPrincipalID)?.displayName ?? credential.agentPrincipalID
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Delegated identity")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(credential.isUsable ? "Issued" : "Blocked")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(credential.isUsable ? Color.green : Color.secondary)
+            }
+            Text(agentName)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text("Source \(credential.sourceCredentialID)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            FlowPillRow(items: credential.claimNames, tint: .purple)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 116, alignment: .topLeading)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
