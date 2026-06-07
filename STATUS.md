@@ -21,6 +21,23 @@
 
 ## Active Task
 
+## Web Eval Harness Copy Revert
+
+- [x] Confirm the parent repository still records the intended `web` submodule pointer.
+- [x] Identify the accidental eval-harness copy as nested `web` commit `8229164` (`sync`).
+- [x] Create GitHub issue for reverting the accidental `web` copy (#145).
+- [x] Revert the accidental nested `web` commit without force-pushing history.
+- [x] Verify focused web tests and hygiene locally; skip the web build per prior user direction because Lovable will handle it.
+- [x] Commit and push the repaired nested `web` repository and parent submodule pointer/status.
+
+Validation notes:
+
+- Web build intentionally deferred per prior user direction on 2026-06-07.
+- Nested `web` repository commit `273146b` reverts `8229164` and was pushed to `advatar/trustless-web-explorer`.
+- `git diff --stat 06c296f62064de7643bf6b03b30dfb5a73afdd95..HEAD` in `web` reported no tree diff after the revert.
+- `npm test` in `web` passed.
+- `rg -n "contextweaver|EvalHarness|prune-eval|mock-agent|public/images/prune_tree|src/pages/Docs|src/pages/Strategy" .` in `web` reported no copied eval-harness remnants.
+
 ## Web Placeholder Cleanup
 
 - [x] Re-scan the web app for user-visible placeholder, coming-soon, and demo copy.
