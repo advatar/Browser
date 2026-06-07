@@ -21,6 +21,26 @@
 
 ## Active Task
 
+## Web Placeholder Cleanup
+
+- [x] Re-scan the web app for user-visible placeholder, coming-soon, and demo copy.
+- [x] Create GitHub issue for fixing the remaining web placeholders (#144).
+- [x] Replace the hero blueprint coming-soon CTA with real navigation.
+- [x] Remove or rename the agent illustration placeholder marker and delete unused placeholder assets.
+- [x] Update demo wording to product/catalog wording and add tests preventing regressions.
+- [x] Verify focused web tests, scoped lint, and hygiene locally; skip the web build per prior user direction because Lovable will handle it.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `npm test` in `web` passed.
+- `npx eslint src/components/Hero.tsx src/components/AgentsSection.tsx src/components/SolutionSection.tsx src/components/CallToAction.tsx tests/a2ui-deployment-content.test.mjs` in `web` passed.
+- `git diff --check -- src/components/Hero.tsx src/components/AgentsSection.tsx src/components/SolutionSection.tsx src/components/CallToAction.tsx tests/a2ui-deployment-content.test.mjs public/placeholder.svg` in `web` passed.
+- `LC_ALL=C grep -n '[^ -~]' src/components/Hero.tsx src/components/AgentsSection.tsx src/components/SolutionSection.tsx src/components/CallToAction.tsx tests/a2ui-deployment-content.test.mjs || true` in `web` reported no non-ASCII matches.
+- Placeholder scan now reports only regression-test assertions and shadcn `placeholder:` CSS utility classes.
+- Web build intentionally deferred per prior user direction on 2026-06-07.
+- Nested `web` repository commit `06c296f` was pushed to `advatar/trustless-web-explorer`.
+
 ## Web Landing Page Subpage Navigation
 
 - [x] Assess the current web router, navigation, landing page composition, and existing capabilities/architecture pages.
