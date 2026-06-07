@@ -21,6 +21,25 @@
 
 ## Active Task
 
+## Web Landing Page Subpage Navigation
+
+- [x] Assess the current web router, navigation, landing page composition, and existing capabilities/architecture pages.
+- [x] Create GitHub issue for splitting the long landing page into logical subpages (#143).
+- [x] Restructure the landing page into a concise overview and move detailed feature surfaces to dedicated routes.
+- [x] Update desktop and mobile navigation so users can reach each logical subpage directly.
+- [x] Add or update focused web content tests for the route split and navigation.
+- [x] Verify focused web tests and hygiene locally; skip the web build per prior user direction because Lovable will handle it.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `npm test` in `web` passed.
+- `npx eslint src/App.tsx src/pages/Index.tsx src/pages/Capabilities.tsx src/pages/Architecture.tsx src/pages/Agents.tsx src/pages/Wallet.tsx src/pages/Protocols.tsx src/pages/Comparison.tsx src/components/Navbar.tsx src/components/MobileStickyBar.tsx src/components/Hero.tsx src/components/ExploreSurfacesSection.tsx` in `web` passed.
+- `git diff --check -- src/App.tsx src/pages/Index.tsx src/pages/Capabilities.tsx src/pages/Architecture.tsx src/pages/Agents.tsx src/pages/Wallet.tsx src/pages/Protocols.tsx src/pages/Comparison.tsx src/components/Navbar.tsx src/components/MobileStickyBar.tsx src/components/Hero.tsx src/components/ExploreSurfacesSection.tsx tests/a2ui-deployment-content.test.mjs` in `web` passed.
+- `LC_ALL=C grep -n '[^ -~]' src/App.tsx src/pages/Index.tsx src/pages/Capabilities.tsx src/pages/Architecture.tsx src/pages/Agents.tsx src/pages/Wallet.tsx src/pages/Protocols.tsx src/pages/Comparison.tsx src/components/Navbar.tsx src/components/MobileStickyBar.tsx src/components/Hero.tsx src/components/ExploreSurfacesSection.tsx tests/a2ui-deployment-content.test.mjs || true` in `web` reported no non-ASCII matches.
+- Web build intentionally deferred per prior user direction on 2026-06-07.
+- Nested `web` repository commit `9f6cae7` was pushed to `advatar/trustless-web-explorer`.
+
 ## Web Landing Page Feature Advertising
 
 - [x] Assess the current web landing page against the current Swift/browser, wallet, EUDI, payments, AFMarket, A2UI, memory, and workflow feature inventory.
