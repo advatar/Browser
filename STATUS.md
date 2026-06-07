@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## Web Landing Page Feature Advertising
+
+- [x] Assess the current web landing page against the current Swift/browser, wallet, EUDI, payments, AFMarket, A2UI, memory, and workflow feature inventory.
+- [x] Create GitHub issue for advertising the full dBrowser feature set on the landing page (#142).
+- [x] Refresh the landing page content so it describes and promotes the full product surface without collapsing human and agent wallet security domains.
+- [x] Add or update focused web content tests for the advertised feature inventory.
+- [x] Verify focused web tests and hygiene locally; skip the web build per user direction because Lovable will handle it.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `npm test` in `web` passed.
+- `git diff --check -- src/pages/Index.tsx src/components/Hero.tsx src/components/FeatureInventorySection.tsx src/components/WalletControlPlaneSection.tsx src/components/CallToAction.tsx tests/a2ui-deployment-content.test.mjs` in `web` passed.
+- `LC_ALL=C grep -n '[^ -~]' STATUS.md web/src/pages/Index.tsx web/src/components/Hero.tsx web/src/components/FeatureInventorySection.tsx web/src/components/WalletControlPlaneSection.tsx web/src/components/CallToAction.tsx web/tests/a2ui-deployment-content.test.mjs || true` reported no non-ASCII matches.
+- `npm run lint` in `web` still fails on pre-existing shadcn/Tailwind files not touched by this task: `src/components/ui/command.tsx`, `src/components/ui/textarea.tsx`, and `tailwind.config.ts`, plus existing fast-refresh warnings.
+- Web build intentionally deferred per user direction on 2026-06-07.
+- Nested `web` repository commit `e3525a5` was pushed to `advatar/trustless-web-explorer`.
+
 ## EUDI Agent Identity Issuance And Verified Email
 
 - [x] Assess the current Swift EUDI wallet/control-plane foundation and the local `cliwallet` verified email VC format.
