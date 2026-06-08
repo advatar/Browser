@@ -16,6 +16,20 @@ enum BundledLLMLoaderSupport: Equatable {
     }
 }
 
+/// Resolves the developer/managed locations where a bundled MLX model may live, without
+/// pinning an absolute per-machine path into the source. Candidate roots come from
+/// environment overrides first, then the conventional Broom checkout in the user's home
+/// directory, then the app's Application Support directory.
+enum BundledLLMWorkspace {
+    /// Conventional developer checkout root: `~/dev/advatar/Broom`.
+    static func defaultDeveloperRoot(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        homeDirectory
+            .appendingPathComponent("dev", isDirectory: true)
+            .appendingPathComponent("advatar", isDirectory: true)
+            .appendingPathComponent("Broom", isDirectory: true)
+    }
+}
+
 struct BundledLLMProfile: Equatable {
     let displayName: String
     let modelFamily: String
@@ -23,7 +37,9 @@ struct BundledLLMProfile: Equatable {
     let quantization: String
     let huggingFaceID: String
     let bundleResourceName: String
-    let localWorkspacePath: String
+    /// Path to the model directory relative to a workspace root, e.g.
+    /// `diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx`. Never an absolute machine path.
+    let localWorkspaceRelativePath: String
     let localDiskFootprintGB: Double
     let recommendedMinimumMemoryGB: Int
     let swiftPackageURL: String
@@ -38,6 +54,22 @@ struct BundledLLMProfile: Equatable {
     var swiftPackageSummary: String {
         "\(swiftPackageURL) @ \(swiftPackageMinimumVersion) (\(swiftPackageProducts.joined(separator: ", ")))"
     }
+
+    /// The model directory's leaf name, e.g. `gemma-4-e2b-it-4bit-mlx`.
+    var localWorkspaceModelDirectoryName: String {
+        (localWorkspaceRelativePath as NSString).lastPathComponent
+    }
+
+    /// Default resolved developer location for the model directory. This is derived from the
+    /// current user's home directory at call time rather than stored as an absolute string.
+    func localWorkspacePath(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
+        BundledLLMWorkspace.defaultDeveloperRoot(homeDirectory: homeDirectory)
+            .appendingPathComponent(localWorkspaceRelativePath)
+            .path
+    }
+
+    /// Convenience property using the live home directory.
+    var localWorkspacePath: String { localWorkspacePath() }
 
     var readinessSummary: String {
         switch loaderSupport {
@@ -55,7 +87,7 @@ struct BundledLLMProfile: Equatable {
         quantization: "4-bit MLX",
         huggingFaceID: "mlx-community/gemma-4-e2b-it-4bit",
         bundleResourceName: "Gemma4E2B4BitMLX",
-        localWorkspacePath: "/Users/johansellstrom/dev/advatar/Broom/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx",
+        localWorkspaceRelativePath: "diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx",
         localDiskFootprintGB: 3.4,
         recommendedMinimumMemoryGB: 8,
         swiftPackageURL: "https://github.com/ml-explore/mlx-swift-lm",
@@ -79,18 +111,67 @@ struct BundledLLMSelection: Equatable {
         bundle.url(forResource: profile.bundleResourceName, withExtension: nil)
     }
 
-    func localWorkspaceModelURL(fileManager: FileManager = .default) -> URL? {
-        let url = URL(fileURLWithPath: profile.localWorkspacePath, isDirectory: true)
+    /// Ordered candidate locations for the local model directory. Environment overrides take
+    /// precedence, then the conventional developer checkout, then the app's Application Support
+    /// directory. No absolute machine path is hard-coded in source.
+    func localWorkspaceCandidateURLs(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        fileManager: FileManager = .default
+    ) -> [URL] {
+        var candidates: [URL] = []
+
+        // 1. Explicit full path to the model directory.
+        if let explicit = environment["DBROWSER_MLX_MODEL_DIR"], !explicit.isEmpty {
+            candidates.append(URL(fileURLWithPath: explicit, isDirectory: true))
+        }
+
+        // 2. Workspace roots (env overrides, then the conventional Broom checkout) + relative path.
+        var workspaceRoots: [URL] = ["DBROWSER_MLX_WORKSPACE", "BROOM_WORKSPACE"]
+            .compactMap { environment[$0] }
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        workspaceRoots.append(BundledLLMWorkspace.defaultDeveloperRoot(homeDirectory: homeDirectory))
+        for root in workspaceRoots {
+            candidates.append(root.appendingPathComponent(profile.localWorkspaceRelativePath, isDirectory: true))
+        }
+
+        // 3. App-managed Application Support location.
+        if let appSupport = try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) {
+            candidates.append(
+                appSupport
+                    .appendingPathComponent("dBrowser", isDirectory: true)
+                    .appendingPathComponent("models", isDirectory: true)
+                    .appendingPathComponent(profile.localWorkspaceModelDirectoryName, isDirectory: true)
+            )
+        }
+
+        return candidates
+    }
+
+    func localWorkspaceModelURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        fileManager: FileManager = .default
+    ) -> URL? {
         let requiredFiles = [
             "config.json",
             "tokenizer.json",
             "model.safetensors"
         ]
 
-        guard requiredFiles.allSatisfy({ fileManager.fileExists(atPath: url.appendingPathComponent($0).path) }) else {
-            return nil
+        return localWorkspaceCandidateURLs(
+            environment: environment,
+            homeDirectory: homeDirectory,
+            fileManager: fileManager
+        ).first { url in
+            requiredFiles.allSatisfy { fileManager.fileExists(atPath: url.appendingPathComponent($0).path) }
         }
-        return url
     }
 
     func modelLocation(bundle: Bundle = .main, fileManager: FileManager = .default) -> BundledLLMModelLocation {

@@ -838,26 +838,54 @@ struct dBrowserTests {
 
     @Test func bundledLLMUsesLocalMLXArtifactWhenPresent() {
         let selection = BundledLLMSelection.recommended
-        let location = selection.modelLocation()
-
-        guard case .localDirectory(let url) = location else {
-            Issue.record("Expected the existing local Gemma 4 MLX model to be selected")
-            return
+        // The model directory is only present on a configured developer machine; off such a
+        // machine the resolver correctly falls back to Hugging Face. Both outcomes are valid.
+        switch selection.modelLocation() {
+        case .localDirectory(let url):
+            #expect(url.path.hasSuffix("/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
+        case .huggingFace(let id):
+            #expect(id == selection.profile.huggingFaceID)
         }
+    }
 
-        #expect(url.path.hasSuffix("/Broom/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
+    @Test func bundledLLMResolvesModelDirectoryFromEnvironmentOverride() throws {
+        let selection = BundledLLMSelection.recommended
+        let fileManager = FileManager.default
+        let modelDir = fileManager.temporaryDirectory
+            .appendingPathComponent("dbrowser-mlx-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: modelDir) }
+        for file in ["config.json", "tokenizer.json", "model.safetensors"] {
+            try Data("{}".utf8).write(to: modelDir.appendingPathComponent(file))
+        }
+        let unusedHome = fileManager.temporaryDirectory
+            .appendingPathComponent("dbrowser-home-\(UUID().uuidString)", isDirectory: true)
+
+        // An explicit override resolves regardless of the host machine layout.
+        let resolved = selection.localWorkspaceModelURL(
+            environment: ["DBROWSER_MLX_MODEL_DIR": modelDir.path],
+            homeDirectory: unusedHome
+        )
+        #expect(resolved?.standardizedFileURL == modelDir.standardizedFileURL)
+
+        // With no override and a home directory that has no checkout, resolution is nil rather
+        // than depending on a hard-coded absolute path.
+        let unresolved = selection.localWorkspaceModelURL(
+            environment: [:],
+            homeDirectory: unusedHome
+        )
+        #expect(unresolved == nil)
     }
 
     @Test func bundledLLMModelConfigurationUsesMLXVLMRegistry() {
         let selection = BundledLLMSelection.recommended
         let configuration = selection.modelConfiguration()
 
-        guard case .directory(let url) = configuration.id else {
-            Issue.record("Expected the existing local Gemma 4 MLX model to back the configuration")
-            return
+        // When the local artifact is present the configuration is directory-backed; otherwise it
+        // is the registry (Hugging Face) configuration. The prompt/EOS metadata holds either way.
+        if case .directory(let url) = configuration.id {
+            #expect(url.path.hasSuffix("/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
         }
-
-        #expect(url.path.hasSuffix("/Broom/diskspace-gemma/models/gemma-4-e2b-it-4bit-mlx"))
         #expect(configuration.defaultPrompt == "Describe the image in English")
         #expect(configuration.extraEOSTokens.contains("<end_of_turn>"))
     }
