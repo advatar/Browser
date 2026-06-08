@@ -5089,6 +5089,80 @@ struct dBrowserTests {
         #expect(model.copilotRuns.first?.events.contains { $0.kind == .cancelled } == true)
     }
 
+    @Test func navigationUpdateDrivesTabLifecycleAndHistory() {
+        let model = makeIsolatedBrowserViewModel()
+        let tabID = model.activeTabID
+
+        // A WKWebView load begins: address and loading state update, but nothing is committed
+        // to history until the load finishes.
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: tabID,
+                urlString: "https://example.com/page",
+                title: "Example",
+                isLoading: true,
+                canGoBack: false,
+                canGoForward: false
+            )
+        )
+        #expect(model.activeTab?.isLoading == true)
+        #expect(model.activeTab?.urlString == "https://example.com/page")
+        #expect(model.addressText == "https://example.com/page")
+        #expect(model.history.contains { $0.urlString == "https://example.com/page" } == false)
+
+        // The load finishes: title and back/forward state settle and the page is recorded.
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: tabID,
+                urlString: "https://example.com/page",
+                title: "Example Domain",
+                isLoading: false,
+                canGoBack: true,
+                canGoForward: false
+            )
+        )
+        #expect(model.activeTab?.isLoading == false)
+        #expect(model.activeTab?.title == "Example Domain")
+        #expect(model.canGoBack == true)
+        #expect(model.history.first?.urlString == "https://example.com/page")
+        #expect(model.history.first?.title == "Example Domain")
+    }
+
+    @MainActor
+    @Test func unresolvableAddressSurfacesRuntimeNoticeWithoutHistory() async {
+        let model = makeIsolatedBrowserViewModel()
+
+        // No native handler or gateway can resolve this scheme, so the runtime bridge must
+        // surface a labeled notice instead of silently navigating, and must not record history.
+        model.navigate("obscureproto://content/item")
+
+        let noticed = await waitForMobileNotice(in: model, containing: "No iOS runtime bridge is registered")
+        #expect(noticed)
+        #expect(model.activeTab?.urlString == "obscureproto://content/item")
+        #expect(model.history.contains { $0.urlString.hasPrefix("obscureproto://") } == false)
+    }
+
+    @Test func closingTabCancelsBoundCopilotRuns() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com")
+        let tabID = model.activeTabID
+
+        guard let runID = model.runCopilot(prompt: "Summarize the current page") else {
+            Issue.record("Expected a Copilot run ID")
+            return
+        }
+        #expect(model.activeCopilotRunCount == 1)
+
+        // Keep at least one tab alive, then close the tab the run is bound to.
+        model.newTab()
+        model.closeTab(tabID)
+
+        let run = model.copilotRuns.first { $0.id == runID }
+        #expect(run?.status == .cancelled)
+        #expect(run?.events.contains { $0.kind == .cancelled } == true)
+        #expect(model.activeCopilotRunCount == 0)
+    }
+
     @MainActor
     @Test func copilotWorkflowsPersistAndRunWhenEnabled() {
         let workflowStore = CopilotWorkflowStore.ephemeral()
