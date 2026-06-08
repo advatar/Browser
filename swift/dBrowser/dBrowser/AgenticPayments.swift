@@ -305,6 +305,7 @@ enum EUDIEmailCredentialImportStatus: String, Codable, Equatable {
     case unverifiedEmail
     case nonHumanSubject
     case expired
+    case signatureRejected
 }
 
 struct EUDIEmailCredentialImportResult: Equatable {
@@ -312,9 +313,15 @@ struct EUDIEmailCredentialImportResult: Equatable {
     var sourceCredential: EUDIEmailAddressCredential?
     var document: EUDICredentialDocument?
     var reasons: [String]
+    var signatureTrust: EUDICredentialSignatureTrust = .unverifiedEnvelope
 
     var isImported: Bool {
         status == .imported && document != nil
+    }
+
+    /// True only when the credential was imported AND its issuer signature was cryptographically verified.
+    var isCryptographicallyVerified: Bool {
+        isImported && signatureTrust == .issuerSignatureVerified
     }
 }
 
@@ -366,16 +373,213 @@ enum EUDIEmailCredentialEnvelopeDecoder {
     }
 }
 
-enum EUDIEmailCredentialImporter {
-    static func importHumanVerifiedEmail(from data: Data, now: Date = Date()) -> EUDIEmailCredentialImportResult {
+// MARK: - EUDI issuer trust store and real VC-JWT signature verification
+
+/// Cryptographic trust state of an imported credential. The distinction is load-bearing:
+/// `issuerSignatureVerified` means an issuer signature was checked against a trusted key,
+/// while `unverifiedEnvelope` means the credential arrived as a bare JSON envelope whose
+/// authenticity dBrowser has NOT cryptographically verified.
+enum EUDICredentialSignatureTrust: String, Codable, Equatable {
+    case issuerSignatureVerified = "issuer_signature_verified"
+    case unverifiedEnvelope = "unverified_envelope"
+
+    var label: String {
+        switch self {
+        case .issuerSignatureVerified: return "Issuer signature verified"
+        case .unverifiedEnvelope: return "Unverified envelope"
+        }
+    }
+}
+
+enum EUDIIssuerSignatureAlgorithm: String, Codable, Equatable {
+    case es256 = "ES256" // ECDSA over P-256 with SHA-256
+    case eddsa = "EdDSA" // Ed25519
+}
+
+/// A trusted issuer signing key, normally sourced from an issuer JWKS endpoint or a pinned
+/// allowlist. `publicKeyRaw` is the raw key representation: 64-byte x||y for ES256 P-256,
+/// 32-byte compressed point for Ed25519.
+struct EUDIIssuerKey: Equatable, Identifiable {
+    var keyID: String
+    var algorithm: EUDIIssuerSignatureAlgorithm
+    var publicKeyRaw: Data
+    var id: String { keyID }
+}
+
+struct EUDIIssuerTrustStore: Equatable {
+    private(set) var keysByID: [String: EUDIIssuerKey]
+
+    init(keys: [EUDIIssuerKey] = []) {
+        var map: [String: EUDIIssuerKey] = [:]
+        for key in keys { map[key.keyID] = key }
+        keysByID = map
+    }
+
+    func key(forID keyID: String) -> EUDIIssuerKey? { keysByID[keyID] }
+
+    var isEmpty: Bool { keysByID.isEmpty }
+}
+
+enum EUDIVerifiableCredentialJWTError: Error, Equatable {
+    case malformedJWT
+    case unsupportedAlgorithm(String)
+    case unknownIssuerKey(String)
+    case algorithmMismatch(String)
+    case signatureVerificationFailed
+    case credentialDecodingFailed(String)
+
+    var reason: String {
+        switch self {
+        case .malformedJWT:
+            return "VC-JWT is not a well-formed compact JWS (header.payload.signature)."
+        case let .unsupportedAlgorithm(alg):
+            return "VC-JWT signature algorithm \(alg) is not supported; expected ES256 or EdDSA."
+        case let .unknownIssuerKey(kid):
+            return "VC-JWT key id \(kid) is not present in the configured issuer trust store."
+        case let .algorithmMismatch(kid):
+            return "VC-JWT algorithm does not match the trusted key \(kid)."
+        case .signatureVerificationFailed:
+            return "VC-JWT issuer signature did not verify against the trusted issuer key."
+        case let .credentialDecodingFailed(detail):
+            return "VC-JWT payload did not contain a decodable email credential: \(detail)."
+        }
+    }
+}
+
+/// Performs real issuer-signature verification of a compact VC-JWT using CryptoKit. This is the
+/// anchor that makes the agent identity/delegation chain trustworthy: a forged credential with
+/// `email_verified: true` but no valid issuer signature is rejected here instead of imported.
+enum EUDIVerifiableCredentialJWTVerifier {
+    static func verify(
+        compactJWT: String,
+        trustStore: EUDIIssuerTrustStore,
+        now: Date = Date()
+    ) -> Result<EUDIEmailAddressCredential, EUDIVerifiableCredentialJWTError> {
+        let segments = compactJWT.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3 else { return .failure(.malformedJWT) }
+        let headerSegment = String(segments[0])
+        let payloadSegment = String(segments[1])
+        let signatureSegment = String(segments[2])
+
+        guard
+            let headerData = base64URLDecode(headerSegment),
+            let payloadData = base64URLDecode(payloadSegment),
+            let signatureData = base64URLDecode(signatureSegment),
+            let header = try? JSONSerialization.jsonObject(with: headerData) as? [String: Any]
+        else {
+            return .failure(.malformedJWT)
+        }
+
+        guard let algString = header["alg"] as? String else { return .failure(.malformedJWT) }
+        guard let algorithm = EUDIIssuerSignatureAlgorithm(rawValue: algString) else {
+            return .failure(.unsupportedAlgorithm(algString))
+        }
+        guard let keyID = header["kid"] as? String else { return .failure(.malformedJWT) }
+        guard let issuerKey = trustStore.key(forID: keyID) else {
+            return .failure(.unknownIssuerKey(keyID))
+        }
+        guard issuerKey.algorithm == algorithm else {
+            return .failure(.algorithmMismatch(keyID))
+        }
+
+        let signingInput = Data("\(headerSegment).\(payloadSegment)".utf8)
+        guard verifySignature(signatureData, over: signingInput, with: issuerKey) else {
+            return .failure(.signatureVerificationFailed)
+        }
+
         do {
-            return importHumanVerifiedEmail(try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: data), now: now)
+            let credential = try decodeCredential(fromPayload: payloadData)
+            return .success(credential)
+        } catch {
+            return .failure(.credentialDecodingFailed(error.localizedDescription))
+        }
+    }
+
+    private static func verifySignature(
+        _ signature: Data,
+        over message: Data,
+        with key: EUDIIssuerKey
+    ) -> Bool {
+        switch key.algorithm {
+        case .es256:
+            guard
+                let publicKey = try? P256.Signing.PublicKey(rawRepresentation: key.publicKeyRaw),
+                let parsedSignature = try? P256.Signing.ECDSASignature(rawRepresentation: signature)
+            else { return false }
+            return publicKey.isValidSignature(parsedSignature, for: message)
+        case .eddsa:
+            guard let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: key.publicKeyRaw) else {
+                return false
+            }
+            return publicKey.isValidSignature(signature, for: message)
+        }
+    }
+
+    /// Accepts either a W3C VC-JWT payload (credential under the `vc` claim) or a payload whose
+    /// top level is the credential object itself.
+    private static func decodeCredential(fromPayload payloadData: Data) throws -> EUDIEmailAddressCredential {
+        if
+            let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+            let vcObject = payload["vc"] as? [String: Any]
+        {
+            let vcData = try JSONSerialization.data(withJSONObject: vcObject, options: [])
+            return try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: vcData)
+        }
+        return try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: payloadData)
+    }
+
+    private static func base64URLDecode(_ string: String) -> Data? {
+        var base64 = string
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder > 0 {
+            base64.append(String(repeating: "=", count: 4 - remainder))
+        }
+        return Data(base64Encoded: base64)
+    }
+}
+
+enum EUDIEmailCredentialImporter {
+    static func importHumanVerifiedEmail(
+        from data: Data,
+        trustStore: EUDIIssuerTrustStore? = nil,
+        now: Date = Date()
+    ) -> EUDIEmailCredentialImportResult {
+        let raw = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let looksLikeCompactJWT = !raw.hasPrefix("{") && raw.split(separator: ".").count == 3
+        if looksLikeCompactJWT {
+            guard let trustStore, !trustStore.isEmpty else {
+                return EUDIEmailCredentialImportResult(
+                    status: .unsupportedFormat,
+                    sourceCredential: nil,
+                    document: nil,
+                    reasons: ["Compact VC-JWT input requires a configured issuer trust store (JWKS) before import."]
+                )
+            }
+            switch EUDIVerifiableCredentialJWTVerifier.verify(compactJWT: raw, trustStore: trustStore, now: now) {
+            case let .success(credential):
+                return importHumanVerifiedEmail(credential, signatureTrust: .issuerSignatureVerified, now: now)
+            case let .failure(error):
+                return EUDIEmailCredentialImportResult(
+                    status: .signatureRejected,
+                    sourceCredential: nil,
+                    document: nil,
+                    reasons: [error.reason]
+                )
+            }
+        }
+
+        do {
+            let credential = try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: data)
+            return importHumanVerifiedEmail(credential, signatureTrust: .unverifiedEnvelope, now: now)
         } catch EUDIEmailCredentialImportError.compactJWTRequiresVerification {
             return EUDIEmailCredentialImportResult(
                 status: .unsupportedFormat,
                 sourceCredential: nil,
                 document: nil,
-                reasons: ["Compact VC-JWT input requires issuer metadata and JWKS verification before import."]
+                reasons: ["Compact VC-JWT input requires a configured issuer trust store (JWKS) before import."]
             )
         } catch {
             return EUDIEmailCredentialImportResult(
@@ -387,7 +591,11 @@ enum EUDIEmailCredentialImporter {
         }
     }
 
-    static func importHumanVerifiedEmail(_ credential: EUDIEmailAddressCredential, now: Date = Date()) -> EUDIEmailCredentialImportResult {
+    static func importHumanVerifiedEmail(
+        _ credential: EUDIEmailAddressCredential,
+        signatureTrust: EUDICredentialSignatureTrust = .unverifiedEnvelope,
+        now: Date = Date()
+    ) -> EUDIEmailCredentialImportResult {
         guard credential.types.contains("EmailAddressCredential") else {
             return EUDIEmailCredentialImportResult(
                 status: .invalidCredential,
@@ -443,18 +651,28 @@ enum EUDIEmailCredentialImporter {
                 "holder_jwk_thumbprint": subject.holder.holderJWKThumbprint,
                 "source_credential_id": credential.id,
                 "source_credential_hash": credential.credentialHash,
-                "subject_type": subject.subjectType.rawValue
+                "subject_type": subject.subjectType.rawValue,
+                "signature_trust": signatureTrust.rawValue
             ],
             issuedAt: credential.validFrom,
             expiresAt: credential.validUntil,
             isRevoked: false
         )
 
+        let trustReason: String
+        switch signatureTrust {
+        case .issuerSignatureVerified:
+            trustReason = "Issuer VC-JWT signature verified; imported into the human identity vault."
+        case .unverifiedEnvelope:
+            trustReason = "Imported into the human identity vault from an unverified JSON envelope; issuer signature was not cryptographically checked."
+        }
+
         return EUDIEmailCredentialImportResult(
             status: .imported,
             sourceCredential: credential,
             document: document,
-            reasons: ["Verified email credential imported into the human identity vault."]
+            reasons: [trustReason],
+            signatureTrust: signatureTrust
         )
     }
 }

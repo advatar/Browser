@@ -21,6 +21,23 @@
 
 ## Active Task
 
+## Concept/Code/UX Review Hardening
+
+Driven by the 2026-06-08 concept/code/UX review (#146). Closing the highest-priority gaps in order.
+
+- [x] 1. Make the EUDI VC trust anchor real: implement CryptoKit ES256/EdDSA VC-JWT issuer-signature verification against a configured issuer trust store, label imported-credential signature trust (`issuer_signature_verified` vs `unverified_envelope`), and reject forged/untrusted/tampered VC-JWTs instead of importing them.
+- [x] 1b. Trim overstated landing-page claim: mark the web comparison "Native IPFS/IPNS path" as partial (gateway-fallback labeled), matching the actual gateway resolution path.
+- [ ] 2. Fix the 4 Swift 6 MainActor isolation warnings and add `[weak self]`/cancellation to the Copilot `Task` blocks.
+- [ ] 3. Begin decomposing `BrowserViewModel`/`ContentView` god objects into per-domain stores/panels.
+- [ ] 4. Replace the hard-coded developer Broom MLX model path with a resolved/configurable location.
+- [ ] 5. Narrow the primary UX to three surfaces (Browse / Copilot / Wallet & Identity); demote dashboards.
+- [ ] 6. Add behavior tests (real page load, gateway-down fallback, cancelled Copilot run).
+
+Validation notes:
+
+- `xcodebuild test ... -only-testing:dBrowserTests/eudiImportsVerifiedEmailFromIssuerSignedVCJWT -only-testing:dBrowserTests/eudiRejectsVCJWTSignedByUntrustedKey -only-testing:dBrowserTests/eudiRejectsVCJWTWithTamperedPayload -only-testing:dBrowserTests/eudiRejectsVCJWTWithUnknownKeyID -only-testing:dBrowserTests/eudiEmailCredentialImporterAcceptsCliwalletVerifiedEmailForHumanWallet` reported `** TEST SUCCEEDED **`.
+- `npm test` in `web` passed; web build deferred per prior user direction because Lovable will handle it.
+
 ## Web Eval Harness Copy Revert
 
 - [x] Confirm the parent repository still records the intended `web` submodule pointer.

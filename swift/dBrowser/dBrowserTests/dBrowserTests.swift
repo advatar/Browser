@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import CryptoKit
 import MLXLMCommon
 @testable import dBrowser
 
@@ -6405,6 +6406,145 @@ struct dBrowserTests {
         #expect(responseImport.status == .imported)
         #expect(responseImport.document?.id == rawImport.document?.id)
         #expect(jwtOnlyImport.status == .unsupportedFormat)
+        // The bare JSON envelope path is explicitly labeled as not cryptographically verified.
+        #expect(rawImport.signatureTrust == .unverifiedEnvelope)
+        #expect(rawImport.isCryptographicallyVerified == false)
+        #expect(rawImport.document?.claims["signature_trust"] == "unverified_envelope")
+    }
+
+    private static func base64URLEncode(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func makeES256VCJWT(
+        credentialJSON: Data,
+        keyID: String,
+        privateKey: P256.Signing.PrivateKey
+    ) -> String {
+        let header = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "kid": keyID, "typ": "JWT"])
+        let credentialObject = try! JSONSerialization.jsonObject(with: credentialJSON)
+        let payloadObject: [String: Any] = ["iss": "https://issuer.example", "vc": credentialObject]
+        let payload = try! JSONSerialization.data(withJSONObject: payloadObject)
+        let headerSegment = base64URLEncode(header)
+        let payloadSegment = base64URLEncode(payload)
+        let signingInput = Data("\(headerSegment).\(payloadSegment)".utf8)
+        let signature = try! privateKey.signature(for: signingInput)
+        let signatureSegment = base64URLEncode(signature.rawRepresentation)
+        return "\(headerSegment).\(payloadSegment).\(signatureSegment)"
+    }
+
+    @Test func eudiImportsVerifiedEmailFromIssuerSignedVCJWT() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: issuerKey
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(jwt.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .imported)
+        #expect(result.signatureTrust == .issuerSignatureVerified)
+        #expect(result.isCryptographicallyVerified)
+        #expect(result.document?.claims["email"] == "johan.sellstrom@iproov.com")
+        #expect(result.document?.claims["signature_trust"] == "issuer_signature_verified")
+    }
+
+    @Test func eudiRejectsVCJWTSignedByUntrustedKey() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let attackerKey = P256.Signing.PrivateKey()
+        // Trust store advertises issuer-key-1 but with a DIFFERENT public key than the signer used.
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        let forgedJWT = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: attackerKey
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(forgedJWT.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .signatureRejected)
+        #expect(result.document == nil)
+        #expect(result.isCryptographicallyVerified == false)
+    }
+
+    @Test func eudiRejectsVCJWTWithTamperedPayload() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: issuerKey
+        )
+        // Flip the trailing character of the payload segment so the signature no longer matches.
+        var segments = jwt.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let payload = segments[1]
+        let mutatedLast: Character = payload.last == "A" ? "B" : "A"
+        segments[1] = String(payload.dropLast()) + String(mutatedLast)
+        let tamperedJWT = segments.joined(separator: ".")
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(tamperedJWT.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .signatureRejected)
+        #expect(result.isCryptographicallyVerified == false)
+    }
+
+    @Test func eudiRejectsVCJWTWithUnknownKeyID() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "unknown-key-99",
+            privateKey: issuerKey
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(jwt.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .signatureRejected)
     }
 
     @Test func eudiWalletIdentityIssuerIssuesScopedVerifiedEmailToAgent() {
