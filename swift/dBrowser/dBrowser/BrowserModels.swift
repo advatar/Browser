@@ -1,5 +1,10 @@
 import Foundation
 
+enum BrowserPanelTier: String, Equatable {
+    case primary
+    case advanced
+}
+
 enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case history
     case bookmarks
@@ -13,22 +18,34 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
 
     var id: String { rawValue }
 
-    static let browserSidebarPanels: [BrowserPanel] = [
+    /// The primary product surfaces shown alongside the web Browser (which is represented by a
+    /// nil panel selection): the agent Copilot and the unified Wallet & Identity control plane.
+    static let primaryPanels: [BrowserPanel] = [
+        .copilot,
+        .wallet
+    ]
+
+    /// Secondary dashboards and developer tools, demoted beneath the primary surfaces so the
+    /// browser does not present nine peer control planes at the same altitude.
+    static let advancedPanels: [BrowserPanel] = [
         .history,
         .bookmarks,
         .mcp,
         .a2ui,
-        .copilot,
         .advantage,
         .localLLM,
         .runtime
     ]
 
+    var tier: BrowserPanelTier {
+        BrowserPanel.primaryPanels.contains(self) ? .primary : .advanced
+    }
+
     var title: String {
         switch self {
         case .history: "History"
         case .bookmarks: "Bookmarks"
-        case .wallet: "Wallet"
+        case .wallet: "Wallet & Identity"
         case .mcp: "MCP"
         case .a2ui: "A2UI"
         case .copilot: "Copilot"

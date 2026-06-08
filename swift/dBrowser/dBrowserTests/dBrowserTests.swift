@@ -539,7 +539,7 @@ struct dBrowserTests {
     @MainActor
     @Test func a2uiRenderingIsTopLevelPanelAndRuntimeFeature() {
         #expect(BrowserPanel.allCases.contains(.a2ui))
-        #expect(BrowserPanel.browserSidebarPanels.contains(.a2ui))
+        #expect(BrowserPanel.advancedPanels.contains(.a2ui))
 
         let bridge = MobileRuntimeBridge()
         let state = bridge.featureStates.first { $0.feature == .a2uiRendering }
@@ -626,7 +626,7 @@ struct dBrowserTests {
     @MainActor
     @Test func localLLMManagementIsTopLevelPanel() {
         #expect(BrowserPanel.allCases.contains(.localLLM))
-        #expect(BrowserPanel.browserSidebarPanels.contains(.localLLM))
+        #expect(BrowserPanel.advancedPanels.contains(.localLLM))
         #expect(BrowserPanel.localLLM.title == "Local LLMs")
         #expect(BrowserPanel.localLLM.systemImage == "cpu")
     }
@@ -6219,12 +6219,16 @@ struct dBrowserTests {
         #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
     }
 
-    @Test func walletPanelIsTopLevelNavigationAndSeparateSidebarSection() {
+    @Test func walletPanelIsPrimarySurface() {
         #expect(BrowserPanel.allCases.contains(.wallet))
-        #expect(BrowserPanel.wallet.title == "Wallet")
+        #expect(BrowserPanel.wallet.title == "Wallet & Identity")
         #expect(BrowserPanel.wallet.systemImage == "wallet.pass")
-        #expect(!BrowserPanel.browserSidebarPanels.contains(.wallet))
-        #expect(BrowserPanel.browserSidebarPanels == [.history, .bookmarks, .mcp, .a2ui, .copilot, .advantage, .localLLM, .runtime])
+        #expect(BrowserPanel.wallet.tier == .primary)
+        #expect(BrowserPanel.primaryPanels.contains(.wallet))
+        #expect(!BrowserPanel.advancedPanels.contains(.wallet))
+        // The three primary surfaces are Browser (nil selection), Copilot, and Wallet & Identity.
+        #expect(BrowserPanel.primaryPanels == [.copilot, .wallet])
+        #expect(BrowserPanel.advancedPanels == [.history, .bookmarks, .mcp, .a2ui, .advantage, .localLLM, .runtime])
     }
 
     @Test func advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline() {
@@ -6234,7 +6238,8 @@ struct dBrowserTests {
         #expect(BrowserPanel.allCases.contains(.advantage))
         #expect(BrowserPanel.advantage.title == "Advantage")
         #expect(BrowserPanel.advantage.systemImage == "chart.line.uptrend.xyaxis")
-        #expect(BrowserPanel.browserSidebarPanels.contains(.advantage))
+        #expect(BrowserPanel.advancedPanels.contains(.advantage))
+        #expect(BrowserPanel.advantage.tier == .advanced)
         #expect(scorecard.trackedStrawberryBaselineCategories == baseline)
         #expect(scorecard.capabilities.count > BrowserAdvantageCategory.strawberryBaseline.count)
         #expect(scorecard.exceededCount > scorecard.matchedCount)
@@ -7071,7 +7076,7 @@ struct dBrowserTests {
         #expect(BrowserPanel.allCases.contains(.mcp))
         #expect(BrowserPanel.mcp.title == "MCP")
         #expect(BrowserPanel.mcp.systemImage == "network")
-        #expect(BrowserPanel.browserSidebarPanels.contains(.mcp))
+        #expect(BrowserPanel.advancedPanels.contains(.mcp))
 
         model.selectPanel(.mcp)
         #expect(model.selectedPanel == .mcp)

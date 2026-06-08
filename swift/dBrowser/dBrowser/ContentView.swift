@@ -301,25 +301,46 @@ private struct BrowserPanelSelector: View {
     private let columns = [GridItem(.adaptive(minimum: 104), spacing: 8)]
 
     var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            BrowserPanelSelectorButton(
-                title: "Browser",
-                systemImage: "globe",
-                isSelected: browser.selectedPanel == nil
-            ) {
-                browser.selectPanel(nil)
-            }
-            .accessibilityIdentifier("panel-browser")
-
-            ForEach(BrowserPanel.allCases) { panel in
+        VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                 BrowserPanelSelectorButton(
-                    title: panel.title,
-                    systemImage: panel.systemImage,
-                    isSelected: browser.selectedPanel == panel
+                    title: "Browser",
+                    systemImage: "globe",
+                    isSelected: browser.selectedPanel == nil
                 ) {
-                    browser.selectPanel(panel)
+                    browser.selectPanel(nil)
                 }
-                .accessibilityIdentifier("panel-\(panel.id)")
+                .accessibilityIdentifier("panel-browser")
+
+                ForEach(BrowserPanel.primaryPanels) { panel in
+                    BrowserPanelSelectorButton(
+                        title: panel.title,
+                        systemImage: panel.systemImage,
+                        isSelected: browser.selectedPanel == panel
+                    ) {
+                        browser.selectPanel(panel)
+                    }
+                    .accessibilityIdentifier("panel-\(panel.id)")
+                }
+            }
+
+            Text("Advanced")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+                .accessibilityIdentifier("panel-advanced-header")
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(BrowserPanel.advancedPanels) { panel in
+                    BrowserPanelSelectorButton(
+                        title: panel.title,
+                        systemImage: panel.systemImage,
+                        isSelected: browser.selectedPanel == panel
+                    ) {
+                        browser.selectPanel(panel)
+                    }
+                    .accessibilityIdentifier("panel-\(panel.id)")
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -2709,7 +2730,7 @@ private struct BrowserSidebar: View {
 
     var body: some View {
         List {
-            Section("Browser") {
+            Section("Browse") {
                 Button {
                     browser.selectPanel(nil)
                 } label: {
@@ -2717,7 +2738,19 @@ private struct BrowserSidebar: View {
                 }
                 .fontWeight(browser.selectedPanel == nil ? .semibold : .regular)
 
-                ForEach(BrowserPanel.browserSidebarPanels) { panel in
+                ForEach(BrowserPanel.primaryPanels) { panel in
+                    Button {
+                        browser.selectPanel(panel)
+                    } label: {
+                        Label(panel.title, systemImage: panel.systemImage)
+                    }
+                    .fontWeight(browser.selectedPanel == panel ? .semibold : .regular)
+                    .accessibilityIdentifier(panel == .wallet ? "sidebar-wallet" : "sidebar-\(panel.id)")
+                }
+            }
+
+            Section("Advanced") {
+                ForEach(BrowserPanel.advancedPanels) { panel in
                     Button {
                         browser.selectPanel(panel)
                     } label: {
@@ -2725,16 +2758,6 @@ private struct BrowserSidebar: View {
                     }
                     .fontWeight(browser.selectedPanel == panel ? .semibold : .regular)
                 }
-            }
-
-            Section("Wallet") {
-                Button {
-                    browser.selectPanel(.wallet)
-                } label: {
-                    Label(BrowserPanel.wallet.title, systemImage: BrowserPanel.wallet.systemImage)
-                }
-                .fontWeight(browser.selectedPanel == .wallet ? .semibold : .regular)
-                .accessibilityIdentifier("sidebar-wallet")
             }
 
             Section("Bookmarks") {
