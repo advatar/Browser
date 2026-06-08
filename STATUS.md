@@ -41,7 +41,7 @@ Review follow-ups (from #146):
 
   North star (user direction 2026-06-08): avoid trusting remote services to the extent possible. No advertised chain currently has a production light client that proves state to tip end-to-end; ~4 families have partial real verification logic, ~6 are fixture-backed, and all default to RPC/gateway fallback. Replacing the RPC fallback with real local verification (SPV, sync-committee/account/storage proofs, Tendermint/GRANDPA to the default path) is the tracked direction.
 - [x] C. Keychain wallet seed storage: added `KeychainWalletSeedStore` (system Keychain, `AfterFirstUnlockThisDeviceOnly`, in-memory fallback when unentitled) and `WalletSeedFactory.generateSeedHex` (256-bit secure entropy). `createEmbeddedWallet` now loads-or-creates the seed from secure storage instead of holding a `UUID().uuidString` in memory. Added a hermetic round-trip test. (Secure Enclave key-wrapping of the seed and BIP-39 mnemonic encoding remain follow-ups.)
-- [ ] D. Full `BrowserViewModel` per-domain store split.
+- [~] D. `BrowserViewModel` decomposition (incremental, per user direction). Extracted the smart-history domain into `BrowserHistoryService` (recording, summarization + exclusion config, autocomplete ranking, recall, persistence), which now owns the `excludedDomains` state and `SmartHistoryStore`. The view model keeps the observable `history` array and delegates, dropping from 1580 to 1422 lines with all 189 tests green. Remaining domains (LLM/Copilot orchestration, wallet, OpenMind memory) are tracked follow-ups.
 
 Validation notes:
 

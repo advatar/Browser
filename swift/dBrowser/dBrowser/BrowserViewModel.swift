@@ -40,11 +40,10 @@ final class BrowserViewModel: ObservableObject {
 
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
-    private let smartHistoryStore: SmartHistoryStore
+    private let historyService: BrowserHistoryService
     private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
     private let localLLMManager: LocalLLMManaging
-    private var smartHistoryExcludedDomains: Set<String>
     private var copilotTasks: [UUID: Task<Void, Never>] = [:]
 
     convenience init(initialURL: String = "about:home") {
@@ -61,7 +60,7 @@ final class BrowserViewModel: ObservableObject {
         localLLMManager: LocalLLMManaging? = nil
     ) {
         let tab = BrowserTab(urlString: initialURL)
-        let smartHistoryPayload = smartHistoryStore.load()
+        let historyService = BrowserHistoryService(store: smartHistoryStore)
         let initialLLMModelOptions = LLMModelRegistry.models(
             afmSnapshot: runtimeBridge.afmServiceSnapshot,
             llmRouterSnapshot: runtimeBridge.llmRouterServiceSnapshot
@@ -72,11 +71,10 @@ final class BrowserViewModel: ObservableObject {
         )
         self.runtimeBridge = runtimeBridge
         self.workflowStore = copilotWorkflowStore
-        self.smartHistoryStore = smartHistoryStore
+        self.historyService = historyService
         self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.localLLMManager = localLLMManager ?? LocalLLMManager()
-        self.smartHistoryExcludedDomains = Set(smartHistoryPayload.excludedDomains)
         self.runtimeFeatureStates = runtimeBridge.featureStates
         self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
@@ -96,7 +94,7 @@ final class BrowserViewModel: ObservableObject {
         self.tabs = [tab]
         self.activeTabID = tab.id
         self.addressText = initialURL
-        self.history = smartHistoryPayload.history
+        self.history = historyService.initialHistory
         self.copilotWorkflows = copilotWorkflowStore.load()
         if restoredLLMState.shouldPersist {
             persistLLMConversation()
@@ -189,32 +187,7 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func addressAutocompleteSuggestions(limit: Int = 6) -> [BrowserAddressSuggestion] {
-        let query = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedQuery = normalizedAutocompleteText(query)
-        guard !normalizedQuery.isEmpty else { return [] }
-
-        var seenURLs = Set<String>()
-        let rankedSuggestions = history.enumerated().compactMap { index, entry -> (rank: Int, index: Int, suggestion: BrowserAddressSuggestion)? in
-            let normalizedURL = normalizedAutocompleteText(entry.urlString)
-            guard seenURLs.insert(normalizedURL).inserted else { return nil }
-            guard let rank = autocompleteRank(for: entry, query: normalizedQuery) else { return nil }
-
-            return (
-                rank,
-                index,
-                BrowserAddressSuggestion(title: entry.title, urlString: entry.urlString)
-            )
-        }
-
-        return rankedSuggestions
-            .sorted {
-                if $0.rank != $1.rank {
-                    return $0.rank < $1.rank
-                }
-                return $0.index < $1.index
-            }
-            .prefix(limit)
-            .map { $0.suggestion }
+        historyService.autocompleteSuggestions(matching: addressText, in: history, limit: limit)
     }
 
     func openAddressSuggestion(_ suggestion: BrowserAddressSuggestion) {
@@ -1002,67 +975,19 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func smartHistoryRecall(_ query: String, limit: Int = 6) -> [SmartHistoryRecallResult] {
-        let terms = query
-            .lowercased()
-            .split(whereSeparator: { $0.isWhitespace })
-            .map(String.init)
-        guard !terms.isEmpty else { return [] }
-
-        return history.compactMap { entry -> SmartHistoryRecallResult? in
-            guard entry.isSmartHistoryIndexed else { return nil }
-            let searchable = [
-                entry.title,
-                entry.urlString,
-                entry.summary ?? ""
-            ]
-            .joined(separator: " ")
-            .lowercased()
-            guard terms.allSatisfy({ searchable.contains($0) }) else { return nil }
-
-            var score = 0
-            for term in terms {
-                if entry.title.lowercased().contains(term) { score += 4 }
-                if entry.urlString.lowercased().contains(term) { score += 3 }
-                if entry.summary?.lowercased().contains(term) == true { score += 5 }
-            }
-            return SmartHistoryRecallResult(entry: entry, score: score, matchedText: entry.summary ?? entry.title)
-        }
-        .sorted {
-            if $0.score != $1.score {
-                return $0.score > $1.score
-            }
-            return $0.entry.visitedAt > $1.entry.visitedAt
-        }
-        .prefix(limit)
-        .map { $0 }
+        historyService.smartHistoryRecall(query, in: history, limit: limit)
     }
 
     func setSmartHistoryIndexing(enabled: Bool, forDomain domain: String) {
-        let normalizedDomain = domain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedDomain.isEmpty else { return }
-        if enabled {
-            smartHistoryExcludedDomains.remove(normalizedDomain)
-        } else {
-            smartHistoryExcludedDomains.insert(normalizedDomain)
-            for index in history.indices where URL(string: history[index].urlString)?.host?.lowercased() == normalizedDomain {
-                history[index].summary = nil
-                history[index].isSmartHistoryIndexed = false
-            }
-        }
-        persistSmartHistory()
+        history = historyService.settingIndexing(enabled: enabled, forDomain: domain, in: history)
     }
 
     func clearSmartHistorySummaries() {
-        for index in history.indices {
-            history[index].summary = nil
-            history[index].isSmartHistoryIndexed = false
-        }
-        persistSmartHistory()
+        history = historyService.clearingSummaries(in: history)
     }
 
     func deleteHistoryEntry(_ id: UUID) {
-        history.removeAll { $0.id == id }
-        persistSmartHistory()
+        history = historyService.deleting(id: id, from: history)
     }
 
     func applyNavigationUpdate(_ update: BrowserNavigationUpdate) {
@@ -1146,53 +1071,11 @@ final class BrowserViewModel: ObservableObject {
     }
 
     private func recordHistory(title: String, urlString: String) {
-        guard urlString != BrowserURLResolver.homeURLString else { return }
-        let previousEntry = history.first { $0.urlString == urlString }
-        history.removeAll { $0.urlString == urlString }
-        let isIndexed = isSmartHistoryIndexable(urlString)
-        let summary = isIndexed
-            ? previousEntry?.summary ?? SmartHistoryIndexer.summary(title: title, urlString: urlString)
-            : nil
-        history.insert(
-            BrowserHistoryEntry(
-                title: title,
-                urlString: urlString,
-                visitedAt: Date(),
-                summary: summary,
-                isSmartHistoryIndexed: isIndexed
-            ),
-            at: 0
-        )
-        if history.count > 100 {
-            history.removeLast(history.count - 100)
-        }
-        persistSmartHistory()
+        history = historyService.recording(title: title, urlString: urlString, into: history)
     }
 
     private func updateSmartHistorySummary(from snapshot: PageSnapshot) {
-        guard isSmartHistoryIndexable(snapshot.urlString) else { return }
-        guard let index = history.firstIndex(where: { $0.urlString == snapshot.urlString }) else { return }
-        history[index].summary = SmartHistoryIndexer.summary(
-            title: history[index].title,
-            urlString: history[index].urlString,
-            snapshot: snapshot
-        )
-        history[index].isSmartHistoryIndexed = true
-        persistSmartHistory()
-    }
-
-    private func isSmartHistoryIndexable(_ urlString: String) -> Bool {
-        guard let host = URL(string: urlString)?.host?.lowercased() else { return true }
-        return !smartHistoryExcludedDomains.contains(host)
-    }
-
-    private func persistSmartHistory() {
-        smartHistoryStore.save(
-            SmartHistoryStorePayload(
-                history: history,
-                excludedDomains: Array(smartHistoryExcludedDomains).sorted()
-            )
-        )
+        history = historyService.updatingSummary(from: snapshot, in: history)
     }
 
     private func persistWorkflows() {
@@ -1530,52 +1413,6 @@ final class BrowserViewModel: ObservableObject {
             return host
         }
         return url.absoluteString
-    }
-
-    private func autocompleteRank(for entry: BrowserHistoryEntry, query: String) -> Int? {
-        let normalizedURL = normalizedAutocompleteText(entry.urlString)
-        let displayURL = displayAutocompleteText(for: entry.urlString)
-        let host = URL(string: entry.urlString)?.host.map(normalizedAutocompleteText) ?? ""
-        let title = normalizedAutocompleteText(entry.title)
-
-        guard normalizedURL != query, displayURL != query else {
-            return nil
-        }
-
-        if normalizedURL.hasPrefix(query) {
-            return 0
-        }
-        if displayURL.hasPrefix(query) {
-            return 1
-        }
-        if host.hasPrefix(query) {
-            return 2
-        }
-        if normalizedURL.contains(query) || displayURL.contains(query) {
-            return 3
-        }
-        if title.contains(query) {
-            return 4
-        }
-        if entry.summary?.lowercased().contains(query) == true {
-            return 5
-        }
-        return nil
-    }
-
-    private func normalizedAutocompleteText(_ text: String) -> String {
-        text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-    }
-
-    private func displayAutocompleteText(for urlString: String) -> String {
-        var text = normalizedAutocompleteText(urlString)
-        for prefix in ["https://www.", "http://www.", "https://", "http://"] where text.hasPrefix(prefix) {
-            text.removeFirst(prefix.count)
-            break
-        }
-        return text
     }
 
     private static func uniquePeerExperts(_ experts: [AFMA2APeerExpert]) -> [AFMA2APeerExpert] {
