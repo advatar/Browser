@@ -931,6 +931,9 @@ struct XRPLLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// UNL-quorum checks are fixture-backed and do not yet replace a production XRPL validator /
+/// rippled verification path; live state is served via RPC fallback (`.rpcFallback`).
 final class XRPLLightClientServiceClient {
     private let configuration: XRPLLightClientEndpointConfiguration
     private let session: URLSession

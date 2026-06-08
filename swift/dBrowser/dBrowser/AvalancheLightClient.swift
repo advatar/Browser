@@ -756,6 +756,9 @@ struct AvalancheLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// Accepted-finality checks are fixture-backed and do not yet replace a production AvalancheGo
+/// light client; live state is served via RPC fallback (`.rpcFallback`), not local verification.
 final class AvalancheLightClientServiceClient {
     private let configuration: AvalancheLightClientEndpointConfiguration
     private let session: URLSession

@@ -573,6 +573,10 @@ struct SolanaLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// Slot-root and account proofs are currently fixture-backed (`SolanaFixtureProof`) and live state
+/// is served via RPC fallback (`.rpcFallback`); this is not local consensus verification. Target:
+/// replace fixtures/fallback with real proof verification.
 final class SolanaLightClientServiceClient {
     private let configuration: SolanaLightClientEndpointConfiguration
     private let session: URLSession

@@ -770,6 +770,10 @@ struct CosmosLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// It DOES perform Tendermint header verification (trusted period + validator set) where a
+/// verification bundle is supplied, but otherwise serves state via RPC fallback (`.rpcFallback`)
+/// rather than local verification. Target: extend real header verification to the default path.
 final class CosmosLightClientServiceClient {
     private let configuration: CosmosLightClientEndpointConfiguration
     private let session: URLSession

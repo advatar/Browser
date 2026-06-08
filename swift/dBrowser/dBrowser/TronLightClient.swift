@@ -853,6 +853,9 @@ struct TronLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// Witness-quorum checks are fixture-backed and do not yet replace a production TRON full-node
+/// light client; live state is served via RPC fallback (`.rpcFallback`), not local verification.
 final class TronLightClientServiceClient {
     private let configuration: TronLightClientEndpointConfiguration
     private let session: URLSession

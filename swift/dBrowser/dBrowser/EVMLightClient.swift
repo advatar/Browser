@@ -744,6 +744,10 @@ struct EVMLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service,
+/// not an in-process verifier. Finality models and proof types are modeled, but chain state is
+/// served via RPC fallback (`.rpcFallback`) by default; sync-committee, account, and storage
+/// proofs are not yet verified locally. Target: real proof verification that removes the fallback.
 final class EVMLightClientServiceClient {
     private let configuration: EVMLightClientEndpointConfiguration
     private let session: URLSession

@@ -797,6 +797,10 @@ struct SubstrateLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
+/// It models GRANDPA finality justifications (with conflicting-justification handling) but also
+/// uses fixture leaf hashes, and serves state via RPC fallback (`.rpcFallback`) by default rather
+/// than local verification. Target: real GRANDPA + storage-proof checks that remove the fallback.
 final class SubstrateLightClientServiceClient {
     private let configuration: SubstrateLightClientEndpointConfiguration
     private let session: URLSession

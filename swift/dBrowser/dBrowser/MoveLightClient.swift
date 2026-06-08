@@ -1027,6 +1027,10 @@ struct MoveLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service
+/// for Sui and Aptos. Checkpoint and ledger-info quorum checks are fixture-backed and do not yet
+/// replace a production Sui/Aptos light client; live state is served via RPC fallback
+/// (`.rpcFallback`), not local verification.
 final class MoveLightClientServiceClient {
     private let configuration: MoveLightClientEndpointConfiguration
     private let session: URLSession

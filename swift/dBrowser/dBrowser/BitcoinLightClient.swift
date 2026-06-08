@@ -584,6 +584,12 @@ struct BitcoinLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
+/// Trust boundary (goal: minimize remote trust). Despite the "light client" name, this is a
+/// client for a remote light-client/RPC service, not a full node. It DOES validate supplied
+/// block-header proof-of-work and hash linkage locally, but it does not yet fetch or prove a
+/// header chain to tip itself, so unproven state is labeled `.rpcFallback`/`.gatewayRPCFallback`
+/// rather than presented as local consensus verification. Target: end-to-end SPV that removes the
+/// RPC fallback.
 final class BitcoinLightClientServiceClient {
     private let configuration: BitcoinLightClientEndpointConfiguration
     private let session: URLSession
