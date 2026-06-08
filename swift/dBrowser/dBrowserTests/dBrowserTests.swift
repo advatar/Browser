@@ -11,6 +11,7 @@ import CryptoKit
 import MLXLMCommon
 @testable import dBrowser
 
+@MainActor
 struct dBrowserTests {
 
     @Test func bareDomainResolvesToHTTPS() {

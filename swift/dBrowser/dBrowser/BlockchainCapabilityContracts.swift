@@ -80,7 +80,7 @@ struct BlockchainCapabilityGrant: Codable, Equatable {
     var expiresAt: Date?
     var approvalGates: [String]
 
-    init(
+    nonisolated init(
         readChainData: Bool = true,
         readWalletState: Bool = true,
         prepareTransactions: Bool = true,
@@ -119,7 +119,7 @@ struct BlockchainCapabilityGrant: Codable, Equatable {
         )
     }
 
-    static func defaultForMCPServer() -> BlockchainCapabilityGrant {
+    nonisolated static func defaultForMCPServer() -> BlockchainCapabilityGrant {
         BlockchainCapabilityGrant(
             requestSigning: false,
             requestBroadcast: false,
@@ -226,7 +226,7 @@ struct BlockchainCapabilityGrant: Codable, Equatable {
         }
     }
 
-    static let defaultChainRefs: [String] = [
+    nonisolated static let defaultChainRefs: [String] = [
         "bitcoin-mainnet",
         "ethereum-mainnet",
         "base-mainnet",
@@ -245,13 +245,13 @@ struct BlockchainCapabilityGrant: Codable, Equatable {
         "aptos-mainnet"
     ]
 
-    static let defaultApprovalGates: [String] = [
+    nonisolated static let defaultApprovalGates: [String] = [
         "wallet account read",
         "transaction signing request",
         "transaction broadcast request"
     ]
 
-    private static func normalizedChainRefs(_ chainRefs: [String]) -> [String] {
+    nonisolated private static func normalizedChainRefs(_ chainRefs: [String]) -> [String] {
         var seen = Set<String>()
         return chainRefs.compactMap { chainRef in
             let normalized = ChainTrustStatus.normalized(chainRef)

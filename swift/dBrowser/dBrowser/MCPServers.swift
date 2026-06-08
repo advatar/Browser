@@ -56,7 +56,7 @@ struct MCPServerStatus: Codable, Equatable {
     var checkedAt: Date?
     var discoveredTools: [String]
 
-    static let disabled = MCPServerStatus(
+    nonisolated static let disabled = MCPServerStatus(
         state: .disabled,
         message: "Enable this MCP server before connecting.",
         checkedAt: nil,
@@ -95,7 +95,7 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         case status
     }
 
-    init(
+    nonisolated init(
         id: String,
         name: String,
         transport: MCPServerTransport,
