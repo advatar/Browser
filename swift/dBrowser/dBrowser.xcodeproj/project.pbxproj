@@ -355,7 +355,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
@@ -405,7 +405,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
@@ -670,6 +670,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../Packages/SwiftLM" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../Packages/SwiftLM;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -688,13 +695,6 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../Packages/SwiftLM" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../Packages/SwiftLM;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		0234635C5599E4E9FA57EED8 /* MLXLMCommon */ = {
