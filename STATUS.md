@@ -27,7 +27,7 @@ Driven by the 2026-06-08 concept/code/UX review (#146). Closing the highest-prio
 
 - [x] 1. Make the EUDI VC trust anchor real: implement CryptoKit ES256/EdDSA VC-JWT issuer-signature verification against a configured issuer trust store, label imported-credential signature trust (`issuer_signature_verified` vs `unverified_envelope`), and reject forged/untrusted/tampered VC-JWTs instead of importing them.
 - [x] 1b. Trim overstated landing-page claim: mark the web comparison "Native IPFS/IPNS path" as partial (gateway-fallback labeled), matching the actual gateway resolution path.
-- [ ] 2. Fix the 4 Swift 6 MainActor isolation warnings and add `[weak self]`/cancellation to the Copilot `Task` blocks.
+- [x] 2. Fix the 4 Swift 6 MainActor isolation warnings (marked the value-type `localDefaults`/`disabled` statics, `init(status:)`, `init(record:)`, and the pure `ChainTrustStatus.displaySummary` / `ChainTrust*` `title` accessors `nonisolated`) and add `[weak self]` + guard to the five Copilot/runtime `Task { @MainActor in }` blocks.
 - [ ] 3. Begin decomposing `BrowserViewModel`/`ContentView` god objects into per-domain stores/panels.
 - [ ] 4. Replace the hard-coded developer Broom MLX model path with a resolved/configurable location.
 - [ ] 5. Narrow the primary UX to three surfaces (Browse / Copilot / Wallet & Identity); demote dashboards.

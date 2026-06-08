@@ -1304,9 +1304,9 @@ struct DecentralizedStorageNativeAdapterEndpoint: Equatable {
 struct DecentralizedStorageNativeAdapterConfiguration: Equatable {
     var endpoints: [String: DecentralizedStorageNativeAdapterEndpoint]
 
-    static let disabled = DecentralizedStorageNativeAdapterConfiguration(endpoints: [:])
+    nonisolated static let disabled = DecentralizedStorageNativeAdapterConfiguration(endpoints: [:])
 
-    static let localDefaults = DecentralizedStorageNativeAdapterConfiguration(
+    nonisolated static let localDefaults = DecentralizedStorageNativeAdapterConfiguration(
         endpoints: [
             "filecoin": DecentralizedStorageNativeAdapterEndpoint(
                 baseURL: URL(string: "http://127.0.0.1:4881")!,

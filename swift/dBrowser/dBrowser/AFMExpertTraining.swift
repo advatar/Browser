@@ -266,7 +266,7 @@ struct AFMA2APeerExpert: Codable, Equatable, Identifiable {
     var attestationSummary: String
     var publishReadiness: AFMExpertPublishReadiness?
 
-    init(record: AFMExpertRecord) {
+    nonisolated init(record: AFMExpertRecord) {
         self.id = record.id
         self.displayName = record.name
         self.baseModelID = record.baseModel

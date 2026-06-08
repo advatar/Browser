@@ -272,7 +272,7 @@ struct BlockchainChainAccessDescriptor: Codable, Equatable, Identifiable {
     var supportedProofTypes: [String]
     var summary: String
 
-    init(status: ChainTrustStatus) {
+    nonisolated init(status: ChainTrustStatus) {
         self.chainRef = status.chainRef
         self.displayName = status.displayName
         self.family = status.family

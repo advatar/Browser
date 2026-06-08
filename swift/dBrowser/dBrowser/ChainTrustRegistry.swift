@@ -14,7 +14,7 @@ enum ChainTrustFamily: String, Codable, Equatable, CaseIterable {
     case aptos
     case unknown
 
-    var title: String {
+    nonisolated var title: String {
         switch self {
         case .bitcoin: "Bitcoin"
         case .ethereum: "Ethereum/EVM"
@@ -41,7 +41,7 @@ enum ChainTrustState: String, Codable, Equatable, CaseIterable {
     case stale
     case failed
 
-    var title: String {
+    nonisolated var title: String {
         switch self {
         case .unavailable: "Unavailable"
         case .syncing: "Syncing"
@@ -66,7 +66,7 @@ enum ChainTrustSource: String, Codable, Equatable {
     case remoteRuntime
     case unavailable
 
-    var title: String {
+    nonisolated var title: String {
         switch self {
         case .embeddedLightClient: "Embedded light client"
         case .localProof: "Local proof"
@@ -188,7 +188,7 @@ struct ChainTrustStatus: Codable, Equatable, Identifiable {
         self.lastUpdated = lastUpdated
     }
 
-    var displaySummary: String {
+    nonisolated var displaySummary: String {
         switch state {
         case .verified:
             return "\(displayName) is locally verified by \(trustSource.title)."

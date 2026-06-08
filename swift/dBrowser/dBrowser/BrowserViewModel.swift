@@ -720,7 +720,8 @@ final class BrowserViewModel: ObservableObject {
         }
         requestPageSnapshot()
 
-        let task = Task { @MainActor in
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
             appendCopilotEvent(runID: runID, kind: .memoryAccessStarted, message: "Requested governed memory from OpenMind.")
             latestOpenMindStepUpRequest = nil
             let memoryRecall = await openMindMemoryClient.recall(
@@ -828,7 +829,8 @@ final class BrowserViewModel: ObservableObject {
             return nil
         }
 
-        return Task { @MainActor in
+        return Task { @MainActor [weak self] in
+            guard let self else { return }
             let request = await openMindMemoryClient.requestStepUpGrant(
                 intent: intent,
                 decision: recall.decision,
@@ -845,7 +847,8 @@ final class BrowserViewModel: ObservableObject {
     @discardableResult
     func requestOpenMindWriteback(for runID: UUID) -> Task<Void, Never>? {
         guard copilotRuns.contains(where: { $0.id == runID }) else { return nil }
-        return Task { @MainActor in
+        return Task { @MainActor [weak self] in
+            guard let self else { return }
             _ = await writeBackOpenMindMemory(for: runID)
         }
     }
@@ -858,7 +861,8 @@ final class BrowserViewModel: ObservableObject {
             return nil
         }
 
-        return Task { @MainActor in
+        return Task { @MainActor [weak self] in
+            guard let self else { return }
             let run = copilotRuns.first
             if let runID = run?.id {
                 appendCopilotEvent(
@@ -1104,7 +1108,8 @@ final class BrowserViewModel: ObservableObject {
         tabs[index].canGoForward = false
         addressText = raw
 
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             let resolution = await runtimeBridge.resolve(raw)
             applyRuntimeResolution(resolution, tabID: tabID, fallbackMessage: fallbackMessage)
         }
