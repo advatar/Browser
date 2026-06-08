@@ -1743,6 +1743,28 @@ struct dBrowserTests {
         #expect(receipt.signatureDigest == nil)
     }
 
+    @Test func keychainWalletSeedStoreGeneratesAndPersistsSecureSeed() {
+        let account = "unit-test-\(UUID().uuidString)"
+        let store = KeychainWalletSeedStore(service: "dbrowser-unit-test-\(UUID().uuidString)")
+        defer { store.deleteSeed(account: account) }
+
+        // Nothing stored yet.
+        #expect(store.loadSeed(account: account) == nil)
+
+        // First access generates 256 bits (64 hex chars) of secure entropy, not a UUID.
+        let created = store.loadOrCreateSeed(account: account)
+        #expect(created.count == 64)
+        #expect(created.allSatisfy { $0.isHexDigit })
+
+        // The seed is stable across loads rather than regenerated on every wallet creation.
+        #expect(store.loadOrCreateSeed(account: account) == created)
+        #expect(store.loadSeed(account: account) == created)
+
+        // Freshly generated seeds are unique and correctly sized.
+        #expect(WalletSeedFactory.generateSeedHex() != WalletSeedFactory.generateSeedHex())
+        #expect(WalletSeedFactory.generateSeedHex().count == 64)
+    }
+
     @MainActor
     @Test func brokeredWalletTransactionContractsEnforceSigningAndBroadcastPermissions() async {
         let bridge = MobileRuntimeBridge()

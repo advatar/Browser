@@ -389,7 +389,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         lastError: "Aptos Move light-client service not checked yet."
     )
     @Published private(set) var chainTrustSnapshot: ChainTrustRegistry
-    private var retainedWalletSeed: String?
+    private let walletSeedStore = KeychainWalletSeedStore()
+    private static let embeddedWalletSeedAccount = "embedded-browser-wallet"
     private var retainedEmbeddedWalletProfile: EmbeddedWalletProfile?
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
@@ -897,8 +898,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     }
 
     func createEmbeddedWallet(label: String = "Embedded browser wallet") async -> WalletBridgeInfo {
-        let seed = retainedWalletSeed ?? UUID().uuidString
-        retainedWalletSeed = seed
+        // Source the seed from secure Keychain storage, generating cryptographically-secure
+        // entropy on first use instead of an in-memory UUID.
+        let seed = walletSeedStore.loadOrCreateSeed(account: Self.embeddedWalletSeedAccount)
         let profile = retainedEmbeddedWalletProfile ?? EmbeddedWalletProfile(
             displayName: label,
             seedFingerprint: String(WalletPolicyEngine.sha256Hex(seed).prefix(16))

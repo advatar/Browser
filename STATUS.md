@@ -38,7 +38,7 @@ Review follow-ups (from #146):
 
 - [x] A. Visa TAP signature-byte verification: added `VisaTrustedAgentKeyStore`, a canonical signing base, a `signatureValue` field, and a `verify(_:keyStore:now:)` overload that cryptographically verifies the signature bytes (Ed25519 / ECDSA P-256 via CryptoKit) after the metadata pre-checks; RSA-PSS is recognized but reported as not locally verifiable. Added `missingSignatureValue`/`signatureInvalid` statuses and a crypto test (genuine, tampered, unknown key, missing bytes, RSA).
 - [ ] B. Rename/relabel the `*LightClient` types to reflect RPC/gateway trust delegation.
-- [ ] C. Keychain/Secure Enclave wallet seed storage.
+- [x] C. Keychain wallet seed storage: added `KeychainWalletSeedStore` (system Keychain, `AfterFirstUnlockThisDeviceOnly`, in-memory fallback when unentitled) and `WalletSeedFactory.generateSeedHex` (256-bit secure entropy). `createEmbeddedWallet` now loads-or-creates the seed from secure storage instead of holding a `UUID().uuidString` in memory. Added a hermetic round-trip test. (Secure Enclave key-wrapping of the seed and BIP-39 mnemonic encoding remain follow-ups.)
 - [ ] D. Full `BrowserViewModel` per-domain store split.
 
 Validation notes:
