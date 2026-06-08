@@ -6785,6 +6785,52 @@ struct dBrowserTests {
         #expect(unsupported.status == .unsupportedAlgorithm)
     }
 
+    @Test func visaTrustedAgentVerifierCryptographicallyVerifiesSignatureBytes() throws {
+        let signingKey = Curve25519.Signing.PrivateKey()
+        var request = AgenticPaymentFixtures.visaRequest
+        request.signature.keyID = "visa-ed-key"
+        request.signature.algorithm = "ed25519"
+
+        let keyStore = VisaTrustedAgentKeyStore(keys: [
+            VisaTrustedAgentKey(
+                keyID: "visa-ed-key",
+                algorithm: "ed25519",
+                publicKeyRaw: signingKey.publicKey.rawRepresentation
+            )
+        ])
+
+        let signingBase = VisaTrustedAgentVerifier.canonicalSigningBase(for: request)
+        request.signature.signatureValue = try signingKey.signature(for: signingBase).base64EncodedString()
+
+        // A genuine signature over the canonical base verifies.
+        #expect(VisaTrustedAgentVerifier.verify(request, keyStore: keyStore, now: AgenticPaymentFixtures.now).status == .verified)
+
+        // Tampering the body digest changes the signing base, so the bytes no longer validate.
+        var tampered = request
+        tampered.bodyDigest += "0"
+        #expect(VisaTrustedAgentVerifier.verify(tampered, keyStore: keyStore, now: AgenticPaymentFixtures.now).status == .signatureInvalid)
+
+        // An empty key store cannot recognize the key.
+        #expect(VisaTrustedAgentVerifier.verify(request, keyStore: VisaTrustedAgentKeyStore(), now: AgenticPaymentFixtures.now).status == .unknownKey)
+
+        // Without signature bytes there is nothing to verify.
+        var noSignature = request
+        noSignature.signature.signatureValue = nil
+        #expect(VisaTrustedAgentVerifier.verify(noSignature, keyStore: keyStore, now: AgenticPaymentFixtures.now).status == .missingSignatureValue)
+
+        // RSA-PSS is recognized but not locally verifiable, so it never reaches verified.
+        var rsa = request
+        rsa.signature.algorithm = "rsa-pss-sha256"
+        let rsaKeyStore = VisaTrustedAgentKeyStore(keys: [
+            VisaTrustedAgentKey(
+                keyID: "visa-ed-key",
+                algorithm: "rsa-pss-sha256",
+                publicKeyRaw: signingKey.publicKey.rawRepresentation
+            )
+        ])
+        #expect(VisaTrustedAgentVerifier.verify(rsa, keyStore: rsaKeyStore, now: AgenticPaymentFixtures.now).status == .unsupportedAlgorithm)
+    }
+
     @Test func acpCheckoutBindsBasketAndDoesNotStoreRawPaymentCredentials() {
         let checkout = AgenticPaymentFixtures.acpCheckout
 

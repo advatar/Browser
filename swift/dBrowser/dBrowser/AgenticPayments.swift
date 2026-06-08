@@ -885,6 +885,29 @@ struct VisaTrustedAgentSignature: Codable, Equatable {
     var issuedAt: Date
     var expiresAt: Date
     var sessionID: String
+    /// Base64-encoded signature bytes over the canonical signing base. Optional so existing
+    /// reference-only requests remain valid; required for cryptographic verification.
+    var signatureValue: String?
+
+    init(
+        keyID: String,
+        algorithm: String,
+        signatureReference: String,
+        signedHeaders: [String],
+        issuedAt: Date,
+        expiresAt: Date,
+        sessionID: String,
+        signatureValue: String? = nil
+    ) {
+        self.keyID = keyID
+        self.algorithm = algorithm
+        self.signatureReference = signatureReference
+        self.signedHeaders = signedHeaders
+        self.issuedAt = issuedAt
+        self.expiresAt = expiresAt
+        self.sessionID = sessionID
+        self.signatureValue = signatureValue
+    }
 
     var coversRequiredHeaders: Bool {
         let required = Set(["method", "target-uri", "body-digest", "created", "expires"])
@@ -912,6 +935,8 @@ enum VisaTrustedAgentVerificationStatus: String, Codable, Equatable {
     case unknownKey
     case unsupportedAlgorithm
     case missingPaymentContext
+    case missingSignatureValue
+    case signatureInvalid
 }
 
 struct VisaTrustedAgentVerification: Codable, Equatable {
@@ -955,6 +980,123 @@ enum VisaTrustedAgentVerifier {
             merchantID: request.merchantID
         )
     }
+
+    /// Locally verifiable Visa Trusted Agent signature algorithms. RSA-PSS is intentionally
+    /// excluded because CryptoKit cannot verify it without the Security framework SecKey path.
+    static let locallyVerifiableAlgorithms = Set(["ed25519", "ecdsa-p256-sha256"])
+
+    /// Canonical signing base for a request, derived from the required signed components in a
+    /// deterministic order. Both signer and verifier must agree on this base. This is a dBrowser
+    /// canonical base pending exact RFC 9421 signature-base alignment with Visa.
+    static func canonicalSigningBase(for request: VisaTrustedAgentRequest) -> Data {
+        let lines = [
+            "\"@method\": \(request.method)",
+            "\"@target-uri\": \(request.targetURI)",
+            "\"body-digest\": \(request.bodyDigest)",
+            "\"@created\": \(Int(request.signature.issuedAt.timeIntervalSince1970))",
+            "\"@expires\": \(Int(request.signature.expiresAt.timeIntervalSince1970))",
+            "\"@key-id\": \(request.signature.keyID)"
+        ]
+        return Data(lines.joined(separator: "\n").utf8)
+    }
+
+    /// Cryptographically verifies the request signature bytes against a trusted key, in addition
+    /// to the metadata checks. This is what makes a "verified" trusted-agent request real: a
+    /// forged or tampered request whose signature does not validate against the trusted key is
+    /// rejected instead of accepted on metadata alone.
+    static func verify(
+        _ request: VisaTrustedAgentRequest,
+        keyStore: VisaTrustedAgentKeyStore,
+        now: Date = Date()
+    ) -> VisaTrustedAgentVerification {
+        func result(_ status: VisaTrustedAgentVerificationStatus) -> VisaTrustedAgentVerification {
+            VisaTrustedAgentVerification(
+                status: status,
+                keyID: request.signature.keyID,
+                agentProviderID: request.agentProviderID,
+                merchantID: request.merchantID
+            )
+        }
+
+        // Run the same metadata pre-checks first.
+        if request.signature.expiresAt <= now || request.signature.issuedAt > now {
+            return result(.expired)
+        }
+        if !request.signature.coversRequiredHeaders {
+            return result(.missingRequiredHeaders)
+        }
+        guard let key = keyStore.key(forID: request.signature.keyID) else {
+            return result(.unknownKey)
+        }
+        let algorithm = request.signature.algorithm.lowercased()
+        guard supportedAlgorithms.contains(algorithm) else {
+            return result(.unsupportedAlgorithm)
+        }
+        if request.paymentContainerHash == nil {
+            return result(.missingPaymentContext)
+        }
+        // Only algorithms dBrowser can locally verify with CryptoKit may reach `.verified`.
+        guard locallyVerifiableAlgorithms.contains(algorithm), key.algorithm.lowercased() == algorithm else {
+            return result(.unsupportedAlgorithm)
+        }
+        guard
+            let signatureValue = request.signature.signatureValue,
+            let signatureData = Data(base64Encoded: signatureValue)
+        else {
+            return result(.missingSignatureValue)
+        }
+
+        let signingBase = canonicalSigningBase(for: request)
+        let signatureValid = verifySignature(signatureData, over: signingBase, key: key, algorithm: algorithm)
+        return result(signatureValid ? .verified : .signatureInvalid)
+    }
+
+    private static func verifySignature(
+        _ signature: Data,
+        over message: Data,
+        key: VisaTrustedAgentKey,
+        algorithm: String
+    ) -> Bool {
+        switch algorithm {
+        case "ecdsa-p256-sha256":
+            guard
+                let publicKey = try? P256.Signing.PublicKey(rawRepresentation: key.publicKeyRaw),
+                let parsed = try? P256.Signing.ECDSASignature(rawRepresentation: signature)
+            else { return false }
+            return publicKey.isValidSignature(parsed, for: message)
+        case "ed25519":
+            guard let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: key.publicKeyRaw) else {
+                return false
+            }
+            return publicKey.isValidSignature(signature, for: message)
+        default:
+            return false
+        }
+    }
+}
+
+/// A trusted Visa Trusted Agent signing key, normally discovered from the agent provider's key
+/// directory. `publicKeyRaw` is the raw key representation: 64-byte x||y for ECDSA P-256,
+/// 32-byte compressed point for Ed25519.
+struct VisaTrustedAgentKey: Equatable, Identifiable {
+    var keyID: String
+    var algorithm: String
+    var publicKeyRaw: Data
+    var id: String { keyID }
+}
+
+struct VisaTrustedAgentKeyStore: Equatable {
+    private(set) var keysByID: [String: VisaTrustedAgentKey]
+
+    init(keys: [VisaTrustedAgentKey] = []) {
+        var map: [String: VisaTrustedAgentKey] = [:]
+        for key in keys { map[key.keyID] = key }
+        keysByID = map
+    }
+
+    func key(forID keyID: String) -> VisaTrustedAgentKey? { keysByID[keyID] }
+
+    var isEmpty: Bool { keysByID.isEmpty }
 }
 
 struct ACPLineItem: Codable, Equatable, Identifiable {

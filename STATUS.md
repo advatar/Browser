@@ -34,6 +34,13 @@ Driven by the 2026-06-08 concept/code/UX review (#146). Closing the highest-prio
 - [x] 5. Narrowed the primary UX to three surfaces. Added a `BrowserPanelTier` with `primaryPanels = [.copilot, .wallet]` (plus the web Browser as the nil selection) and `advancedPanels = [history, bookmarks, mcp, a2ui, advantage, localLLM, runtime]`, renamed the wallet surface to "Wallet & Identity", and regrouped both the macOS sidebar (`Browse` section + demoted `Advanced` section) and the iOS panel selector (primary grid + demoted "Advanced" grid). All panel buttons remain reachable so the iOS UI test still passes.
 - [x] 6. Added behavior tests beyond the existing model/fixture assertions: `navigationUpdateDrivesTabLifecycleAndHistory` (real WKWebView load lifecycle through `applyNavigationUpdate`, asserting history is committed only on load completion), `unresolvableAddressSurfacesRuntimeNoticeWithoutHistory` (gateway/handler-down fallback surfaces a labeled runtime notice and records no history), and `closingTabCancelsBoundCopilotRuns` (closing a tab cancels its in-flight Copilot runs and frees the active-run slot). Full `dBrowserTests` suite: 187 passing under Swift 6.
 
+Review follow-ups (from #146):
+
+- [x] A. Visa TAP signature-byte verification: added `VisaTrustedAgentKeyStore`, a canonical signing base, a `signatureValue` field, and a `verify(_:keyStore:now:)` overload that cryptographically verifies the signature bytes (Ed25519 / ECDSA P-256 via CryptoKit) after the metadata pre-checks; RSA-PSS is recognized but reported as not locally verifiable. Added `missingSignatureValue`/`signatureInvalid` statuses and a crypto test (genuine, tampered, unknown key, missing bytes, RSA).
+- [ ] B. Rename/relabel the `*LightClient` types to reflect RPC/gateway trust delegation.
+- [ ] C. Keychain/Secure Enclave wallet seed storage.
+- [ ] D. Full `BrowserViewModel` per-domain store split.
+
 Validation notes:
 
 - `xcodebuild test ... -only-testing:dBrowserTests/eudiImportsVerifiedEmailFromIssuerSignedVCJWT -only-testing:dBrowserTests/eudiRejectsVCJWTSignedByUntrustedKey -only-testing:dBrowserTests/eudiRejectsVCJWTWithTamperedPayload -only-testing:dBrowserTests/eudiRejectsVCJWTWithUnknownKeyID -only-testing:dBrowserTests/eudiEmailCredentialImporterAcceptsCliwalletVerifiedEmailForHumanWallet` reported `** TEST SUCCEEDED **`.
