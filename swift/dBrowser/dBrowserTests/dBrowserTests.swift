@@ -3284,18 +3284,50 @@ struct dBrowserTests {
         #expect(weakResult.summary.contains("two-thirds"))
     }
 
+    @Test func tendermintRejectsUnverifiedAndForgedCommitSignatures() {
+        let bundle = Self.cosmosHeaderBundle(chain: .cosmosHub)
+
+        // A validator merely flagged `signed` but carrying no verifiable signature bytes must not
+        // count toward the two-thirds threshold (this is the trust gap that is now closed).
+        var flagOnly = bundle
+        flagOnly.commit.signatures[1] = TendermintCommitSignature(
+            validatorAddress: bundle.validatorSet.validators[1].address,
+            blockIDHash: bundle.header.hash,
+            signed: true,
+            signature: nil
+        )
+        let flagOnlyResult = flagOnly.verify(nowUnixSeconds: 1_778_889_600)
+        #expect(flagOnlyResult.verified == false)
+        #expect(flagOnlyResult.summary.contains("two-thirds"))
+
+        // A signature produced by the wrong validator key does not verify and is not counted.
+        var forged = bundle
+        forged.commit.signatures[1] = Self.cosmosCommitSignature(
+            Self.cosmosValidatorKey(0xC3),
+            address: bundle.validatorSet.validators[1].address,
+            chain: .cosmosHub,
+            height: bundle.header.height,
+            round: 0,
+            blockIDHash: bundle.header.hash
+        )
+        let forgedResult = forged.verify(nowUnixSeconds: 1_778_889_600)
+        #expect(forgedResult.verified == false)
+    }
+
     @Test func tendermintTrustPeriodExpiryAndConflictingCommitsAreExplicit() {
         let bundle = Self.cosmosHeaderBundle(chain: .cosmosHub)
         let expiredResult = bundle.verify(nowUnixSeconds: bundle.trustPolicy.trustedTimeUnixSeconds + bundle.trustPolicy.trustPeriodSeconds + 1)
         var conflictBundle = bundle
         let conflictingHash = TendermintHex.sha256Hex("conflicting-block")
+        // The same validators (a, b) double-sign a conflicting block with real Ed25519 signatures,
+        // so the equivocation is detected via cryptographic verification, not a flag.
         conflictBundle.conflictingCommit = TendermintCommit(
             height: bundle.header.height,
             round: 0,
             blockIDHash: conflictingHash,
             signatures: [
-                TendermintCommitSignature(validatorAddress: bundle.validatorSet.validators[0].address, blockIDHash: conflictingHash),
-                TendermintCommitSignature(validatorAddress: bundle.validatorSet.validators[1].address, blockIDHash: conflictingHash)
+                Self.cosmosCommitSignature(Self.cosmosValidatorKey(0xA1), address: bundle.validatorSet.validators[0].address, chain: .cosmosHub, height: bundle.header.height, round: 0, blockIDHash: conflictingHash),
+                Self.cosmosCommitSignature(Self.cosmosValidatorKey(0xB2), address: bundle.validatorSet.validators[1].address, chain: .cosmosHub, height: bundle.header.height, round: 0, blockIDHash: conflictingHash)
             ],
             source: "fixture"
         )
@@ -8128,11 +8160,42 @@ struct dBrowserTests {
         return SolanaProofBundle(snapshot: snapshot, proof: proof)
     }
 
+    static func cosmosValidatorKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        // Deterministic Ed25519 key from a fixed 32-byte seed so the fixture is both real and stable.
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    static func cosmosCommitSignature(
+        _ key: Curve25519.Signing.PrivateKey,
+        address: String,
+        chain: CosmosChain,
+        height: Int,
+        round: Int,
+        blockIDHash: String
+    ) -> TendermintCommitSignature {
+        let message = TendermintCommitSignatureVerifier.canonicalSignBytes(
+            chainID: chain.chainID,
+            height: height,
+            round: round,
+            blockIDHash: blockIDHash
+        )
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return TendermintCommitSignature(
+            validatorAddress: address,
+            blockIDHash: blockIDHash,
+            signed: true,
+            signature: signature
+        )
+    }
+
     private static func cosmosHeaderBundle(chain: CosmosChain) -> TendermintHeaderVerificationBundle {
+        let keyA = cosmosValidatorKey(0xA1)
+        let keyB = cosmosValidatorKey(0xB2)
+        let keyC = cosmosValidatorKey(0xC3)
         let validators = [
-            TendermintValidator(address: String(repeating: "a1", count: 20), publicKey: "cosmos-pubkey-a", votingPower: 40, name: "validator-a"),
-            TendermintValidator(address: String(repeating: "b2", count: 20), publicKey: "cosmos-pubkey-b", votingPower: 35, name: "validator-b"),
-            TendermintValidator(address: String(repeating: "c3", count: 20), publicKey: "cosmos-pubkey-c", votingPower: 25, name: "validator-c")
+            TendermintValidator(address: String(repeating: "a1", count: 20), publicKey: keyA.publicKey.rawRepresentation.base64EncodedString(), votingPower: 40, name: "validator-a"),
+            TendermintValidator(address: String(repeating: "b2", count: 20), publicKey: keyB.publicKey.rawRepresentation.base64EncodedString(), votingPower: 35, name: "validator-b"),
+            TendermintValidator(address: String(repeating: "c3", count: 20), publicKey: keyC.publicKey.rawRepresentation.base64EncodedString(), votingPower: 25, name: "validator-c")
         ]
         let validatorSet = TendermintValidatorSet(
             chain: chain,
@@ -8158,8 +8221,8 @@ struct dBrowserTests {
             round: 0,
             blockIDHash: header.hash,
             signatures: [
-                TendermintCommitSignature(validatorAddress: validators[0].address, blockIDHash: header.hash),
-                TendermintCommitSignature(validatorAddress: validators[1].address, blockIDHash: header.hash),
+                cosmosCommitSignature(keyA, address: validators[0].address, chain: chain, height: header.height, round: 0, blockIDHash: header.hash),
+                cosmosCommitSignature(keyB, address: validators[1].address, chain: chain, height: header.height, round: 0, blockIDHash: header.hash),
                 TendermintCommitSignature(validatorAddress: validators[2].address, blockIDHash: header.hash, signed: false)
             ],
             source: "fixture"

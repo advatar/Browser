@@ -491,6 +491,54 @@ struct TendermintTrustPolicy: Codable, Equatable {
     }
 }
 
+/// Real Ed25519 verification of Tendermint commit signatures. This closes the Cosmos trust gap:
+/// the two-thirds voting-power threshold is computed from validators whose signature
+/// cryptographically verifies against their public key, not from a `signed` boolean flag a remote
+/// service could assert. `canonicalSignBytes` is a dBrowser-deterministic vote encoding pending
+/// exact Tendermint CanonicalVote protobuf alignment; both signer and verifier must agree on it.
+enum TendermintCommitSignatureVerifier {
+    static func canonicalSignBytes(chainID: String, height: Int, round: Int, blockIDHash: String) -> Data {
+        Data("tendermint-canonical-vote|\(chainID)|\(height)|\(round)|\(TendermintHex.normalized(blockIDHash))".utf8)
+    }
+
+    /// Addresses whose commit signature verifies against their validator-set public key. A
+    /// signature that is merely flagged `signed` but carries no verifiable bytes does not count.
+    static func verifiedSignerAddresses(
+        commit: TendermintCommit,
+        validatorSet: TendermintValidatorSet,
+        chainID: String
+    ) -> Set<String> {
+        var validatorsByAddress: [String: TendermintValidator] = [:]
+        for validator in validatorSet.validators {
+            validatorsByAddress[TendermintHex.normalized(validator.address)] = validator
+        }
+
+        var verified = Set<String>()
+        for signature in commit.signatures where signature.signed {
+            let address = TendermintHex.normalized(signature.validatorAddress)
+            guard
+                let validator = validatorsByAddress[address],
+                let publicKeyBase64 = validator.publicKey,
+                let publicKeyData = Data(base64Encoded: publicKeyBase64),
+                let publicKey = try? Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData),
+                let signatureBase64 = signature.signature,
+                let signatureData = Data(base64Encoded: signatureBase64)
+            else { continue }
+
+            let message = canonicalSignBytes(
+                chainID: chainID,
+                height: commit.height,
+                round: commit.round,
+                blockIDHash: signature.blockIDHash
+            )
+            if publicKey.isValidSignature(signatureData, for: message) {
+                verified.insert(address)
+            }
+        }
+        return verified
+    }
+}
+
 struct TendermintHeaderVerificationBundle: Codable, Equatable {
     var header: TendermintHeader
     var validatorSet: TendermintValidatorSet
@@ -532,10 +580,17 @@ struct TendermintHeaderVerificationBundle: Codable, Equatable {
                 summary: "Tendermint trusted period expired before this header could be verified."
             )
         }
+        let chainID = header.chain.chainID
         if let conflictingCommit,
            conflictingCommit.height == commit.height,
            TendermintHex.normalized(conflictingCommit.blockIDHash) != TendermintHex.normalized(commit.blockIDHash),
-           validatorSet.hasTwoThirdsPower(addresses: conflictingCommit.signedAddresses) {
+           validatorSet.hasTwoThirdsPower(
+               addresses: TendermintCommitSignatureVerifier.verifiedSignerAddresses(
+                   commit: conflictingCommit,
+                   validatorSet: validatorSet,
+                   chainID: chainID
+               )
+           ) {
             return CosmosHeaderVerificationResult(
                 verified: false,
                 state: .failed,
@@ -547,8 +602,13 @@ struct TendermintHeaderVerificationBundle: Codable, Equatable {
                 summary: "Conflicting Tendermint commits both reached the voting-power threshold."
             )
         }
-        guard validatorSet.hasTwoThirdsPower(addresses: commit.signedAddresses) else {
-            return failure("Tendermint commit did not reach the two-thirds voting-power threshold.")
+        let verifiedSigners = TendermintCommitSignatureVerifier.verifiedSignerAddresses(
+            commit: commit,
+            validatorSet: validatorSet,
+            chainID: chainID
+        )
+        guard validatorSet.hasTwoThirdsPower(addresses: verifiedSigners) else {
+            return failure("Tendermint commit did not reach the two-thirds verified voting-power threshold.")
         }
 
         return CosmosHeaderVerificationResult(
@@ -771,9 +831,12 @@ struct CosmosLightClientServiceSnapshot: Codable, Equatable {
 }
 
 /// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
-/// It DOES perform Tendermint header verification (trusted period + validator set) where a
-/// verification bundle is supplied, but otherwise serves state via RPC fallback (`.rpcFallback`)
-/// rather than local verification. Target: extend real header verification to the default path.
+/// Where a verification bundle is supplied it performs real local Tendermint verification: trusted
+/// period, validator-set hash, and a two-thirds voting-power threshold computed from commit
+/// signatures whose Ed25519 bytes cryptographically verify against the validators' public keys
+/// (`TendermintCommitSignatureVerifier`) — a `signed` flag alone no longer counts. Without a
+/// bundle it serves state via RPC fallback (`.rpcFallback`). Remaining: drive bundle verification
+/// on the default path and align the canonical vote encoding with Tendermint's CanonicalVote.
 final class CosmosLightClientServiceClient {
     private let configuration: CosmosLightClientEndpointConfiguration
     private let session: URLSession
