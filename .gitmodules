@@ -7,3 +7,6 @@
 [submodule "web"]
 	path = web
 	url = git@github.com:advatar/trustless-web-explorer.git
+[submodule "swift/BLSVerifierKit/Vendor/blst"]
+	path = swift/BLSVerifierKit/Vendor/blst
+	url = https://github.com/supranational/blst.git
