@@ -8511,6 +8511,17 @@ struct dBrowserTests {
         )
     }
 
+    static func tronWitnessKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    static func tronFinalitySignature(_ key: Curve25519.Signing.PrivateKey, address: String, epoch: Int, blockID: String) -> TronFinalitySignature {
+        let message = TronFinalityProof.canonicalVote(epoch: epoch, blockID: blockID)
+        let signature = try! key.signature(for: message).base64EncodedString()
+        let publicKey = key.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
+        return TronFinalitySignature(witnessAddress: address, blockID: blockID, signed: true, signature: signature, publicKey: publicKey)
+    }
+
     private static func tronProofBundle(network: TronNetwork) -> TronProofVerificationBundle {
         let witnesses = [
             TronWitness(address: "41" + String(repeating: "a1", count: 20), weight: 10, name: "sr-a"),
@@ -8544,8 +8555,8 @@ struct dBrowserTests {
             targetBlockID: header.blockID,
             targetNumber: header.number,
             signatures: [
-                TronFinalitySignature(witnessAddress: witnesses[0].address, blockID: header.blockID),
-                TronFinalitySignature(witnessAddress: witnesses[1].address, blockID: header.blockID),
+                tronFinalitySignature(tronWitnessKey(0xA1), address: witnesses[0].address, epoch: witnessSet.epoch, blockID: header.blockID),
+                tronFinalitySignature(tronWitnessKey(0xB2), address: witnesses[1].address, epoch: witnessSet.epoch, blockID: header.blockID),
                 TronFinalitySignature(witnessAddress: witnesses[2].address, blockID: header.blockID, signed: false)
             ],
             source: "fixture"

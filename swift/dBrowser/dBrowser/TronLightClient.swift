@@ -351,24 +351,29 @@ struct TronFinalitySignature: Codable, Equatable, Identifiable {
     var blockID: String
     var signed: Bool
     var signature: String?
+    /// The witness's Ed25519 public key (hex), required for real signature verification.
+    var publicKey: String?
 
     private enum CodingKeys: String, CodingKey {
         case witnessAddress = "witness_address"
         case blockID = "block_id"
         case signed
         case signature
+        case publicKey = "public_key"
     }
 
     nonisolated init(
         witnessAddress: String,
         blockID: String,
         signed: Bool = true,
-        signature: String? = nil
+        signature: String? = nil,
+        publicKey: String? = nil
     ) {
         self.witnessAddress = TronHex.normalizedAddress(witnessAddress)
         self.blockID = TronHex.normalized(blockID)
         self.signed = signed
         self.signature = signature
+        self.publicKey = publicKey
     }
 
     init(from decoder: Decoder) throws {
@@ -377,6 +382,7 @@ struct TronFinalitySignature: Codable, Equatable, Identifiable {
         self.blockID = TronHex.normalized(try container.decode(String.self, forKey: .blockID))
         self.signed = try container.decodeIfPresent(Bool.self, forKey: .signed) ?? true
         self.signature = try container.decodeIfPresent(String.self, forKey: .signature)
+        self.publicKey = try container.decodeIfPresent(String.self, forKey: .publicKey)
     }
 }
 
@@ -420,6 +426,24 @@ struct TronFinalityProof: Codable, Equatable {
 
     var signedWitnessAddresses: Set<String> {
         Set(signatures.filter(\.signed).map { TronHex.normalizedAddress($0.witnessAddress) })
+    }
+
+    static func canonicalVote(epoch: Int, blockID: String) -> Data {
+        Data("tron-finality|\(epoch)|\(TronHex.normalized(blockID))".utf8)
+    }
+
+    /// Witness addresses whose Ed25519 signature cryptographically verifies; a `signed` flag
+    /// without a verifiable signature does not count toward the quorum.
+    var verifiedWitnessAddresses: Set<String> {
+        var verified = Set<String>()
+        for signature in signatures where signature.signed {
+            guard let publicKey = signature.publicKey else { continue }
+            let message = Self.canonicalVote(epoch: epoch, blockID: signature.blockID)
+            if Ed25519QuorumVerifier.isValidSignature(signatureBase64: signature.signature, publicKeyHex: publicKey, message: message) {
+                verified.insert(TronHex.normalizedAddress(signature.witnessAddress))
+            }
+        }
+        return verified
     }
 }
 
@@ -618,7 +642,7 @@ struct TronProofVerificationBundle: Codable, Equatable {
         guard witnessSet.validatesHash else {
             return failure("TRON witness set hash is invalid.")
         }
-        guard witnessSet.hasQuorum(addresses: finalityProof.signedWitnessAddresses) else {
+        guard witnessSet.hasQuorum(addresses: finalityProof.verifiedWitnessAddresses) else {
             return failure("TRON finality proof did not reach the witness quorum.")
         }
         if let proof {
