@@ -414,6 +414,29 @@ struct GRANDPAFinalityJustification: Codable, Equatable {
     var signedAuthorityIDs: Set<String> {
         Set(signatures.filter(\.signed).map { SubstrateHex.normalized($0.authorityID) })
     }
+
+    /// Canonical GRANDPA vote bytes both signer and verifier agree on (dBrowser encoding pending
+    /// exact SCALE-encoded GRANDPA message alignment).
+    static func canonicalVote(setID: Int, round: Int, blockHash: String) -> Data {
+        Data("grandpa-vote|\(setID)|\(round)|\(SubstrateHex.normalized(blockHash))".utf8)
+    }
+
+    /// Authority IDs whose Ed25519 signature cryptographically verifies (the authority ID is the
+    /// Ed25519 public key). A `signed` flag without a verifiable signature does not count.
+    var verifiedAuthorityIDs: Set<String> {
+        var verified = Set<String>()
+        for signature in signatures where signature.signed {
+            let message = Self.canonicalVote(setID: setID, round: round, blockHash: signature.blockHash)
+            if Ed25519QuorumVerifier.isValidSignature(
+                signatureBase64: signature.signature,
+                publicKeyHex: signature.authorityID,
+                message: message
+            ) {
+                verified.insert(SubstrateHex.normalized(signature.authorityID))
+            }
+        }
+        return verified
+    }
 }
 
 enum SubstrateProofWitnessPosition: String, Codable, Equatable {
@@ -571,10 +594,10 @@ struct SubstrateProofVerificationBundle: Codable, Equatable {
         if let conflictingJustification,
            conflictingJustification.targetNumber == justification.targetNumber,
            SubstrateHex.normalized(conflictingJustification.targetHash) != SubstrateHex.normalized(justification.targetHash),
-           authoritySet.hasTwoThirdsWeight(authorityIDs: conflictingJustification.signedAuthorityIDs) {
+           authoritySet.hasTwoThirdsWeight(authorityIDs: conflictingJustification.verifiedAuthorityIDs) {
             return failure("Conflicting GRANDPA justifications both reached the authority threshold.")
         }
-        guard authoritySet.hasTwoThirdsWeight(authorityIDs: justification.signedAuthorityIDs) else {
+        guard authoritySet.hasTwoThirdsWeight(authorityIDs: justification.verifiedAuthorityIDs) else {
             return failure("GRANDPA justification did not reach the two-thirds authority threshold.")
         }
         if let storageProof {

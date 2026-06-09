@@ -3526,8 +3526,8 @@ struct dBrowserTests {
             targetHash: conflictingHash,
             targetNumber: bundle.header.number,
             signatures: [
-                GRANDPAJustificationSignature(authorityID: bundle.authoritySet.authorities[0].authorityID, blockHash: conflictingHash),
-                GRANDPAJustificationSignature(authorityID: bundle.authoritySet.authorities[1].authorityID, blockHash: conflictingHash)
+                Self.grandpaSignature(Self.substrateAuthorityKey(0xD1), setID: bundle.authoritySet.setID, round: 43, blockHash: conflictingHash),
+                Self.grandpaSignature(Self.substrateAuthorityKey(0xE2), setID: bundle.authoritySet.setID, round: 43, blockHash: conflictingHash)
             ],
             source: "fixture"
         )
@@ -6693,11 +6693,15 @@ struct dBrowserTests {
     private static func makeES256VCJWT(
         credentialJSON: Data,
         keyID: String,
-        privateKey: P256.Signing.PrivateKey
+        privateKey: P256.Signing.PrivateKey,
+        extraClaims: [String: Any] = [:]
     ) -> String {
         let header = try! JSONSerialization.data(withJSONObject: ["alg": "ES256", "kid": keyID, "typ": "JWT"])
-        let credentialObject = try! JSONSerialization.jsonObject(with: credentialJSON)
-        let payloadObject: [String: Any] = ["iss": "https://issuer.example", "vc": credentialObject]
+        let credentialObject = try! JSONSerialization.jsonObject(with: credentialJSON) as! [String: Any]
+        // W3C VC-JWT requires the JWT `iss` to equal the credential issuer.
+        let issuer = credentialObject["issuer"] as? String ?? "https://issuer.example"
+        var payloadObject: [String: Any] = ["iss": issuer, "vc": credentialObject]
+        payloadObject.merge(extraClaims) { _, new in new }
         let payload = try! JSONSerialization.data(withJSONObject: payloadObject)
         let headerSegment = base64URLEncode(header)
         let payloadSegment = base64URLEncode(payload)
@@ -6712,6 +6716,7 @@ struct dBrowserTests {
         let trustStore = EUDIIssuerTrustStore(keys: [
             EUDIIssuerKey(
                 keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
                 algorithm: .es256,
                 publicKeyRaw: issuerKey.publicKey.rawRepresentation
             )
@@ -6742,6 +6747,7 @@ struct dBrowserTests {
         let trustStore = EUDIIssuerTrustStore(keys: [
             EUDIIssuerKey(
                 keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
                 algorithm: .es256,
                 publicKeyRaw: issuerKey.publicKey.rawRepresentation
             )
@@ -6768,6 +6774,7 @@ struct dBrowserTests {
         let trustStore = EUDIIssuerTrustStore(keys: [
             EUDIIssuerKey(
                 keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
                 algorithm: .es256,
                 publicKeyRaw: issuerKey.publicKey.rawRepresentation
             )
@@ -6799,6 +6806,7 @@ struct dBrowserTests {
         let trustStore = EUDIIssuerTrustStore(keys: [
             EUDIIssuerKey(
                 keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
                 algorithm: .es256,
                 publicKeyRaw: issuerKey.publicKey.rawRepresentation
             )
@@ -6816,6 +6824,92 @@ struct dBrowserTests {
         )
 
         #expect(result.status == .signatureRejected)
+    }
+
+    @Test func eudiRejectsVCJWTFromKeyNotAuthoritativeForIssuer() {
+        let issuerKey = P256.Signing.PrivateKey()
+        // The key id is trusted and the signature is valid, but the key is authoritative for a
+        // DIFFERENT issuer than the one the credential claims.
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                issuer: "https://other-issuer.example",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: issuerKey
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(jwt.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .signatureRejected)
+        #expect(result.isCryptographicallyVerified == false)
+    }
+
+    @Test func eudiRejectsExpiredVCJWT() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        // Valid signature, but the JWS `exp` is one hour before `now`.
+        let expiredAt = AgenticPaymentFixtures.now.timeIntervalSince1970 - 3600
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: issuerKey,
+            extraClaims: ["exp": expiredAt]
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(jwt.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .expired)
+        #expect(result.isCryptographicallyVerified == false)
+    }
+
+    @Test func eudiRejectsNotYetValidVCJWT() {
+        let issuerKey = P256.Signing.PrivateKey()
+        let trustStore = EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: "issuer-key-1",
+                issuer: "https://verifiedemail.showntell.dev",
+                algorithm: .es256,
+                publicKeyRaw: issuerKey.publicKey.rawRepresentation
+            )
+        ])
+        // Valid signature, but the JWS `nbf` is one hour after `now`.
+        let notBefore = AgenticPaymentFixtures.now.timeIntervalSince1970 + 3600
+        let jwt = Self.makeES256VCJWT(
+            credentialJSON: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            keyID: "issuer-key-1",
+            privateKey: issuerKey,
+            extraClaims: ["nbf": notBefore]
+        )
+
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: Data(jwt.utf8),
+            trustStore: trustStore,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(result.status == .expired)
+        #expect(result.isCryptographicallyVerified == false)
     }
 
     @Test func eudiWalletIdentityIssuerIssuesScopedVerifiedEmailToAgent() {
@@ -8284,11 +8378,28 @@ struct dBrowserTests {
 
     private static let substrateStorageKey = "0x26aa394eea5630e07c48ae0c9558cef7"
 
+    static func substrateAuthorityKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    static func substratePubkeyHex(_ key: Curve25519.Signing.PrivateKey) -> String {
+        key.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func grandpaSignature(_ key: Curve25519.Signing.PrivateKey, setID: Int, round: Int, blockHash: String) -> GRANDPAJustificationSignature {
+        let message = GRANDPAFinalityJustification.canonicalVote(setID: setID, round: round, blockHash: blockHash)
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return GRANDPAJustificationSignature(authorityID: substratePubkeyHex(key), blockHash: blockHash, signed: true, signature: signature)
+    }
+
     private static func substrateProofBundle(chain: SubstrateChain) -> SubstrateProofVerificationBundle {
+        let keyA = substrateAuthorityKey(0xD1)
+        let keyB = substrateAuthorityKey(0xE2)
+        let keyC = substrateAuthorityKey(0xF3)
         let authorities = [
-            GRANDPAAuthority(authorityID: String(repeating: "d1", count: 16), weight: 40),
-            GRANDPAAuthority(authorityID: String(repeating: "e2", count: 16), weight: 35),
-            GRANDPAAuthority(authorityID: String(repeating: "f3", count: 16), weight: 25)
+            GRANDPAAuthority(authorityID: substratePubkeyHex(keyA), weight: 40),
+            GRANDPAAuthority(authorityID: substratePubkeyHex(keyB), weight: 35),
+            GRANDPAAuthority(authorityID: substratePubkeyHex(keyC), weight: 25)
         ]
         let authoritySet = GRANDPAAuthoritySet(
             chain: chain,
@@ -8315,9 +8426,9 @@ struct dBrowserTests {
             targetHash: header.hash,
             targetNumber: header.number,
             signatures: [
-                GRANDPAJustificationSignature(authorityID: authorities[0].authorityID, blockHash: header.hash),
-                GRANDPAJustificationSignature(authorityID: authorities[1].authorityID, blockHash: header.hash),
-                GRANDPAJustificationSignature(authorityID: authorities[2].authorityID, blockHash: header.hash, signed: false)
+                grandpaSignature(keyA, setID: authoritySet.setID, round: 42, blockHash: header.hash),
+                grandpaSignature(keyB, setID: authoritySet.setID, round: 42, blockHash: header.hash),
+                GRANDPAJustificationSignature(authorityID: substratePubkeyHex(keyC), blockHash: header.hash, signed: false)
             ],
             source: "fixture"
         )
