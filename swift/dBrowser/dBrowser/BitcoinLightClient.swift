@@ -193,6 +193,87 @@ struct BitcoinBlockHeader: Codable, Equatable, Identifiable {
     }
 }
 
+extension BitcoinBlockHeader {
+    /// True when the block's own hash satisfies the proof-of-work target encoded in `bits`. This
+    /// is the property that makes a header expensive to forge, and therefore the basis of SPV
+    /// trust: a verified Merkle inclusion is only meaningful against a header that did real work.
+    var meetsProofOfWork: Bool {
+        BitcoinProofOfWork.meets(hashHex: validatedHash, bits: bits)
+    }
+}
+
+/// Real Bitcoin proof-of-work: decodes the compact `nBits` difficulty into a 256-bit target and
+/// checks a block hash against it, with no remote service involved. This is what closes the SPV
+/// trust gap locally — without it, a forged header with any Merkle root would "verify".
+enum BitcoinProofOfWork {
+    /// Decodes the compact `nBits` representation into a 32-byte big-endian target. Returns nil for
+    /// the negative flag or for a target that overflows 256 bits.
+    static func target(fromCompactBits bits: UInt32) -> [UInt8]? {
+        if bits & 0x0080_0000 != 0 { return nil } // negative flag is invalid for a target
+        let exponent = Int(bits >> 24)
+        let mantissa = bits & 0x007f_ffff
+        var result = [UInt8](repeating: 0, count: 32)
+        if mantissa == 0 { return result }
+
+        if exponent <= 3 {
+            let shift = 8 * (3 - exponent)
+            let value = UInt32(mantissa) >> shift
+            result[31] = UInt8(value & 0xff)
+            result[30] = UInt8((value >> 8) & 0xff)
+            result[29] = UInt8((value >> 16) & 0xff)
+            return result
+        }
+
+        // target = mantissa << (8 * (exponent - 3)); place the three mantissa bytes big-endian.
+        let mantissaBytes: [UInt8] = [
+            UInt8((mantissa >> 16) & 0xff), // most significant
+            UInt8((mantissa >> 8) & 0xff),
+            UInt8(mantissa & 0xff)          // least significant
+        ]
+        let placements = [
+            (index: 32 - exponent, byte: mantissaBytes[0]),
+            (index: 33 - exponent, byte: mantissaBytes[1]),
+            (index: 34 - exponent, byte: mantissaBytes[2])
+        ]
+        for placement in placements where placement.byte != 0 {
+            guard placement.index >= 0, placement.index < 32 else { return nil } // overflows 256 bits
+            result[placement.index] = placement.byte
+        }
+        return result
+    }
+
+    /// True when the big-endian block hash is less than or equal to the target encoded by `bits`.
+    static func meets(hashHex: String, bits: UInt32) -> Bool {
+        guard
+            let target = target(fromCompactBits: bits),
+            let hash = BitcoinHex.bigEndianBytes(fromDisplayHex: hashHex),
+            hash.count == 32
+        else { return false }
+        for index in 0..<32 {
+            if hash[index] < target[index] { return true }
+            if hash[index] > target[index] { return false }
+        }
+        return true // exactly equal to the target still satisfies it
+    }
+
+    /// Validates an ordered header chain (oldest first): every header must be self-consistent, meet
+    /// its proof-of-work target, and link to its predecessor's hash. This is the local primitive
+    /// for proving a header chain rather than trusting a remote service's "synced" claim.
+    static func validatesHeaderChain(_ headers: [BitcoinBlockHeader]) -> Bool {
+        guard !headers.isEmpty else { return false }
+        for (offset, header) in headers.enumerated() {
+            guard header.validatesAdvertisedHash, header.meetsProofOfWork else { return false }
+            if offset > 0 {
+                let parent = headers[offset - 1]
+                guard BitcoinHex.normalized(header.previousBlockHash) == parent.validatedHash else {
+                    return false
+                }
+            }
+        }
+        return true
+    }
+}
+
 struct BitcoinMerkleProofSibling: Codable, Equatable {
     var hash: String
     var position: BitcoinMerkleSiblingPosition
@@ -265,6 +346,17 @@ struct BitcoinTransactionInclusionProof: Codable, Equatable {
                 blockHash: proof.blockHash,
                 height: header.height,
                 summary: "Bitcoin header hash does not match its serialized header."
+            )
+        }
+
+        guard header.meetsProofOfWork else {
+            return BitcoinTransactionVerificationResult(
+                verified: false,
+                state: .failed,
+                transactionID: proof.transactionID,
+                blockHash: proof.blockHash,
+                height: header.height,
+                summary: "Bitcoin header \(header.height) hash does not meet its proof-of-work target; inclusion is not trusted."
             )
         }
 
@@ -584,12 +676,13 @@ struct BitcoinLightClientServiceSnapshot: Codable, Equatable {
     }
 }
 
-/// Trust boundary (goal: minimize remote trust). Despite the "light client" name, this is a
-/// client for a remote light-client/RPC service, not a full node. It DOES validate supplied
-/// block-header proof-of-work and hash linkage locally, but it does not yet fetch or prove a
-/// header chain to tip itself, so unproven state is labeled `.rpcFallback`/`.gatewayRPCFallback`
-/// rather than presented as local consensus verification. Target: end-to-end SPV that removes the
-/// RPC fallback.
+/// Trust boundary (goal: minimize remote trust). This client fetches block headers and Merkle
+/// proofs from a remote service, but the SPV trust decision is made locally: a transaction
+/// inclusion is only accepted when the header is self-consistent, its hash meets the real
+/// proof-of-work target encoded in `nBits` (`BitcoinProofOfWork`), and the Merkle branch resolves
+/// to the header's Merkle root. A forged header with insufficient work is rejected rather than
+/// trusted. Remaining gap: anchoring the proven header chain to tip from a trusted checkpoint and
+/// validating difficulty retargeting across epochs.
 final class BitcoinLightClientServiceClient {
     private let configuration: BitcoinLightClientEndpointConfiguration
     private let session: URLSession
@@ -697,6 +790,12 @@ private enum BitcoinHex {
     static func littleEndianData(fromDisplayHex hex: String) -> Data? {
         guard let data = data(from: hex) else { return nil }
         return Data(data.reversed())
+    }
+
+    /// Big-endian bytes of a display hash (Bitcoin block hashes are displayed big-endian), i.e.
+    /// the natural hex decode with no byte reversal. Used for proof-of-work target comparison.
+    static func bigEndianBytes(fromDisplayHex hex: String) -> [UInt8]? {
+        data(from: hex).map(Array.init)
     }
 
     static func displayHex(fromLittleEndianData data: Data) -> String {

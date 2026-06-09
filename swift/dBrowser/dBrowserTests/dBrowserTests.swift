@@ -2734,6 +2734,73 @@ struct dBrowserTests {
         #expect(result.height == 0)
     }
 
+    @Test func bitcoinProofOfWorkDecodesTargetAndChecksRealWork() {
+        // Known 256-bit target for the genesis nBits 0x1d00ffff.
+        var expectedTarget = [UInt8](repeating: 0, count: 32)
+        expectedTarget[4] = 0xff
+        expectedTarget[5] = 0xff
+        #expect(BitcoinProofOfWork.target(fromCompactBits: 0x1d00ffff) == expectedTarget)
+
+        // The real genesis block hash meets its real difficulty.
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+        #expect(genesis.meetsProofOfWork)
+
+        // The same hash does NOT satisfy a harder target, and an all-FF hash never satisfies the
+        // easiest standard target — i.e. insufficient work is detected.
+        #expect(BitcoinProofOfWork.meets(hashHex: genesis.validatedHash, bits: 0x1b00ffff) == false)
+        #expect(BitcoinProofOfWork.meets(hashHex: String(repeating: "f", count: 64), bits: 0x1d00ffff) == false)
+    }
+
+    @Test func bitcoinInclusionProofRejectsHeaderThatDoesNotMeetProofOfWork() {
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+
+        // A header that is self-consistent (hash == computedHash) but claims a difficulty far
+        // beyond the work actually performed. SPV must reject it instead of trusting the inclusion.
+        let underworked = BitcoinBlockHeader(
+            height: genesis.height,
+            version: genesis.version,
+            previousBlockHash: genesis.previousBlockHash,
+            merkleRoot: genesis.merkleRoot,
+            timestamp: genesis.timestamp,
+            bits: 0x1b00ffff,
+            nonce: genesis.nonce,
+            hash: nil
+        )
+        #expect(underworked.meetsProofOfWork == false)
+
+        let proof = BitcoinMerkleProof(
+            transactionID: genesis.merkleRoot,
+            blockHash: underworked.validatedHash,
+            merkleRoot: genesis.merkleRoot,
+            transactionIndex: 0,
+            siblings: []
+        )
+        let result = BitcoinTransactionInclusionProof(header: underworked, proof: proof).verify()
+        #expect(result.verified == false)
+        #expect(result.state == .failed)
+        #expect(result.summary.contains("proof-of-work"))
+    }
+
+    @Test func bitcoinHeaderChainValidationRequiresWorkAndLinkage() {
+        let genesis = BitcoinBlockHeader.mainnetGenesis
+
+        // A single real, PoW-valid header is a valid chain.
+        #expect(BitcoinProofOfWork.validatesHeaderChain([genesis]))
+
+        // A synthetic follow-on header does not meet proof-of-work, so the chain is invalid.
+        let synthetic = BitcoinBlockHeader(
+            height: 1,
+            version: 1,
+            previousBlockHash: genesis.validatedHash,
+            merkleRoot: String(repeating: "1", count: 64),
+            timestamp: 1_231_006_600,
+            bits: 0x1d00ffff,
+            nonce: 1
+        )
+        #expect(BitcoinProofOfWork.validatesHeaderChain([genesis, synthetic]) == false)
+        #expect(BitcoinProofOfWork.validatesHeaderChain([]) == false)
+    }
+
     @Test func bitcoinHeaderTrackerOrdersByChainWorkAndLabelsReorgs() {
         let genesis = BitcoinBlockHeader.mainnetGenesis
         let firstHeader = BitcoinBlockHeader(
