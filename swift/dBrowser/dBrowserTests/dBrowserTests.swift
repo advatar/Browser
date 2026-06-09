@@ -3314,6 +3314,48 @@ struct dBrowserTests {
         #expect(forgedResult.verified == false)
     }
 
+    @Test func evmSyncCommitteeVerifiesRealBLSAggregateSignature() {
+        let signingRoot = Data(repeating: 0xAB, count: 32)
+        // 7 of 9 committee members sign with real BLS keys (supermajority).
+        let update = EVMSyncCommitteeTestSupport.signedUpdate(committeeSize: 9, signingRoot: signingRoot, participation: 7)
+
+        let result = EVMSyncCommitteeVerifier.verify(update)
+        #expect(result.status == .verified)
+        #expect(result.verified)
+        #expect(result.participantCount == 7)
+        #expect(result.committeeSize == 9)
+        #expect(result.chainTrustState == .proofChecked)
+    }
+
+    @Test func evmSyncCommitteeRejectsInsufficientParticipation() {
+        let signingRoot = Data(repeating: 0xCD, count: 32)
+        // 5 of 9 is below the two-thirds supermajority (needs >= 6).
+        let update = EVMSyncCommitteeTestSupport.signedUpdate(committeeSize: 9, signingRoot: signingRoot, participation: 5)
+
+        let result = EVMSyncCommitteeVerifier.verify(update)
+        #expect(result.status == .insufficientParticipation)
+        #expect(result.chainTrustState == .rpcFallback)
+    }
+
+    @Test func evmSyncCommitteeRejectsSignatureOverDifferentRoot() {
+        let signedRoot = Data(repeating: 0x01, count: 32)
+        var update = EVMSyncCommitteeTestSupport.signedUpdate(committeeSize: 9, signingRoot: signedRoot, participation: 8)
+        // The committee signed `signedRoot`, but the update now claims a different signing root.
+        update.signingRoot = Data(repeating: 0x02, count: 32)
+
+        let result = EVMSyncCommitteeVerifier.verify(update)
+        #expect(result.status == .signatureInvalid)
+        #expect(result.verified == false)
+    }
+
+    @Test func evmSyncCommitteeRejectsMalformedUpdate() {
+        let signingRoot = Data(repeating: 0x09, count: 32)
+        var update = EVMSyncCommitteeTestSupport.signedUpdate(committeeSize: 4, signingRoot: signingRoot, participation: 4)
+        update.participationBits = [true, true] // bitfield length no longer matches the committee
+
+        #expect(EVMSyncCommitteeVerifier.verify(update).status == .malformed)
+    }
+
     @Test func tendermintTrustPeriodExpiryAndConflictingCommitsAreExplicit() {
         let bundle = Self.cosmosHeaderBundle(chain: .cosmosHub)
         let expiredResult = bundle.verify(nowUnixSeconds: bundle.trustPolicy.trustedTimeUnixSeconds + bundle.trustPolicy.trustPeriodSeconds + 1)

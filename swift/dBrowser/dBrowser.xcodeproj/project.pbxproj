@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C87C9BD2FD88BB9009C1B2C /* BLSVerifierKit in Frameworks */ = {isa = PBXBuildFile; productRef = 0C87C9BC2FD88BB9009C1B2C /* BLSVerifierKit */; };
 		451F78EAD7736A2F932730E3 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 41336243A89F768EDC117F21 /* A2UISwiftUI */; };
 		5043B3F9C2FF49D38770A0C9 /* ControlPlane in Frameworks */ = {isa = PBXBuildFile; platformFilters = (macos, ); productRef = 1C85446A282344B7B7C5D77E /* ControlPlane */; };
 		74537CA1039C7B731A4AB345 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 0234635C5599E4E9FA57EED8 /* MLXLMCommon */; };
@@ -79,6 +80,7 @@
 				5043B3F9C2FF49D38770A0C9 /* ControlPlane in Frameworks */,
 				D3590F01C04BCD8D9A9AF658 /* MLXVLM in Frameworks */,
 				7E8832D3B799843B11CB0EA5 /* A2UISwiftCore in Frameworks */,
+				0C87C9BD2FD88BB9009C1B2C /* BLSVerifierKit in Frameworks */,
 				EACA99B2E5594010A096B1F8 /* Contracts in Frameworks */,
 				8BD15F1A81BC1DC587186A6D /* MLXLMCommon in Frameworks */,
 			);
@@ -148,6 +150,7 @@
 				F4C8BDD7D068B495E7B2B951 /* MLXLMCommon */,
 				1C85446A282344B7B7C5D77E /* ControlPlane */,
 				4885D8C648A041819F1C2F01 /* Contracts */,
+				0C87C9BC2FD88BB9009C1B2C /* BLSVerifierKit */,
 			);
 			productName = dBrowser;
 			productReference = 0C135A7D2FB7C4D4002F9C73 /* dBrowser.app */;
@@ -236,6 +239,7 @@
 				28F0B7298917D8D863D0E866 /* XCRemoteSwiftPackageReference "a2ui-swift" */,
 				B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */,
 				08A671642A2C42CABD328013 /* XCLocalSwiftPackageReference "../Packages/SwiftLM" */,
+				0C87C9BB2FD88BB9009C1B2C /* XCLocalSwiftPackageReference "../BLSVerifierKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C135A7E2FB7C4D4002F9C73 /* Products */;
@@ -675,6 +679,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../Packages/SwiftLM;
 		};
+		0C87C9BB2FD88BB9009C1B2C /* XCLocalSwiftPackageReference "../BLSVerifierKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../BLSVerifierKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -706,6 +714,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B59B5497CD94C0FCD941D4E2 /* XCRemoteSwiftPackageReference "mlx-swift-lm" */;
 			productName = MLXVLM;
+		};
+		0C87C9BC2FD88BB9009C1B2C /* BLSVerifierKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BLSVerifierKit;
 		};
 		1C85446A282344B7B7C5D77E /* ControlPlane */ = {
 			isa = XCSwiftPackageProductDependency;
