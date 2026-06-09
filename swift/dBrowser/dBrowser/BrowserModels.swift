@@ -784,13 +784,13 @@ enum BrowserCompanionOnboardingEngine {
     }
 }
 
-enum BrowserResearchSourceConfidence: String, Equatable {
+enum BrowserResearchSourceConfidence: String, Equatable, Codable {
     case high
     case medium
     case low
 }
 
-struct BrowserResearchSourceEntry: Equatable, Identifiable {
+struct BrowserResearchSourceEntry: Equatable, Identifiable, Codable {
     let id: UUID
     var title: String
     var urlString: String
@@ -825,7 +825,7 @@ struct BrowserResearchSourceEntry: Equatable, Identifiable {
     }()
 }
 
-struct BrowserResearchLedger: Equatable {
+struct BrowserResearchLedger: Equatable, Codable {
     var topic: String
     var entries: [BrowserResearchSourceEntry]
 

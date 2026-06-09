@@ -16,6 +16,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var latestPageSnapshot: PageSnapshot?
     @Published var copilotRuns: [CopilotRun] = []
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
+    @Published var researchLedgers: [BrowserResearchLedger] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
     @Published var chainTrustSnapshot: ChainTrustRegistry
     @Published var afmServiceSnapshot: AFMServiceSnapshot
@@ -38,8 +39,13 @@ final class BrowserViewModel: ObservableObject {
     @Published var selectedLLMModelID: String
     @Published var localLLMState: LocalLLMManagementState
 
+    /// Most-recently-created view model, used so App Intents can reach the live
+    /// browser to run a saved workflow.
+    static weak var shared: BrowserViewModel?
+
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
+    private let researchLedgerStore: ResearchLedgerStore
     private let historyService: BrowserHistoryService
     private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
@@ -54,6 +60,7 @@ final class BrowserViewModel: ObservableObject {
         initialURL: String,
         runtimeBridge: MobileRuntimeBridge,
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
+        researchLedgerStore: ResearchLedgerStore = ResearchLedgerStore(),
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
         llmConversationStore: LLMConversationStore = LLMConversationStore(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
@@ -71,6 +78,7 @@ final class BrowserViewModel: ObservableObject {
         )
         self.runtimeBridge = runtimeBridge
         self.workflowStore = copilotWorkflowStore
+        self.researchLedgerStore = researchLedgerStore
         self.historyService = historyService
         self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
@@ -96,9 +104,11 @@ final class BrowserViewModel: ObservableObject {
         self.addressText = initialURL
         self.history = historyService.initialHistory
         self.copilotWorkflows = copilotWorkflowStore.load()
+        self.researchLedgers = researchLedgerStore.load()
         if restoredLLMState.shouldPersist {
             persistLLMConversation()
         }
+        Self.shared = self
     }
 
     var activeTabIndex: Int? {
@@ -1080,6 +1090,10 @@ final class BrowserViewModel: ObservableObject {
 
     private func persistWorkflows() {
         workflowStore.save(copilotWorkflows)
+    }
+
+    func persistResearchLedgers() {
+        researchLedgerStore.save(researchLedgers)
     }
 
     private func persistLLMConversation() {
