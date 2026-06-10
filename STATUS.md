@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## EUDI VC-JWT Trust Store And Import Gating (#147)
+
+Closing the remaining EUDI VC-JWT trust-anchor gaps after issuer-signature verification landed.
+
+- [x] Add repo-owned issuer trust-store provenance for the cliwallet-compatible verified email issuer.
+- [x] Wire verified email bootstrap/import through the trust store instead of seeding unverified envelope documents.
+- [x] Require issuer-signature trust before delegated agent identity issuance can derive from a human verified email credential.
+- [x] Surface credential signature trust in wallet identity labels.
+- [x] Add focused Swift tests for signed bootstrap, unsigned denial, and trust status labeling.
+- [x] Verify focused Swift tests and the macOS build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-eudi-trust-gating-tests` with focused EUDI VC-JWT, issuer trust, identity issuance, wallet control-plane, and runtime bridge `-only-testing` filters passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-eudi-trust-gating-tests` with the remaining wallet control-plane `defaultDelegation` `-only-testing` filters passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-eudi-trust-gating-build` passed.
+
 ## Concept/Code/UX Review Hardening
 
 Driven by the 2026-06-08 concept/code/UX review (#146). Closing the highest-priority gaps in order.

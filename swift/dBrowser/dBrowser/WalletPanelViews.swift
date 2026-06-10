@@ -455,7 +455,7 @@ struct WalletIdentityCredentialCard: View {
     let document: EUDICredentialDocument
 
     private var claimLabels: [String] {
-        let preferred = ["email", "email_verified", "email_normalized"]
+        let preferred = ["email", "email_verified", "signature_trust", "email_normalized"]
         let preferredLabels = preferred.compactMap { key in
             document.claims[key].map { "\(key):\($0)" }
         }

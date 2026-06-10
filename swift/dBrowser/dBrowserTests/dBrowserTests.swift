@@ -6740,6 +6740,73 @@ struct dBrowserTests {
         #expect(result.document?.claims["signature_trust"] == "issuer_signature_verified")
     }
 
+    @Test func eudiImportsPinnedCliwalletVerifiedEmailVCJWTFromTrustedRegistry() {
+        let trustedKey = EUDITrustedIssuerRegistry.verifiedEmailTrustStore.key(
+            forID: EUDITrustedIssuerRegistry.verifiedEmailKeyID
+        )
+        let result = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: AgenticPaymentFixtures.cliwalletVerifiedEmailVCJWTData,
+            trustStore: EUDITrustedIssuerRegistry.verifiedEmailTrustStore,
+            now: AgenticPaymentFixtures.now
+        )
+        let snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        let verifiedEmail = snapshot.verifiedEmailCredentials.first
+
+        #expect(trustedKey?.issuer == EUDITrustedIssuerRegistry.verifiedEmailIssuer)
+        #expect(trustedKey?.source == .pinnedRepositoryConfiguration)
+        #expect(result.status == .imported)
+        #expect(result.isCryptographicallyVerified)
+        #expect(result.document?.isIssuerSignatureVerified == true)
+        #expect(result.document?.claims["signature_trust"] == "issuer_signature_verified")
+        #expect(verifiedEmail?.isIssuerSignatureVerified == true)
+        #expect(snapshot.activeAgentIdentityCredentials.count == 1)
+    }
+
+    @Test func eudiUnverifiedEmailEnvelopeDoesNotAuthorizeAgentIdentityIssuance() {
+        let rawImport = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: AgenticPaymentFixtures.cliwalletVerifiedEmailCredentialJSON,
+            now: AgenticPaymentFixtures.now
+        )
+        guard let rawDocument = rawImport.document else {
+            Issue.record("Expected raw email credential import document")
+            return
+        }
+        var snapshot = WalletControlPlaneSnapshot.defaultDelegation()
+        guard let human = snapshot.humanPrincipals.first,
+              let agent = snapshot.agentPrincipals.first else {
+            Issue.record("Expected default human and agent principals")
+            return
+        }
+        snapshot.humanIdentityCredentials = [rawDocument]
+        snapshot.agentIdentityCredentials = []
+
+        let request = EUDIAgentIdentityIssuanceRequest(
+            id: "unsigned-agent-email",
+            humanPrincipalID: human.id,
+            agentPrincipalID: agent.id,
+            sourceCredentialID: rawDocument.id,
+            requestedClaims: ["email", "email_verified"],
+            relyingPartyID: "dbrowser.local",
+            relyingPartyName: "dBrowser Wallet Control Plane",
+            protocolName: .manualApproval,
+            purpose: "Agent identity bootstrap",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(600),
+            requiresRootCredentialAccess: false
+        )
+        let result = EUDIWalletIdentityIssuer.issueAgentIdentity(
+            request,
+            snapshot: snapshot,
+            now: AgenticPaymentFixtures.now
+        )
+
+        #expect(rawImport.signatureTrust == .unverifiedEnvelope)
+        #expect(rawDocument.isIssuerSignatureVerified == false)
+        #expect(snapshot.verifiedEmailCredentials.isEmpty)
+        #expect(result.state == .denied)
+        #expect(result.credential == nil)
+        #expect(result.reasons.contains { $0.contains("issuer VC-JWT signature trust") })
+    }
+
     @Test func eudiRejectsVCJWTSignedByUntrustedKey() {
         let issuerKey = P256.Signing.PrivateKey()
         let attackerKey = P256.Signing.PrivateKey()
@@ -7208,6 +7275,8 @@ struct dBrowserTests {
         #expect(snapshot.policySummary.contains("1 verified email"))
         #expect(snapshot.policySummary.contains("1 agent identity"))
         #expect(verifiedEmail.claims["email_verified"] == "true")
+        #expect(verifiedEmail.claims["signature_trust"] == "issuer_signature_verified")
+        #expect(verifiedEmail.isIssuerSignatureVerified)
         #expect(agentIdentity.claims["email"] == verifiedEmail.claims["email"])
         #expect(agentIdentity.sourceCredentialID == verifiedEmail.id)
         #expect(!agentIdentity.exposesRootCredential)

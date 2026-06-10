@@ -92,6 +92,20 @@ struct EUDICredentialDocument: Codable, Equatable, Identifiable {
     var isUsable: Bool {
         !isRevoked && expiresAt.map { $0 > Date() } != false
     }
+
+    var eudiSignatureTrust: EUDICredentialSignatureTrust {
+        guard
+            let rawTrust = claims["signature_trust"],
+            let trust = EUDICredentialSignatureTrust(rawValue: rawTrust)
+        else {
+            return .unverifiedEnvelope
+        }
+        return trust
+    }
+
+    var isIssuerSignatureVerified: Bool {
+        eudiSignatureTrust == .issuerSignatureVerified
+    }
 }
 
 enum EUDIEmailCredentialSubjectType: String, Codable, Equatable {
@@ -396,13 +410,22 @@ enum EUDIIssuerSignatureAlgorithm: String, Codable, Equatable {
     case eddsa = "EdDSA" // Ed25519
 }
 
+enum EUDIIssuerKeySource: String, Equatable {
+    case injectedRuntimeConfiguration = "injected_runtime_configuration"
+    case pinnedRepositoryConfiguration = "pinned_repository_configuration"
+}
+
 /// A trusted issuer signing key, normally sourced from an issuer JWKS endpoint or a pinned
 /// allowlist. `publicKeyRaw` is the raw key representation: 64-byte x||y for ES256 P-256,
-/// 32-byte compressed point for Ed25519.
+/// 32-byte compressed point for Ed25519. `issuer` is the credential issuer this key is
+/// authoritative for; verification binds the key id to it so a key trusted for one issuer
+/// cannot vouch for a credential that claims to come from another.
 struct EUDIIssuerKey: Equatable, Identifiable {
     var keyID: String
+    var issuer: String
     var algorithm: EUDIIssuerSignatureAlgorithm
     var publicKeyRaw: Data
+    var source: EUDIIssuerKeySource = .injectedRuntimeConfiguration
     var id: String { keyID }
 }
 
@@ -420,12 +443,34 @@ struct EUDIIssuerTrustStore: Equatable {
     var isEmpty: Bool { keysByID.isEmpty }
 }
 
+enum EUDITrustedIssuerRegistry {
+    static let verifiedEmailIssuer = "https://verifiedemail.showntell.dev"
+    static let verifiedEmailKeyID = "verifiedemail-showntell-dev-p256-2026-01"
+
+    private static let verifiedEmailPublicKeyRaw = Data(base64Encoded: "QpzVptqmkg+5587+SpxITtWTmNxfn5C5Zfd57Yn3xTQXhMIdQEdwS+oaXGs+K756lnqIjEO0N9htWijTT9QYLg==")!
+
+    static var verifiedEmailTrustStore: EUDIIssuerTrustStore {
+        EUDIIssuerTrustStore(keys: [
+            EUDIIssuerKey(
+                keyID: verifiedEmailKeyID,
+                issuer: verifiedEmailIssuer,
+                algorithm: .es256,
+                publicKeyRaw: verifiedEmailPublicKeyRaw,
+                source: .pinnedRepositoryConfiguration
+            )
+        ])
+    }
+}
+
 enum EUDIVerifiableCredentialJWTError: Error, Equatable {
     case malformedJWT
     case unsupportedAlgorithm(String)
     case unknownIssuerKey(String)
     case algorithmMismatch(String)
     case signatureVerificationFailed
+    case issuerKeyMismatch(kid: String, iss: String)
+    case expired
+    case notYetValid
     case credentialDecodingFailed(String)
 
     var reason: String {
@@ -440,8 +485,25 @@ enum EUDIVerifiableCredentialJWTError: Error, Equatable {
             return "VC-JWT algorithm does not match the trusted key \(kid)."
         case .signatureVerificationFailed:
             return "VC-JWT issuer signature did not verify against the trusted issuer key."
+        case let .issuerKeyMismatch(kid, iss):
+            return "VC-JWT key id \(kid) is not authoritative for issuer \(iss)."
+        case .expired:
+            return "VC-JWT is past its `exp` claim."
+        case .notYetValid:
+            return "VC-JWT is not valid yet; its `nbf` claim is in the future."
         case let .credentialDecodingFailed(detail):
             return "VC-JWT payload did not contain a decodable email credential: \(detail)."
+        }
+    }
+
+    /// Maps a verification failure onto the import status surfaced to the user. Temporal failures
+    /// are reported as `.expired`; everything else is a signature/trust rejection.
+    var importStatus: EUDIEmailCredentialImportStatus {
+        switch self {
+        case .expired, .notYetValid:
+            return .expired
+        default:
+            return .signatureRejected
         }
     }
 }
@@ -487,12 +549,34 @@ enum EUDIVerifiableCredentialJWTVerifier {
             return .failure(.signatureVerificationFailed)
         }
 
+        // JWT-level temporal claims. These are independent of the credential's own validity window
+        // (checked later against `validUntil`): a JWS can expire before the credential it carries.
+        let claims = (try? JSONSerialization.jsonObject(with: payloadData)) as? [String: Any]
+        let nowSeconds = now.timeIntervalSince1970
+        if let exp = numericDateClaim("exp", in: claims), nowSeconds >= exp {
+            return .failure(.expired)
+        }
+        if let nbf = numericDateClaim("nbf", in: claims), nowSeconds < nbf {
+            return .failure(.notYetValid)
+        }
+
+        let credential: EUDIEmailAddressCredential
         do {
-            let credential = try decodeCredential(fromPayload: payloadData)
-            return .success(credential)
+            credential = try decodeCredential(fromPayload: payloadData)
         } catch {
             return .failure(.credentialDecodingFailed(error.localizedDescription))
         }
+
+        // Bind the signing key to the issuer. The key must be authoritative for the issuer the
+        // credential claims, and any JWT-level `iss` claim must agree with that issuer.
+        guard credential.issuer == issuerKey.issuer else {
+            return .failure(.issuerKeyMismatch(kid: keyID, iss: credential.issuer))
+        }
+        if let iss = claims?["iss"] as? String, iss != credential.issuer {
+            return .failure(.issuerKeyMismatch(kid: keyID, iss: iss))
+        }
+
+        return .success(credential)
     }
 
     private static func verifySignature(
@@ -526,6 +610,14 @@ enum EUDIVerifiableCredentialJWTVerifier {
             return try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: vcData)
         }
         return try EUDIEmailCredentialEnvelopeDecoder.decodeCredential(from: payloadData)
+    }
+
+    private static func numericDateClaim(_ name: String, in claims: [String: Any]?) -> Double? {
+        guard let value = claims?[name] else { return nil }
+        if let double = value as? Double { return double }
+        if let int = value as? Int { return Double(int) }
+        if let number = value as? NSNumber { return number.doubleValue }
+        return nil
     }
 
     private static func base64URLDecode(_ string: String) -> Data? {
@@ -563,7 +655,7 @@ enum EUDIEmailCredentialImporter {
                 return importHumanVerifiedEmail(credential, signatureTrust: .issuerSignatureVerified, now: now)
             case let .failure(error):
                 return EUDIEmailCredentialImportResult(
-                    status: .signatureRejected,
+                    status: error.importStatus,
                     sourceCredential: nil,
                     document: nil,
                     reasons: [error.reason]
@@ -1722,6 +1814,15 @@ enum EUDIWalletIdentityIssuer {
                 now: now
             )
         }
+        guard sourceCredential.isIssuerSignatureVerified else {
+            return deniedResult(
+                state: .denied,
+                request: request,
+                decision: WalletControlPlaneDecision(kind: .deny, grantID: nil, reasons: ["Verified email credential requires issuer VC-JWT signature trust before agent identity issuance."]),
+                reason: "Verified email credential requires issuer VC-JWT signature trust before agent identity issuance.",
+                now: now
+            )
+        }
 
         let requestedClaimSet = Set(request.requestedClaims)
         let availableClaimSet = Set(sourceCredential.claims.keys)
@@ -1887,7 +1988,7 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
     }
 
     var verifiedEmailCredentials: [EUDICredentialDocument] {
-        humanIdentityCredentials.filter { $0.kind == .verifiedEmail && $0.isUsable }
+        humanIdentityCredentials.filter { $0.kind == .verifiedEmail && $0.isUsable && $0.isIssuerSignatureVerified }
     }
 
     var activeAgentIdentityCredentials: [EUDIAgentIdentityCredential] {
@@ -1932,32 +2033,13 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
         let humanID = "principal-human-root"
         let agentID = "principal-agent-travel"
         let fingerprintLabel = rootWalletFingerprint.map { "Embedded wallet fingerprint \($0)" }
-        let verifiedEmailCredentialID = "https://verifiedemail.showntell.dev/credentials/email/human-dbrowser-fixture"
-        let verifiedEmailSourceHash = AgenticPaymentHash.stable([
-            verifiedEmailCredentialID,
-            "https://verifiedemail.showntell.dev",
-            "johan.sellstrom@iproov.com",
-            "did:dbrowser:human:johan"
-        ])
-        let verifiedEmailDocument = EUDICredentialDocument(
-            id: verifiedEmailCredentialID,
-            kind: .verifiedEmail,
-            issuer: "https://verifiedemail.showntell.dev",
-            subjectHint: "johan.sellstrom@iproov.com",
-            claims: [
-                "email": "johan.sellstrom@iproov.com",
-                "email_normalized": "johan.sellstrom@iproov.com",
-                "email_verified": "true",
-                "holder_did": "did:dbrowser:human:johan",
-                "holder_jwk_thumbprint": "human-email-jwk-thumbprint",
-                "source_credential_id": verifiedEmailCredentialID,
-                "source_credential_hash": verifiedEmailSourceHash,
-                "subject_type": "user"
-            ],
-            issuedAt: issuedAt,
-            expiresAt: expiresAt,
-            isRevoked: false
+        let verifiedEmailImport = EUDIEmailCredentialImporter.importHumanVerifiedEmail(
+            from: AgenticPaymentFixtures.cliwalletVerifiedEmailVCJWTData,
+            trustStore: EUDITrustedIssuerRegistry.verifiedEmailTrustStore,
+            now: issuedAt
         )
+        let verifiedEmailDocument = verifiedEmailImport.isCryptographicallyVerified ? verifiedEmailImport.document : nil
+        let verifiedEmailCredentialID = verifiedEmailDocument?.id ?? "verified-email-unavailable"
         let human = WalletPrincipal(
             id: humanID,
             kind: .human,
@@ -1969,7 +2051,9 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
                 "EUDI wallet-compatible client",
                 "Root payment instruments stay tokenized",
                 "Full crypto recovery retained by user",
-                "Verified email from cliwallet-compatible issuer"
+                verifiedEmailDocument == nil
+                    ? "Verified email issuer signature unavailable"
+                    : "Verified email issuer signature verified"
             ] + [fingerprintLabel].compactMap { $0 }
         )
         let agentProfile = AgentWalletProfile(
@@ -2116,31 +2200,33 @@ struct WalletControlPlaneSnapshot: Codable, Equatable {
             principals: [human, agent],
             grants: [identityGrant, emailIdentityGrant, paymentGrant, cryptoGrant],
             receipts: receipts,
-            humanIdentityCredentials: [verifiedEmailDocument],
+            humanIdentityCredentials: verifiedEmailDocument.map { [$0] } ?? [],
             agentIdentityCredentials: []
         )
-        let issuanceRequest = EUDIAgentIdentityIssuanceRequest(
-            id: "verified-email-travel-agent",
-            humanPrincipalID: humanID,
-            agentPrincipalID: agentID,
-            sourceCredentialID: verifiedEmailCredentialID,
-            requestedClaims: ["email", "email_verified"],
-            relyingPartyID: "dbrowser.local",
-            relyingPartyName: "dBrowser Wallet Control Plane",
-            protocolName: .manualApproval,
-            purpose: "Agent identity bootstrap",
-            expiresAt: expiresAt,
-            requiresRootCredentialAccess: false
-        )
-        let issuanceResult = EUDIWalletIdentityIssuer.issueAgentIdentity(
-            issuanceRequest,
-            snapshot: snapshot,
-            now: issuedAt
-        )
-        if let credential = issuanceResult.credential {
-            snapshot.agentIdentityCredentials.append(credential)
+        if verifiedEmailDocument != nil {
+            let issuanceRequest = EUDIAgentIdentityIssuanceRequest(
+                id: "verified-email-travel-agent",
+                humanPrincipalID: humanID,
+                agentPrincipalID: agentID,
+                sourceCredentialID: verifiedEmailCredentialID,
+                requestedClaims: ["email", "email_verified"],
+                relyingPartyID: "dbrowser.local",
+                relyingPartyName: "dBrowser Wallet Control Plane",
+                protocolName: .manualApproval,
+                purpose: "Agent identity bootstrap",
+                expiresAt: expiresAt,
+                requiresRootCredentialAccess: false
+            )
+            let issuanceResult = EUDIWalletIdentityIssuer.issueAgentIdentity(
+                issuanceRequest,
+                snapshot: snapshot,
+                now: issuedAt
+            )
+            if let credential = issuanceResult.credential {
+                snapshot.agentIdentityCredentials.append(credential)
+            }
+            snapshot.receipts.append(issuanceResult.receipt)
         }
-        snapshot.receipts.append(issuanceResult.receipt)
         return snapshot
     }
 }
@@ -2464,6 +2550,18 @@ enum AgenticPaymentFixtures {
           }
         }
         """.data(using: .utf8)!
+    }
+
+    static var cliwalletVerifiedEmailVCJWTData: Data {
+        Data(cliwalletVerifiedEmailVCJWT.utf8)
+    }
+
+    static var cliwalletVerifiedEmailVCJWT: String {
+        [
+            "eyJhbGciOiJFUzI1NiIsImtpZCI6InZlcmlmaWVkZW1haWwtc2hvd250ZWxsLWRldi1wMjU2LTIwMjYtMDEiLCJ0eXAiOiJKV1QifQ",
+            "eyJleHAiOjQxMDI0NDQ4MDAsImlhdCI6MTc2NzIyNTYwMCwiaXNzIjoiaHR0cHM6XC9cL3ZlcmlmaWVkZW1haWwuc2hvd250ZWxsLmRldiIsIm5iZiI6MTc2NzIyNTYwMCwidmMiOnsiQGNvbnRleHQiOlsiaHR0cHM6XC9cL3d3dy53My5vcmdcL25zXC9jcmVkZW50aWFsc1wvdjIiLCJodHRwczpcL1wvc2NoZW1hcy53YXV0aC5kZXZcL2NvbnRleHRzXC9lbWFpbC1hZGRyZXNzLWNyZWRlbnRpYWwtdjAuMS5qc29ubGQiXSwiY3JlZGVudGlhbFN1YmplY3QiOnsiZW1haWwiOiJqb2hhbi5zZWxsc3Ryb21AaXByb292LmNvbSIsImVtYWlsX25vcm1hbGl6ZWQiOiJqb2hhbi5zZWxsc3Ryb21AaXByb292LmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJob2xkZXIiOnsiaG9sZGVyX2RpZCI6ImRpZDprZXk6ejZNa2lIdW1hbldhbGxldCIsImhvbGRlcl9qd2tfdGh1bWJwcmludCI6Imh1bWFuLWVtYWlsLXRodW1icHJpbnQiLCJob2xkZXJfcHVibGljX2tleV9qd2siOnsiY3J2IjoiRWQyNTUxOSIsImtpZCI6Imh1bWFuLWVtYWlsLWtleSIsImt0eSI6Ik9LUCIsIngiOiJodW1hbi1lbWFpbC1wdWJsaWMta2V5In19LCJpZCI6ImRpZDprZXk6ejZNa2lIdW1hbldhbGxldCIsInN1YmplY3RfdHlwZSI6InVzZXIifSwiZXZpZGVuY2UiOlt7ImNoYWxsZW5nZV9pZCI6IjAxMjM0NTY3LTg5YWItY2RlZi0wMTIzLTQ1Njc4OWFiY2RlZiIsImVtYWlsX2hhc2giOiJzaGEyNTY6ZW1haWxoYXNoIiwibWV0aG9kIjoiZW1haWxfY29kZV9jaGFsbGVuZ2UiLCJub25jZV9oYXNoIjoic2hhMjU2Om5vbmNlaGFzaCIsInZlcmlmaWVkX2F0IjoiMjAyNi0wMS0wMVQwMDowMDowMFoifV0sImlkIjoiaHR0cHM6XC9cL3ZlcmlmaWVkZW1haWwuc2hvd250ZWxsLmRldlwvY3JlZGVudGlhbHNcL2VtYWlsXC9odW1hbi10ZXN0IiwiaXNzdWVyIjoiaHR0cHM6XC9cL3ZlcmlmaWVkZW1haWwuc2hvd250ZWxsLmRldiIsInR5cGUiOlsiVmVyaWZpYWJsZUNyZWRlbnRpYWwiLCJFbWFpbEFkZHJlc3NDcmVkZW50aWFsIl0sInZhbGlkRnJvbSI6IjIwMjYtMDEtMDFUMDA6MDA6MDBaIiwidmFsaWRVbnRpbCI6IjIxMDAtMDEtMDFUMDA6MDA6MDBaIn19",
+            "z9ET_wjnQ1_wfd-AGavrJhfYHA8-h8n-sB81bOjDQn7Glc7ryO7As2Jc6HlTOcNd2G4Pz2EUvbLNXxtBxqJfYg"
+        ].joined(separator: ".")
     }
 
     static var visaRequest: VisaTrustedAgentRequest {
