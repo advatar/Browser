@@ -60,7 +60,7 @@ enum AvalancheNetwork: String, Codable, Equatable, CaseIterable {
     nonisolated var limitations: [String] {
         switch self {
         case .cChain:
-            return ["Fixture-backed accepted-finality checks do not yet replace a production AvalancheGo light client."]
+            return ["Ed25519 accepted-finality checks are fixture-sourced and do not yet replace a production AvalancheGo light client."]
         case .fujiCChain:
             return ["Fuji is modeled for routing and fallback; production local verification is not enabled."]
         case .localCChain:
@@ -275,21 +275,27 @@ struct AvalancheValidator: Codable, Equatable, Identifiable {
 
     var nodeID: String
     var weight: Int
+    var publicKey: String?
 
     private enum CodingKeys: String, CodingKey {
         case nodeID = "node_id"
         case weight
+        case publicKey = "public_key"
     }
 
-    nonisolated init(nodeID: String, weight: Int) {
+    nonisolated init(nodeID: String, weight: Int, publicKey: String? = nil) {
         self.nodeID = AvalancheHex.normalizedID(nodeID)
         self.weight = weight
+        self.publicKey = publicKey?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.nodeID = AvalancheHex.normalizedID(try container.decode(String.self, forKey: .nodeID))
         self.weight = try container.decode(Int.self, forKey: .weight)
+        self.publicKey = try container.decodeIfPresent(String.self, forKey: .publicKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }
 
@@ -378,7 +384,10 @@ struct AvalancheValidatorSet: Codable, Equatable, Identifiable {
 
     nonisolated static func computeHash(validators: [AvalancheValidator]) -> String {
         let payload = validators
-            .map { "\(AvalancheHex.normalizedID($0.nodeID)):\($0.weight)" }
+            .map {
+                let publicKey = $0.publicKey?.lowercased() ?? ""
+                return "\(AvalancheHex.normalizedID($0.nodeID)):\($0.weight):\(publicKey)"
+            }
             .sorted()
             .joined(separator: "|")
         return AvalancheHex.sha256Hex(payload)
@@ -459,8 +468,47 @@ struct AvalancheFinalityEvidence: Codable, Equatable {
         self.source = try container.decodeIfPresent(String.self, forKey: .source)
     }
 
-    var signedValidatorIDs: Set<String> {
-        Set(signatures.filter(\.signed).map { AvalancheHex.normalizedID($0.nodeID) })
+    static func canonicalVote(setID: Int, targetHeight: Int, blockHash: String) -> Data {
+        let normalizedHash = AvalancheHex.normalized(blockHash)
+        return Data("avalanche-snowman-accepted-v1|\(setID)|\(targetHeight)|\(normalizedHash)".utf8)
+    }
+
+    func verifiedValidatorIDs(validators: [AvalancheValidator]) -> Set<String> {
+        let publicKeysByID = Dictionary(
+            uniqueKeysWithValues: validators.compactMap { validator -> (String, String)? in
+                guard let publicKey = validator.publicKey else {
+                    return nil
+                }
+                return (AvalancheHex.normalizedID(validator.nodeID), publicKey)
+            }
+        )
+        let normalizedTarget = AvalancheHex.normalized(targetHash)
+        var verified = Set<String>()
+
+        for signature in signatures where signature.signed {
+            let validatorID = AvalancheHex.normalizedID(signature.nodeID)
+            guard
+                AvalancheHex.normalized(signature.blockHash) == normalizedTarget,
+                let publicKey = publicKeysByID[validatorID]
+            else {
+                continue
+            }
+
+            let message = Self.canonicalVote(
+                setID: setID,
+                targetHeight: targetHeight,
+                blockHash: signature.blockHash
+            )
+            if Ed25519QuorumVerifier.isValidSignature(
+                signatureBase64: signature.signature,
+                publicKeyHex: publicKey,
+                message: message
+            ) {
+                verified.insert(validatorID)
+            }
+        }
+
+        return verified
     }
 }
 
@@ -513,10 +561,10 @@ struct AvalancheStateVerificationBundle: Codable, Equatable {
         if let conflictingEvidence,
            conflictingEvidence.targetHeight == finalityEvidence.targetHeight,
            AvalancheHex.normalized(conflictingEvidence.targetHash) != AvalancheHex.normalized(finalityEvidence.targetHash),
-           validatorSet.hasAcceptedQuorum(validatorIDs: conflictingEvidence.signedValidatorIDs) {
+           validatorSet.hasAcceptedQuorum(validatorIDs: conflictingEvidence.verifiedValidatorIDs(validators: validatorSet.validators)) {
             return failure("Conflicting Avalanche accepted-block evidence reached validator quorum.")
         }
-        guard validatorSet.hasAcceptedQuorum(validatorIDs: finalityEvidence.signedValidatorIDs) else {
+        guard validatorSet.hasAcceptedQuorum(validatorIDs: finalityEvidence.verifiedValidatorIDs(validators: validatorSet.validators)) else {
             return failure("Avalanche accepted-finality evidence did not reach the validator-weight quorum.")
         }
 
@@ -548,7 +596,7 @@ struct AvalancheStateVerificationBundle: Codable, Equatable {
             blockHash: acceptedBlock.blockHash,
             proofID: evmProof?.proof.proofID,
             summary: evmProof == nil
-                ? "Avalanche Snowman accepted block \(acceptedBlock.height) checked with fixture validator quorum."
+                ? "Avalanche Snowman accepted block \(acceptedBlock.height) checked with Ed25519 validator quorum."
                 : "Avalanche Snowman accepted block \(acceptedBlock.height) checked with C-Chain EVM proof evidence."
         )
     }
@@ -757,8 +805,8 @@ struct AvalancheLightClientServiceSnapshot: Codable, Equatable {
 }
 
 /// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
-/// Accepted-finality checks are fixture-backed and do not yet replace a production AvalancheGo
-/// light client; live state is served via RPC fallback (`.rpcFallback`), not local verification.
+/// Accepted-finality checks verify Ed25519 validator quorum evidence, but the evidence is still
+/// fixture/service-sourced and does not yet replace a production AvalancheGo light client.
 final class AvalancheLightClientServiceClient {
     private let configuration: AvalancheLightClientEndpointConfiguration
     private let session: URLSession

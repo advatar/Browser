@@ -36,7 +36,7 @@ enum XRPLNetwork: String, Codable, Equatable, CaseIterable {
     nonisolated var limitations: [String] {
         switch self {
         case .mainnet:
-            return ["Fixture-backed UNL quorum checks do not yet replace a production XRPL validator or rippled verification path."]
+            return ["Ed25519 UNL quorum checks are fixture-sourced and do not yet replace a production XRPL validator or rippled verification path."]
         case .testnet, .devnet:
             return ["XRPL test networks are modeled for explicit fallback and fixture checks only."]
         case .localnet:
@@ -468,13 +468,38 @@ struct XRPLLedgerValidationProof: Codable, Equatable {
         self.source = try container.decodeIfPresent(String.self, forKey: .source)
     }
 
-    func signedValidatorPublicKeys(ledgerHash: String, ledgerIndex: Int) -> Set<String> {
+    static func canonicalVote(listID: String, ledgerHash: String, ledgerIndex: Int) -> Data {
         let normalizedLedgerHash = XRPLHash.normalized(ledgerHash)
-        return Set(votes.filter {
-            $0.signed
-                && $0.ledgerIndex == ledgerIndex
-                && XRPLHash.normalized($0.ledgerHash) == normalizedLedgerHash
-        }.map { XRPLHash.normalizedID($0.validatorPublicKey) })
+        return Data("xrpl-validation-v1|\(listID)|\(ledgerIndex)|\(normalizedLedgerHash)".utf8)
+    }
+
+    func verifiedValidatorPublicKeys(ledgerHash: String, ledgerIndex: Int) -> Set<String> {
+        let normalizedLedgerHash = XRPLHash.normalized(ledgerHash)
+        var verified = Set<String>()
+
+        for vote in votes where vote.signed {
+            guard
+                vote.ledgerIndex == ledgerIndex,
+                XRPLHash.normalized(vote.ledgerHash) == normalizedLedgerHash
+            else {
+                continue
+            }
+
+            let message = Self.canonicalVote(
+                listID: listID,
+                ledgerHash: vote.ledgerHash,
+                ledgerIndex: vote.ledgerIndex
+            )
+            if Ed25519QuorumVerifier.isValidSignature(
+                signatureBase64: vote.signature,
+                publicKeyHex: vote.validatorPublicKey,
+                message: message
+            ) {
+                verified.insert(XRPLHash.normalizedID(vote.validatorPublicKey))
+            }
+        }
+
+        return verified
     }
 }
 
@@ -692,11 +717,11 @@ struct XRPLProofVerificationBundle: Codable, Equatable {
         guard unlSet.validatesHash else {
             return failure("XRPL UNL trust-anchor hash is invalid.")
         }
-        let signedValidators = validationProof.signedValidatorPublicKeys(
+        let verifiedValidators = validationProof.verifiedValidatorPublicKeys(
             ledgerHash: ledger.ledgerHash,
             ledgerIndex: ledger.ledgerIndex
         )
-        guard unlSet.hasQuorum(validatorPublicKeys: signedValidators) else {
+        guard unlSet.hasQuorum(validatorPublicKeys: verifiedValidators) else {
             return failure("XRPL validation proof did not reach the configured UNL quorum.")
         }
         if let proof {
@@ -722,7 +747,7 @@ struct XRPLProofVerificationBundle: Codable, Equatable {
             proofID: proof?.proofID,
             kind: proof?.kind,
             summary: proof == nil
-                ? "XRPL validated ledger \(ledger.ledgerIndex) checked with fixture UNL quorum."
+                ? "XRPL validated ledger \(ledger.ledgerIndex) checked with Ed25519 UNL quorum."
                 : "XRPL \(proof?.kind.rawValue ?? "state") proof checked against validated ledger \(ledger.ledgerIndex)."
         )
     }
@@ -932,8 +957,8 @@ struct XRPLLightClientServiceSnapshot: Codable, Equatable {
 }
 
 /// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
-/// UNL-quorum checks are fixture-backed and do not yet replace a production XRPL validator /
-/// rippled verification path; live state is served via RPC fallback (`.rpcFallback`).
+/// UNL-quorum checks verify Ed25519 validator votes, but the evidence is still fixture or service
+/// sourced and does not yet replace a production XRPL validator / rippled verification path.
 final class XRPLLightClientServiceClient {
     private let configuration: XRPLLightClientEndpointConfiguration
     private let session: URLSession

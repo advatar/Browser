@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## Avalanche / XRPL / Move Ed25519 Quorum Closure (#148)
+
+Closing the remaining signed-flag quorum gaps for the chains that match the shared Ed25519 verifier pattern.
+
+- [x] Apply real Ed25519 signature gating to Avalanche accepted-finality quorum evidence.
+- [x] Apply real Ed25519 signature gating to XRPL UNL validation quorum evidence.
+- [x] Apply real Ed25519 signature gating to Move Sui/Aptos finality quorum evidence.
+- [x] Re-sign focused Swift fixtures and add flag-only / wrong-key rejection tests.
+- [x] Update the trust-gap scorecard in this file.
+- [x] Verify focused Swift tests, full unit tests, and the macOS build locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination platform=macOS` with focused Avalanche, XRPL, and Move positive/rejection `-only-testing` filters passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination platform=macOS -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination platform=macOS` passed.
+
 ## EUDI VC-JWT Trust Store And Import Gating (#147)
 
 Closing the remaining EUDI VC-JWT trust-anchor gaps after issuer-signature verification landed.
@@ -55,7 +73,7 @@ Driven by the 2026-06-08 concept/code/UX review (#146). Closing the highest-prio
 Review follow-ups (from #146):
 
 - [x] A. Visa TAP signature-byte verification: added `VisaTrustedAgentKeyStore`, a canonical signing base, a `signatureValue` field, and a `verify(_:keyStore:now:)` overload that cryptographically verifies the signature bytes (Ed25519 / ECDSA P-256 via CryptoKit) after the metadata pre-checks; RSA-PSS is recognized but reported as not locally verifiable. Added `missingSignatureValue`/`signatureInvalid` statuses and a crypto test (genuine, tampered, unknown key, missing bytes, RSA).
-- [x] B. Relabel the `*LightClient` types to reflect RPC/gateway trust delegation (per user direction: accurate per-type documentation rather than a blanket symbol rename, since a blanket rename would mislabel clients that do real work, e.g. Bitcoin header PoW). Added a "Trust boundary (goal: minimize remote trust)" doc to each `*LightClientServiceClient` stating its real status: Bitcoin (real header PoW/hash-linkage, not yet end-to-end SPV), Cosmos (real Tendermint header verification where a bundle is supplied), Substrate (GRANDPA justifications + some fixtures), EVM (finality/proofs modeled, RPC fallback by default), and Solana/Avalanche/Tron/XRPL/Sui/Aptos (explicitly fixture-backed). All default to `.rpcFallback`/`.gatewayRPCFallback`.
+- [x] B. Relabel the `*LightClient` types to reflect RPC/gateway trust delegation (per user direction: accurate per-type documentation rather than a blanket symbol rename, since a blanket rename would mislabel clients that do real work, e.g. Bitcoin header PoW). Added a "Trust boundary (goal: minimize remote trust)" doc to each `*LightClientServiceClient` stating its real status: Bitcoin (real header PoW/hash-linkage, not yet end-to-end SPV), Cosmos (real Tendermint header verification where a bundle is supplied), Substrate/Tron/Avalanche/XRPL/Move (local quorum verification over fixture or service evidence), EVM (finality/proofs modeled, RPC fallback by default), and Solana (fixture-backed). All default to `.rpcFallback`/`.gatewayRPCFallback`.
 
 ## Trust Gap Closure (real light-client verification)
 
@@ -65,10 +83,10 @@ Review follow-ups (from #146):
 - [x] EVM sync-committee verification: `BLSVerifierKit` is wired into the app target and `EVMSyncCommitteeVerifier` verifies the committee's aggregate signature with real BLS12-381 (`BLSVerifier.fastAggregateVerify`), requiring a two-thirds participation supermajority; a verified update reports `.proofChecked` (local proof), insufficient/invalid/malformed updates do not. Added `BLSSigner` (keygen/sign/aggregate) for test-vector generation and four app tests (real-signature verify, insufficient participation, wrong-root rejection, malformed). Remaining precision step: derive the signing root via exact SSZ `hash_tree_root` + `compute_domain` (genesis validators root, fork version) instead of taking it as input, and drive verification on the live EVM snapshot path.
 - [x] Substrate GRANDPA: real Ed25519 justification verification gating the 2/3 weight threshold (shared `Ed25519QuorumVerifier`; authority id is the Ed25519 key). Fixtures re-signed.
 - [x] Tron: real Ed25519 witness-quorum verification (added witness public key to the signature). Fixtures re-signed.
-- [ ] Avalanche / XRPL / Move (Sui/Aptos): identical `signed`+`signature?` shape — apply the same shared-`Ed25519QuorumVerifier` pattern (add a public key where the id is not the key, swap the quorum input to the verified set, re-sign fixtures).
+- [x] Avalanche / XRPL / Move (Sui/Aptos): real Ed25519 quorum verification now gates Avalanche accepted-finality, XRPL UNL validation, and Move Sui/Aptos finality evidence. Validator sets carry public keys where the signer id is not already the key, quorum math consumes only verified signers, and fixtures were re-signed with deterministic keys plus flag-only / wrong-key rejection tests.
 - [ ] Solana: different model (no per-signer signature struct) — needs its own vote-signature design.
 
-North star (user direction 2026-06-08): avoid trusting remote services to the extent possible. No advertised chain currently has a production light client that proves state to tip end-to-end; ~4 families have partial real verification logic, ~6 are fixture-backed, and all default to RPC/gateway fallback. Replacing the RPC fallback with real local verification (SPV, sync-committee/account/storage proofs, Tendermint/GRANDPA to the default path) is the tracked direction.
+North star (user direction 2026-06-08): avoid trusting remote services to the extent possible. No advertised chain currently has a production light client that proves state to tip end-to-end; Bitcoin, Cosmos, EVM, Substrate, Tron, Avalanche, XRPL, and Move now have partial real verification logic, Solana remains fixture-backed, and all default to RPC/gateway fallback. Replacing the RPC fallback with real local verification (SPV, sync-committee/account/storage proofs, Tendermint/GRANDPA to the default path) is the tracked direction.
 - [x] C. Keychain wallet seed storage: added `KeychainWalletSeedStore` (system Keychain, `AfterFirstUnlockThisDeviceOnly`, in-memory fallback when unentitled) and `WalletSeedFactory.generateSeedHex` (256-bit secure entropy). `createEmbeddedWallet` now loads-or-creates the seed from secure storage instead of holding a `UUID().uuidString` in memory. Added a hermetic round-trip test. (Secure Enclave key-wrapping of the seed and BIP-39 mnemonic encoding remain follow-ups.)
 - [~] D. `BrowserViewModel` decomposition (incremental, per user direction). Extracted the smart-history domain into `BrowserHistoryService` (recording, summarization + exclusion config, autocomplete ranking, recall, persistence), which now owns the `excludedDomains` state and `SmartHistoryStore`. The view model keeps the observable `history` array and delegates, dropping from 1580 to 1422 lines with all 189 tests green. Remaining domains (LLM/Copilot orchestration, wallet, OpenMind memory) are tracked follow-ups.
 

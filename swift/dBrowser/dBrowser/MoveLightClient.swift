@@ -67,13 +67,13 @@ enum MoveChain: String, Codable, Equatable, CaseIterable {
     nonisolated var limitations: [String] {
         switch self {
         case .suiMainnet:
-            return ["Fixture-backed Sui checkpoint quorum checks do not yet replace a production Sui light client."]
+            return ["Ed25519 Sui checkpoint quorum checks are fixture-sourced and do not yet replace a production Sui light client."]
         case .suiTestnet, .suiDevnet:
             return ["Sui non-mainnet routes are modeled for explicit fallback and fixture checks only."]
         case .suiLocalnet:
             return ["Local Sui routes require caller-provided committee and checkpoint evidence."]
         case .aptosMainnet:
-            return ["Fixture-backed Aptos ledger-info quorum checks do not yet replace a production Aptos light client."]
+            return ["Ed25519 Aptos ledger-info quorum checks are fixture-sourced and do not yet replace a production Aptos light client."]
         case .aptosTestnet, .aptosDevnet:
             return ["Aptos non-mainnet routes are modeled for explicit fallback and fixture checks only."]
         case .aptosLocalnet:
@@ -301,12 +301,14 @@ struct MoveValidator: Codable, Equatable, Identifiable {
     var validatorID: String
     var weight: Int
     var name: String?
+    var publicKey: String?
     var disabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case validatorID = "validator_id"
         case weight
         case name
+        case publicKey = "public_key"
         case disabled
     }
 
@@ -314,11 +316,13 @@ struct MoveValidator: Codable, Equatable, Identifiable {
         validatorID: String,
         weight: Int,
         name: String? = nil,
+        publicKey: String? = nil,
         disabled: Bool = false
     ) {
         self.validatorID = MoveHash.normalizedID(validatorID)
         self.weight = weight
         self.name = name
+        self.publicKey = publicKey?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         self.disabled = disabled
     }
 
@@ -327,6 +331,9 @@ struct MoveValidator: Codable, Equatable, Identifiable {
         self.validatorID = MoveHash.normalizedID(try container.decode(String.self, forKey: .validatorID))
         self.weight = try container.decodeIfPresent(Int.self, forKey: .weight) ?? 1
         self.name = try container.decodeIfPresent(String.self, forKey: .name)
+        self.publicKey = try container.decodeIfPresent(String.self, forKey: .publicKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         self.disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled) ?? false
     }
 }
@@ -436,7 +443,10 @@ struct MoveValidatorSet: Codable, Equatable, Identifiable {
 
     nonisolated static func computeHash(validators: [MoveValidator]) -> String {
         let payload = validators
-            .map { "\(MoveHash.normalizedID($0.validatorID)):\($0.weight):\($0.disabled ? "disabled" : "active")" }
+            .map {
+                let publicKey = $0.publicKey?.lowercased() ?? ""
+                return "\(MoveHash.normalizedID($0.validatorID)):\($0.weight):\($0.disabled ? "disabled" : "active"):\(publicKey)"
+            }
             .sorted()
             .joined(separator: "|")
         return MoveHash.sha256Hex(payload)
@@ -536,13 +546,54 @@ struct MoveFinalityProof: Codable, Equatable {
         self.source = source
     }
 
-    func signedValidatorIDs(targetDigest: String, targetSequenceNumber: Int) -> Set<String> {
+    static func canonicalVote(chain: MoveChain, epoch: Int, targetDigest: String, targetSequenceNumber: Int) -> Data {
+        let normalizedDigest = MoveHash.normalized(targetDigest)
+        return Data("move-finality-v1|\(chain.chainRef)|\(epoch)|\(targetSequenceNumber)|\(normalizedDigest)".utf8)
+    }
+
+    func verifiedValidatorIDs(
+        targetDigest: String,
+        targetSequenceNumber: Int,
+        validators: [MoveValidator],
+        chain: MoveChain
+    ) -> Set<String> {
+        let publicKeysByID = Dictionary(
+            uniqueKeysWithValues: validators.compactMap { validator -> (String, String)? in
+                guard let publicKey = validator.publicKey else {
+                    return nil
+                }
+                return (MoveHash.normalizedID(validator.validatorID), publicKey)
+            }
+        )
         let normalizedTarget = MoveHash.normalized(targetDigest)
-        return Set(signatures.filter {
-            $0.signed
-                && $0.sequenceNumber == targetSequenceNumber
-                && MoveHash.normalized($0.checkpointDigest) == normalizedTarget
-        }.map { MoveHash.normalizedID($0.validatorID) })
+        var verified = Set<String>()
+
+        for signature in signatures where signature.signed {
+            let validatorID = MoveHash.normalizedID(signature.validatorID)
+            guard
+                signature.sequenceNumber == targetSequenceNumber,
+                MoveHash.normalized(signature.checkpointDigest) == normalizedTarget,
+                let publicKey = publicKeysByID[validatorID]
+            else {
+                continue
+            }
+
+            let message = Self.canonicalVote(
+                chain: chain,
+                epoch: epoch,
+                targetDigest: signature.checkpointDigest,
+                targetSequenceNumber: signature.sequenceNumber
+            )
+            if Ed25519QuorumVerifier.isValidSignature(
+                signatureBase64: signature.signature,
+                publicKeyHex: publicKey,
+                message: message
+            ) {
+                verified.insert(validatorID)
+            }
+        }
+
+        return verified
     }
 }
 
@@ -777,11 +828,13 @@ struct MoveProofVerificationBundle: Codable, Equatable {
         guard validatorSet.validatesHash else {
             return failure("Move validator set hash is invalid.")
         }
-        let signedValidators = finalityProof.signedValidatorIDs(
+        let verifiedValidators = finalityProof.verifiedValidatorIDs(
             targetDigest: checkpoint.digest,
-            targetSequenceNumber: checkpoint.sequenceNumber
+            targetSequenceNumber: checkpoint.sequenceNumber,
+            validators: validatorSet.validators,
+            chain: validatorSet.chain
         )
-        guard validatorSet.hasQuorum(validatorIDs: signedValidators) else {
+        guard validatorSet.hasQuorum(validatorIDs: verifiedValidators) else {
             return failure("Move finality proof did not reach the validator quorum.")
         }
         if let proof {
@@ -810,7 +863,7 @@ struct MoveProofVerificationBundle: Codable, Equatable {
             proofID: proof?.proofID,
             kind: proof?.kind,
             summary: proof == nil
-                ? "\(checkpoint.chain.displayName) checkpoint \(checkpoint.sequenceNumber) checked with fixture validator quorum."
+                ? "\(checkpoint.chain.displayName) checkpoint \(checkpoint.sequenceNumber) checked with Ed25519 validator quorum."
                 : "\(checkpoint.chain.displayName) \(proof?.kind.rawValue ?? "state") proof checked against checkpoint \(checkpoint.sequenceNumber)."
         )
     }
@@ -1028,9 +1081,9 @@ struct MoveLightClientServiceSnapshot: Codable, Equatable {
 }
 
 /// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service
-/// for Sui and Aptos. Checkpoint and ledger-info quorum checks are fixture-backed and do not yet
-/// replace a production Sui/Aptos light client; live state is served via RPC fallback
-/// (`.rpcFallback`), not local verification.
+/// for Sui and Aptos. Checkpoint and ledger-info quorum checks verify Ed25519 validator evidence,
+/// but the evidence is still fixture or service sourced and does not yet replace a production
+/// Sui/Aptos light client.
 final class MoveLightClientServiceClient {
     private let configuration: MoveLightClientEndpointConfiguration
     private let session: URLSession

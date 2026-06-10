@@ -3667,7 +3667,7 @@ struct dBrowserTests {
 
         #expect(bundle.validatorSet.validatesHash)
         #expect(bundle.validatorSet.totalWeight == 100)
-        #expect(bundle.validatorSet.hasAcceptedQuorum(validatorIDs: bundle.finalityEvidence.signedValidatorIDs))
+        #expect(bundle.validatorSet.hasAcceptedQuorum(validatorIDs: bundle.finalityEvidence.verifiedValidatorIDs(validators: bundle.validatorSet.validators)))
         #expect(bundle.evmProof?.header.chain == .avalancheCChain)
         #expect(result.verified)
         #expect(result.state == .proofChecked)
@@ -3688,8 +3688,20 @@ struct dBrowserTests {
             targetHash: conflictingHash,
             targetHeight: bundle.acceptedBlock.height,
             signatures: [
-                AvalancheFinalitySignature(nodeID: bundle.validatorSet.validators[0].nodeID, blockHash: conflictingHash),
-                AvalancheFinalitySignature(nodeID: bundle.validatorSet.validators[1].nodeID, blockHash: conflictingHash)
+                Self.avalancheFinalitySignature(
+                    Self.avalancheValidatorKey(0xA1),
+                    nodeID: bundle.validatorSet.validators[0].nodeID,
+                    setID: bundle.validatorSet.setID,
+                    targetHeight: bundle.acceptedBlock.height,
+                    blockHash: conflictingHash
+                ),
+                Self.avalancheFinalitySignature(
+                    Self.avalancheValidatorKey(0xB2),
+                    nodeID: bundle.validatorSet.validators[1].nodeID,
+                    setID: bundle.validatorSet.setID,
+                    targetHeight: bundle.acceptedBlock.height,
+                    blockHash: conflictingHash
+                )
             ],
             source: "fixture"
         )
@@ -3698,6 +3710,41 @@ struct dBrowserTests {
         #expect(result.verified == false)
         #expect(result.state == .failed)
         #expect(result.summary.contains("Conflicting Avalanche"))
+    }
+
+    @Test func avalancheRejectsFlagOnlyAndWrongKeyFinalityEvidence() {
+        let bundle = Self.avalancheProofBundle(network: .cChain)
+        var flagOnlyBundle = bundle
+        flagOnlyBundle.finalityEvidence.signatures = [
+            AvalancheFinalitySignature(
+                nodeID: bundle.validatorSet.validators[0].nodeID,
+                blockHash: bundle.acceptedBlock.blockHash,
+                signed: true,
+                signature: nil
+            ),
+            AvalancheFinalitySignature(
+                nodeID: bundle.validatorSet.validators[1].nodeID,
+                blockHash: bundle.acceptedBlock.blockHash,
+                signed: true,
+                signature: nil
+            )
+        ]
+        var wrongKeyBundle = bundle
+        wrongKeyBundle.finalityEvidence.signatures[1] = Self.avalancheFinalitySignature(
+            Self.avalancheValidatorKey(0xEE),
+            nodeID: bundle.validatorSet.validators[1].nodeID,
+            setID: bundle.validatorSet.setID,
+            targetHeight: bundle.acceptedBlock.height,
+            blockHash: bundle.acceptedBlock.blockHash
+        )
+
+        let flagOnlyResult = flagOnlyBundle.verify()
+        let wrongKeyResult = wrongKeyBundle.verify()
+
+        #expect(flagOnlyResult.verified == false)
+        #expect(flagOnlyResult.summary.contains("validator-weight quorum"))
+        #expect(wrongKeyResult.verified == false)
+        #expect(wrongKeyResult.summary.contains("validator-weight quorum"))
     }
 
     @MainActor
@@ -3996,6 +4043,10 @@ struct dBrowserTests {
         #expect(accountBundle.unlSet.configuredWeight == 5)
         #expect(accountBundle.unlSet.effectiveWeight == 4)
         #expect(accountBundle.unlSet.requiredQuorumWeight == 4)
+        #expect(accountBundle.unlSet.hasQuorum(validatorPublicKeys: accountBundle.validationProof.verifiedValidatorPublicKeys(
+            ledgerHash: accountBundle.ledger.ledgerHash,
+            ledgerIndex: accountBundle.ledger.ledgerIndex
+        )))
         #expect(accountResult.verified)
         #expect(accountResult.state == .proofChecked)
         #expect(trustLineResult.verified)
@@ -4006,6 +4057,36 @@ struct dBrowserTests {
         #expect(weakResult.summary.contains("UNL quorum"))
         #expect(apiOnlyResult.verified == false)
         #expect(apiOnlyResult.summary.contains("API/RPC data must remain fallback-labeled"))
+    }
+
+    @Test func xrplRejectsFlagOnlyAndWrongKeyUNLVotes() {
+        let bundle = Self.xrplProofBundle(network: .mainnet, kind: .account)
+        var flagOnlyBundle = bundle
+        flagOnlyBundle.validationProof.votes = Array(bundle.unlSet.validators.prefix(4)).map { validator in
+            XRPLValidationVote(
+                validatorPublicKey: validator.validatorPublicKey,
+                ledgerHash: bundle.ledger.ledgerHash,
+                ledgerIndex: bundle.ledger.ledgerIndex,
+                signed: true,
+                signature: nil
+            )
+        }
+        var wrongKeyBundle = bundle
+        wrongKeyBundle.validationProof.votes[3] = Self.xrplValidationVote(
+            Self.xrplValidatorKey(0xFE),
+            listID: bundle.unlSet.listID,
+            ledgerHash: bundle.ledger.ledgerHash,
+            ledgerIndex: bundle.ledger.ledgerIndex,
+            validatorPublicKey: bundle.unlSet.validators[3].validatorPublicKey
+        )
+
+        let flagOnlyResult = flagOnlyBundle.verify()
+        let wrongKeyResult = wrongKeyBundle.verify()
+
+        #expect(flagOnlyResult.verified == false)
+        #expect(flagOnlyResult.summary.contains("UNL quorum"))
+        #expect(wrongKeyResult.verified == false)
+        #expect(wrongKeyResult.summary.contains("UNL quorum"))
     }
 
     @MainActor
@@ -4157,6 +4238,12 @@ struct dBrowserTests {
         #expect(suiObjectBundle.validatorSet.validatesHash)
         #expect(suiObjectBundle.validatorSet.configuredWeight == 100)
         #expect(suiObjectBundle.validatorSet.requiredQuorumWeight == 67)
+        #expect(suiObjectBundle.validatorSet.hasQuorum(validatorIDs: suiObjectBundle.finalityProof.verifiedValidatorIDs(
+            targetDigest: suiObjectBundle.checkpoint.digest,
+            targetSequenceNumber: suiObjectBundle.checkpoint.sequenceNumber,
+            validators: suiObjectBundle.validatorSet.validators,
+            chain: suiObjectBundle.validatorSet.chain
+        )))
         #expect(suiObjectResult.verified)
         #expect(suiObjectResult.state == .proofChecked)
         #expect(suiEffectsResult.verified)
@@ -4169,6 +4256,64 @@ struct dBrowserTests {
         #expect(weakResult.summary.contains("validator quorum"))
         #expect(apiOnlyResult.verified == false)
         #expect(apiOnlyResult.summary.contains("API/RPC data must remain fallback-labeled"))
+    }
+
+    @Test func moveRejectsFlagOnlyAndWrongKeyFinalityEvidence() {
+        let suiBundle = Self.moveProofBundle(chain: .suiMainnet, kind: .suiObject)
+        var flagOnlySuiBundle = suiBundle
+        flagOnlySuiBundle.finalityProof.signatures = Array(suiBundle.validatorSet.validators.prefix(2)).map { validator in
+            MoveValidatorSignature(
+                validatorID: validator.validatorID,
+                checkpointDigest: suiBundle.checkpoint.digest,
+                sequenceNumber: suiBundle.checkpoint.sequenceNumber,
+                signed: true,
+                signature: nil
+            )
+        }
+        var wrongKeySuiBundle = suiBundle
+        wrongKeySuiBundle.finalityProof.signatures[1] = Self.moveValidatorSignature(
+            Self.moveValidatorKey(0xEE),
+            validatorID: suiBundle.validatorSet.validators[1].validatorID,
+            chain: suiBundle.validatorSet.chain,
+            epoch: suiBundle.validatorSet.epoch,
+            checkpointDigest: suiBundle.checkpoint.digest,
+            sequenceNumber: suiBundle.checkpoint.sequenceNumber
+        )
+
+        let aptosBundle = Self.moveProofBundle(chain: .aptosMainnet, kind: .aptosAccount)
+        var flagOnlyAptosBundle = aptosBundle
+        flagOnlyAptosBundle.finalityProof.signatures = Array(aptosBundle.validatorSet.validators.prefix(2)).map { validator in
+            MoveValidatorSignature(
+                validatorID: validator.validatorID,
+                checkpointDigest: aptosBundle.checkpoint.digest,
+                sequenceNumber: aptosBundle.checkpoint.sequenceNumber,
+                signed: true,
+                signature: nil
+            )
+        }
+        var wrongKeyAptosBundle = aptosBundle
+        wrongKeyAptosBundle.finalityProof.signatures[1] = Self.moveValidatorSignature(
+            Self.moveValidatorKey(0xEF),
+            validatorID: aptosBundle.validatorSet.validators[1].validatorID,
+            chain: aptosBundle.validatorSet.chain,
+            epoch: aptosBundle.validatorSet.epoch,
+            checkpointDigest: aptosBundle.checkpoint.digest,
+            sequenceNumber: aptosBundle.checkpoint.sequenceNumber
+        )
+
+        let flagOnlySuiResult = flagOnlySuiBundle.verify()
+        let wrongKeySuiResult = wrongKeySuiBundle.verify()
+        let flagOnlyAptosResult = flagOnlyAptosBundle.verify()
+        let wrongKeyAptosResult = wrongKeyAptosBundle.verify()
+
+        #expect(flagOnlySuiResult.verified == false)
+        #expect(flagOnlySuiResult.summary.contains("validator quorum"))
+        #expect(wrongKeySuiResult.verified == false)
+        #expect(wrongKeySuiResult.summary.contains("validator quorum"))
+        #expect(flagOnlyAptosResult.verified == false)
+        #expect(flagOnlyAptosResult.summary.contains("validator quorum"))
+        #expect(wrongKeyAptosResult.verified == false)
+        #expect(wrongKeyAptosResult.summary.contains("validator quorum"))
     }
 
     @MainActor
@@ -8455,6 +8600,10 @@ struct dBrowserTests {
         key.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func ed25519PublicKeyHex(_ key: Curve25519.Signing.PrivateKey) -> String {
+        key.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined()
+    }
+
     static func grandpaSignature(_ key: Curve25519.Signing.PrivateKey, setID: Int, round: Int, blockHash: String) -> GRANDPAJustificationSignature {
         let message = GRANDPAFinalityJustification.canonicalVote(setID: setID, round: round, blockHash: blockHash)
         let signature = try! key.signature(for: message).base64EncodedString()
@@ -8519,11 +8668,39 @@ struct dBrowserTests {
         )
     }
 
+    private static func avalancheValidatorKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    private static func avalancheFinalitySignature(
+        _ key: Curve25519.Signing.PrivateKey,
+        nodeID: String,
+        setID: Int,
+        targetHeight: Int,
+        blockHash: String
+    ) -> AvalancheFinalitySignature {
+        let message = AvalancheFinalityEvidence.canonicalVote(
+            setID: setID,
+            targetHeight: targetHeight,
+            blockHash: blockHash
+        )
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return AvalancheFinalitySignature(
+            nodeID: nodeID,
+            blockHash: blockHash,
+            signed: true,
+            signature: signature
+        )
+    }
+
     private static func avalancheProofBundle(network: AvalancheNetwork) -> AvalancheStateVerificationBundle {
+        let keyA = avalancheValidatorKey(0xA1)
+        let keyB = avalancheValidatorKey(0xB2)
+        let keyC = avalancheValidatorKey(0xC3)
         let validators = [
-            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-a", weight: 50),
-            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-b", weight: 30),
-            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-c", weight: 20)
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-a", weight: 50, publicKey: ed25519PublicKeyHex(keyA)),
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-b", weight: 30, publicKey: ed25519PublicKeyHex(keyB)),
+            AvalancheValidator(nodeID: "nodeid-avalanche-fixture-c", weight: 20, publicKey: ed25519PublicKeyHex(keyC))
         ]
         let validatorSet = AvalancheValidatorSet(
             network: network,
@@ -8563,8 +8740,8 @@ struct dBrowserTests {
             targetHash: acceptedBlock.blockHash,
             targetHeight: acceptedBlock.height,
             signatures: [
-                AvalancheFinalitySignature(nodeID: validators[0].nodeID, blockHash: acceptedBlock.blockHash),
-                AvalancheFinalitySignature(nodeID: validators[1].nodeID, blockHash: acceptedBlock.blockHash),
+                avalancheFinalitySignature(keyA, nodeID: validators[0].nodeID, setID: validatorSet.setID, targetHeight: acceptedBlock.height, blockHash: acceptedBlock.blockHash),
+                avalancheFinalitySignature(keyB, nodeID: validators[1].nodeID, setID: validatorSet.setID, targetHeight: acceptedBlock.height, blockHash: acceptedBlock.blockHash),
                 AvalancheFinalitySignature(nodeID: validators[2].nodeID, blockHash: acceptedBlock.blockHash, signed: false)
             ],
             source: "fixture"
@@ -8652,16 +8829,47 @@ struct dBrowserTests {
         )
     }
 
+    private static func xrplValidatorKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    private static func xrplValidationVote(
+        _ key: Curve25519.Signing.PrivateKey,
+        listID: String,
+        ledgerHash: String,
+        ledgerIndex: Int,
+        validatorPublicKey: String? = nil
+    ) -> XRPLValidationVote {
+        let message = XRPLLedgerValidationProof.canonicalVote(
+            listID: listID,
+            ledgerHash: ledgerHash,
+            ledgerIndex: ledgerIndex
+        )
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return XRPLValidationVote(
+            validatorPublicKey: validatorPublicKey ?? ed25519PublicKeyHex(key),
+            ledgerHash: ledgerHash,
+            ledgerIndex: ledgerIndex,
+            signed: true,
+            signature: signature
+        )
+    }
+
     private static func xrplProofBundle(
         network: XRPLNetwork,
         kind: XRPLLocalProofKind = .account
     ) -> XRPLProofVerificationBundle {
+        let keyA = xrplValidatorKey(0x11)
+        let keyB = xrplValidatorKey(0x22)
+        let keyC = xrplValidatorKey(0x33)
+        let keyD = xrplValidatorKey(0x44)
+        let keyE = xrplValidatorKey(0x55)
         let validators = [
-            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatora", domain: "validator-a.example"),
-            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatorb", domain: "validator-b.example"),
-            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatorc", domain: "validator-c.example"),
-            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatord", domain: "validator-d.example"),
-            XRPLUNLValidator(validatorPublicKey: "n9xrplvalidatore", domain: "validator-e.example", disabled: true)
+            XRPLUNLValidator(validatorPublicKey: ed25519PublicKeyHex(keyA), domain: "validator-a.example"),
+            XRPLUNLValidator(validatorPublicKey: ed25519PublicKeyHex(keyB), domain: "validator-b.example"),
+            XRPLUNLValidator(validatorPublicKey: ed25519PublicKeyHex(keyC), domain: "validator-c.example"),
+            XRPLUNLValidator(validatorPublicKey: ed25519PublicKeyHex(keyD), domain: "validator-d.example"),
+            XRPLUNLValidator(validatorPublicKey: ed25519PublicKeyHex(keyE), domain: "validator-e.example", disabled: true)
         ]
         let unlSet = XRPLUNLSet(
             network: network,
@@ -8713,10 +8921,10 @@ struct dBrowserTests {
             ledgerHash: ledger.ledgerHash,
             ledgerIndex: ledger.ledgerIndex,
             votes: [
-                XRPLValidationVote(validatorPublicKey: validators[0].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
-                XRPLValidationVote(validatorPublicKey: validators[1].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
-                XRPLValidationVote(validatorPublicKey: validators[2].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
-                XRPLValidationVote(validatorPublicKey: validators[3].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                xrplValidationVote(keyA, listID: unlSet.listID, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                xrplValidationVote(keyB, listID: unlSet.listID, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                xrplValidationVote(keyC, listID: unlSet.listID, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
+                xrplValidationVote(keyD, listID: unlSet.listID, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex),
                 XRPLValidationVote(validatorPublicKey: validators[4].validatorPublicKey, ledgerHash: ledger.ledgerHash, ledgerIndex: ledger.ledgerIndex, signed: false)
             ],
             source: "fixture"
@@ -8779,15 +8987,46 @@ struct dBrowserTests {
         )
     }
 
+    private static func moveValidatorKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
+        try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: seed, count: 32))
+    }
+
+    private static func moveValidatorSignature(
+        _ key: Curve25519.Signing.PrivateKey,
+        validatorID: String,
+        chain: MoveChain,
+        epoch: Int,
+        checkpointDigest: String,
+        sequenceNumber: Int
+    ) -> MoveValidatorSignature {
+        let message = MoveFinalityProof.canonicalVote(
+            chain: chain,
+            epoch: epoch,
+            targetDigest: checkpointDigest,
+            targetSequenceNumber: sequenceNumber
+        )
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return MoveValidatorSignature(
+            validatorID: validatorID,
+            checkpointDigest: checkpointDigest,
+            sequenceNumber: sequenceNumber,
+            signed: true,
+            signature: signature
+        )
+    }
+
     private static func moveProofBundle(
         chain: MoveChain,
         kind: MoveLocalProofKind
     ) -> MoveProofVerificationBundle {
         if chain.kind == .sui {
+            let keyA = moveValidatorKey(0xA1)
+            let keyB = moveValidatorKey(0xB2)
+            let keyC = moveValidatorKey(0xC3)
             let validators = [
-                MoveValidator(validatorID: "sui-validator-a", weight: 40, name: "sui-a"),
-                MoveValidator(validatorID: "sui-validator-b", weight: 35, name: "sui-b"),
-                MoveValidator(validatorID: "sui-validator-c", weight: 25, name: "sui-c")
+                MoveValidator(validatorID: "sui-validator-a", weight: 40, name: "sui-a", publicKey: ed25519PublicKeyHex(keyA)),
+                MoveValidator(validatorID: "sui-validator-b", weight: 35, name: "sui-b", publicKey: ed25519PublicKeyHex(keyB)),
+                MoveValidator(validatorID: "sui-validator-c", weight: 25, name: "sui-c", publicKey: ed25519PublicKeyHex(keyC))
             ]
             let validatorSet = MoveValidatorSet(
                 chain: chain,
@@ -8832,8 +9071,8 @@ struct dBrowserTests {
                 targetDigest: checkpoint.digest,
                 targetSequenceNumber: checkpoint.sequenceNumber,
                 signatures: [
-                    MoveValidatorSignature(validatorID: validators[0].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
-                    MoveValidatorSignature(validatorID: validators[1].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                    moveValidatorSignature(keyA, validatorID: validators[0].validatorID, chain: chain, epoch: validatorSet.epoch, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                    moveValidatorSignature(keyB, validatorID: validators[1].validatorID, chain: chain, epoch: validatorSet.epoch, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
                     MoveValidatorSignature(validatorID: validators[2].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber, signed: false)
                 ],
                 source: "fixture"
@@ -8894,10 +9133,13 @@ struct dBrowserTests {
             )
         }
 
+        let keyA = moveValidatorKey(0xD1)
+        let keyB = moveValidatorKey(0xE2)
+        let keyC = moveValidatorKey(0xF3)
         let validators = [
-            MoveValidator(validatorID: "aptos-validator-a", weight: 45, name: "aptos-a"),
-            MoveValidator(validatorID: "aptos-validator-b", weight: 35, name: "aptos-b"),
-            MoveValidator(validatorID: "aptos-validator-c", weight: 20, name: "aptos-c")
+            MoveValidator(validatorID: "aptos-validator-a", weight: 45, name: "aptos-a", publicKey: ed25519PublicKeyHex(keyA)),
+            MoveValidator(validatorID: "aptos-validator-b", weight: 35, name: "aptos-b", publicKey: ed25519PublicKeyHex(keyB)),
+            MoveValidator(validatorID: "aptos-validator-c", weight: 20, name: "aptos-c", publicKey: ed25519PublicKeyHex(keyC))
         ]
         let validatorSet = MoveValidatorSet(
             chain: chain,
@@ -8942,8 +9184,8 @@ struct dBrowserTests {
             targetDigest: checkpoint.digest,
             targetSequenceNumber: checkpoint.sequenceNumber,
             signatures: [
-                MoveValidatorSignature(validatorID: validators[0].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
-                MoveValidatorSignature(validatorID: validators[1].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                moveValidatorSignature(keyA, validatorID: validators[0].validatorID, chain: chain, epoch: validatorSet.epoch, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
+                moveValidatorSignature(keyB, validatorID: validators[1].validatorID, chain: chain, epoch: validatorSet.epoch, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber),
                 MoveValidatorSignature(validatorID: validators[2].validatorID, checkpointDigest: checkpoint.digest, sequenceNumber: checkpoint.sequenceNumber, signed: false)
             ],
             source: "fixture"
@@ -9101,7 +9343,8 @@ struct dBrowserTests {
             "validators": validatorSet.validators.map { validator in
                 [
                     "node_id": validator.nodeID,
-                    "weight": validator.weight
+                    "weight": validator.weight,
+                    "public_key": validator.publicKey ?? ""
                 ] as [String: Any]
             },
             "hash": validatorSet.hash,
@@ -9208,6 +9451,7 @@ struct dBrowserTests {
                     "validator_id": validator.validatorID,
                     "weight": validator.weight,
                     "name": validator.name ?? "",
+                    "public_key": validator.publicKey ?? "",
                     "disabled": validator.disabled
                 ] as [String: Any]
             },
