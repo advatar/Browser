@@ -21,6 +21,19 @@
 
 ## Active Task
 
+## Hyperactive Web Integration — UniversalInteractionKit (#149)
+
+Wire UniversalInteractionKit (the Hyperactive Web navigation/orchestration fabric) into the native Swift app. dBrowser renders UIK's A2UI v0.9 token output with the existing `A2UISurfaceView`; UIK never ships its own UI here. Reference: `Docs/dBrowserIntegration.md` in advatar/UniversalInteractionKit.
+
+- [ ] Add UIK as a remote SPM package (core product only).
+- [ ] Slice 2 — Adapter bridge: register UIK `MCPAdapter`/`A2AAdapter`/`OpenAPIAdapter` (or wrap `MCPServers`/`RuntimeBridge`/AFM A2A) with `CapabilityResolver`.
+- [ ] Slice 3 — `DBrowserPolicyKernel`: map UIK `RiskLevel`/dual-risk → approval gates + `BlockchainCapabilityGrant`.
+- [ ] Slice 4 — `OpenMindArtifactStore`: back UIK's `ArtifactStore` with `OpenMindMemoryClient` for retention/provenance.
+- [ ] Slice 5 — Discovery: fetch `/.well-known/agent-card.json` → `ServiceCard` → render via the A2UI emitter; route `ResolvedAction` events into the resolver/orchestrator.
+- [ ] Slice 6 — `PaymentAuthorizer` over AgenticPayments / Stripe MPP for 402-gated capabilities.
+- [ ] Slice 7 — `NodeIdentityVerifier` resolving DNS-ID (+ OpenMind node-key shim).
+- [ ] Verify with the focused Swift test lane and the macOS build; commit scoped changes only.
+
 ## Avalanche / XRPL / Move Ed25519 Quorum Closure (#148)
 
 Closing the remaining signed-flag quorum gaps for the chains that match the shared Ed25519 verifier pattern.
