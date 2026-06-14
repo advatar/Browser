@@ -25,14 +25,17 @@
 
 Wire UniversalInteractionKit (the Hyperactive Web navigation/orchestration fabric) into the native Swift app. dBrowser renders UIK's A2UI v0.9 token output with the existing `A2UISurfaceView`; UIK never ships its own UI here. Reference: `Docs/dBrowserIntegration.md` in advatar/UniversalInteractionKit.
 
-- [ ] Add UIK as a remote SPM package (core product only).
-- [ ] Slice 2 — Adapter bridge: register UIK `MCPAdapter`/`A2AAdapter`/`OpenAPIAdapter` (or wrap `MCPServers`/`RuntimeBridge`/AFM A2A) with `CapabilityResolver`.
-- [ ] Slice 3 — `DBrowserPolicyKernel`: map UIK `RiskLevel`/dual-risk → approval gates + `BlockchainCapabilityGrant`.
-- [ ] Slice 4 — `OpenMindArtifactStore`: back UIK's `ArtifactStore` with `OpenMindMemoryClient` for retention/provenance.
-- [ ] Slice 5 — Discovery: fetch `/.well-known/agent-card.json` → `ServiceCard` → render via the A2UI emitter; route `ResolvedAction` events into the resolver/orchestrator.
-- [ ] Slice 6 — `PaymentAuthorizer` over AgenticPayments / Stripe MPP for 402-gated capabilities.
-- [ ] Slice 7 — `NodeIdentityVerifier` resolving DNS-ID (+ OpenMind node-key shim).
-- [ ] Verify with the focused Swift test lane and the macOS build; commit scoped changes only.
+Bridge lives in `dBrowser/HyperactiveWeb/`; UIK added as a local SPM package (private repo → relative path `../../../Packages/UniversalInteractionKit`). macOS build verified.
+
+- [x] Add UIK as a Swift package (local reference; switch to a pinned remote when the repo is shared).
+- [x] Slice 2 — Adapter bridge: `HyperactiveAdapters` builds UIK `MCPAdapter`s from enabled HTTP MCP servers. (A2A/OpenAPI adapters exist in UIK; factory currently covers MCP.)
+- [x] Slice 3 — `DBrowserPolicyKernel`: read-safe runs; side-effecting/sensitive/paid → requireConfirmation gate.
+- [x] Slice 4 — `DBrowserArtifactStore`: durable file-backed retention/provenance. (OpenMind `writeback` mirroring pending.)
+- [x] Slice 5 — `HyperactiveWebCoordinator`: builds the resolver, renders surfaces via `A2UISurfaceEncoder` → `A2UITokenRenderer`, indexes affordances, routes `ResolvedAction` (`capability.follow`/`pay`) back into the resolver. (Wiring into `BrowserViewModel`/navigation + `/.well-known/agent-card.json` fetch pending.)
+- [x] Slice 6 — `DBrowserPaymentAuthorizer`: scaffold defers 402 to a manual payment surface. (AgenticPayments / SPT auto-auth pending.)
+- [x] Slice 7 — `DBrowserIdentityVerifier`: DNS-ID via DNS TXT lookup + node-key shim.
+- [x] macOS build verified (`xcodebuild ... build` → BUILD SUCCEEDED).
+- [ ] Follow-ups: OpenMind writeback mirroring; AgenticPayments auto-auth; wire the coordinator into navigation (fetch agent card on navigate, present its surface, feed renderer actions to `coordinator.handle`).
 
 ## Avalanche / XRPL / Move Ed25519 Quorum Closure (#148)
 
