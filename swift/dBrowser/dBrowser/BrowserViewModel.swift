@@ -39,6 +39,11 @@ final class BrowserViewModel: ObservableObject {
     @Published var selectedLLMModelID: String
     @Published var localLLMState: LocalLLMManagementState
 
+    /// The Hyperactive Web navigation fabric (UIK): discovers service cards from
+    /// `/.well-known/agent-card.json` as the user navigates and renders their
+    /// capability surfaces. `nil` if its retention store could not be opened.
+    @Published var hyperactiveWeb: HyperactiveWebCoordinator?
+
     /// Most-recently-created view model, used so App Intents can reach the live
     /// browser to run a saved workflow.
     static weak var shared: BrowserViewModel?
@@ -108,7 +113,20 @@ final class BrowserViewModel: ObservableObject {
         if restoredLLMState.shouldPersist {
             persistLLMConversation()
         }
+        self.hyperactiveWeb = try? HyperactiveWebCoordinator(
+            mcpServers: runtimeBridge.mcpServers,
+            rootDirectory: Self.hyperactiveWebRoot(),
+            openMind: self.openMindMemoryClient
+        )
         Self.shared = self
+    }
+
+    /// On-disk retention root for the Hyperactive Web (durable artifacts +
+    /// OpenMind mirror provenance).
+    private static func hyperactiveWebRoot() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("dBrowser/HyperactiveWeb", isDirectory: true)
     }
 
     var activeTabIndex: Int? {
@@ -224,8 +242,23 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].isLoading = true
             addressText = url.absoluteString
             recordHistory(title: title, urlString: url.absoluteString)
+            probeHyperactiveWeb(url)
         case .unsupported(let raw, let message):
             resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id)
+        }
+    }
+
+    /// Probe a navigated page for a Hyperactive Web service card. If one is
+    /// found, the capability surface is rendered and the panel is surfaced so the
+    /// user can act on it alongside the page.
+    private func probeHyperactiveWeb(_ url: URL) {
+        guard let coordinator = hyperactiveWeb else { return }
+        Task { [weak self] in
+            let entered = await coordinator.discover(urlString: url.absoluteString)
+            guard entered, let self else { return }
+            if self.selectedPanel == nil {
+                self.selectedPanel = .hyperactiveWeb
+            }
         }
     }
 

@@ -30,12 +30,12 @@ Bridge lives in `dBrowser/HyperactiveWeb/`; UIK added as a local SPM package (pr
 - [x] Add UIK as a Swift package (local reference; switch to a pinned remote when the repo is shared).
 - [x] Slice 2 — Adapter bridge: `HyperactiveAdapters` builds UIK `MCPAdapter`s from enabled HTTP MCP servers. (A2A/OpenAPI adapters exist in UIK; factory currently covers MCP.)
 - [x] Slice 3 — `DBrowserPolicyKernel`: read-safe runs; side-effecting/sensitive/paid → requireConfirmation gate.
-- [x] Slice 4 — `DBrowserArtifactStore`: durable file-backed retention/provenance. (OpenMind `writeback` mirroring pending.)
-- [x] Slice 5 — `HyperactiveWebCoordinator`: builds the resolver, renders surfaces via `A2UISurfaceEncoder` → `A2UITokenRenderer`, indexes affordances, routes `ResolvedAction` (`capability.follow`/`pay`) back into the resolver. (Wiring into `BrowserViewModel`/navigation + `/.well-known/agent-card.json` fetch pending.)
-- [x] Slice 6 — `DBrowserPaymentAuthorizer`: scaffold defers 402 to a manual payment surface. (AgenticPayments / SPT auto-auth pending.)
+- [x] Slice 4 — `DBrowserArtifactStore`: durable file-backed retention/provenance, now `@MainActor` and mirroring every retained artifact into the personal node's governed memory via `OpenMindMemoryClient.writeback` (best-effort; a no-op until an OpenMind endpoint is configured).
+- [x] Slice 5 — `HyperactiveWebCoordinator`: builds the resolver, renders surfaces via `A2UISurfaceEncoder` → `A2UITokenRenderer`, indexes affordances, routes `ResolvedAction` (`capability.follow`/`pay`) back into the resolver. Now wired into navigation: `BrowserViewModel.navigate` probes each web URL via `coordinator.discover`, which fetches `/.well-known/agent-card.json` (native UIK `ServiceCard` or a plain A2A agent card wrapped via `A2AAdapter` + `resolver.registerAdapter`), enters the service, and surfaces the new **Hyperactive Web** panel (`HyperactiveWebPanel` → `A2UISurfaceView`, actions routed to `coordinator.handle`).
+- [x] Slice 6 — payments reuse dBrowser's existing X402 stack: `X402Bridge` maps UIK `PaymentRequirements` ↔ `X402PaymentRequirement`/`X402PaymentPayload` ↔ `PaymentAuthorization`. The coordinator's `capability.pay` path routes the 402 through the host's injected `walletAuthorize` (wallet / AgenticPayments approval), then calls `resolver.pay` and retains the receipt. `DBrowserPaymentAuthorizer` still defers the auto path so spends stay user-approved, matching the wallet-spend gate model.
 - [x] Slice 7 — `DBrowserIdentityVerifier`: DNS-ID via DNS TXT lookup + node-key shim.
-- [x] macOS build verified (`xcodebuild ... build` → BUILD SUCCEEDED).
-- [ ] Follow-ups: OpenMind writeback mirroring; AgenticPayments auto-auth; wire the coordinator into navigation (fetch agent card on navigate, present its surface, feed renderer actions to `coordinator.handle`).
+- [x] UIK addition: `CapabilityResolver.registerAdapter(_:)` lets the host grow the transport set as the user navigates (A2A agents discovered at nav time). UIK builds + 56 tests pass.
+- [x] macOS build verified (`xcodebuild ... build` → BUILD SUCCEEDED) after every slice.
 
 ## Avalanche / XRPL / Move Ed25519 Quorum Closure (#148)
 

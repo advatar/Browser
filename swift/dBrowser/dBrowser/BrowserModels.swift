@@ -11,6 +11,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
     case wallet
     case mcp
     case a2ui
+    case hyperactiveWeb
     case copilot
     case advantage
     case localLLM
@@ -32,6 +33,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         .bookmarks,
         .mcp,
         .a2ui,
+        .hyperactiveWeb,
         .advantage,
         .localLLM,
         .runtime
@@ -48,6 +50,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .wallet: "Wallet & Identity"
         case .mcp: "MCP"
         case .a2ui: "A2UI"
+        case .hyperactiveWeb: "Hyperactive Web"
         case .copilot: "Copilot"
         case .advantage: "Advantage"
         case .localLLM: "Local LLMs"
@@ -62,6 +65,7 @@ enum BrowserPanel: String, CaseIterable, Hashable, Identifiable {
         case .wallet: "wallet.pass"
         case .mcp: "network"
         case .a2ui: "square.grid.2x2"
+        case .hyperactiveWeb: "point.3.connected.trianglepath.dotted"
         case .copilot: "sparkles"
         case .advantage: "chart.line.uptrend.xyaxis"
         case .localLLM: "cpu"

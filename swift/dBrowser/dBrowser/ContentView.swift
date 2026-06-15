@@ -387,6 +387,12 @@ private struct BrowserPanelContentView: View {
                 MCPServersPanelView(browser: browser)
             case .a2ui:
                 A2UITokenPanelView()
+            case .hyperactiveWeb:
+                if let coordinator = browser.hyperactiveWeb {
+                    HyperactiveWebPanel(coordinator: coordinator)
+                } else {
+                    ContentUnavailableView("Hyperactive Web unavailable", systemImage: "point.3.connected.trianglepath.dotted")
+                }
             case .copilot:
                 CopilotPanelView(browser: browser)
             case .advantage:
