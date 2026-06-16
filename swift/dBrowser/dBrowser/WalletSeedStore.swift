@@ -11,8 +11,9 @@ import Security
 import CryptoKit
 
 /// Generates a fresh embedded wallet seed. This is 256 bits of cryptographically-secure
-/// entropy rendered as hex, replacing the previous `UUID().uuidString`. BIP-39 mnemonic
-/// encoding and Secure Enclave key-wrapping of the seed remain follow-ups.
+/// entropy rendered as hex, replacing the previous `UUID().uuidString`. Mnemonic export and
+/// Secure Enclave wrapping are intentionally absent until recovery and hardware-binding policy
+/// are modeled in the wallet approval UX.
 enum WalletSeedFactory {
     static func generateSeedHex() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)

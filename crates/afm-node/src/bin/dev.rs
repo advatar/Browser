@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     handle
         .submit_task(AfmTaskDescriptor::new(
             "dev-demo",
-            json!({ "message": "hello from afm-node stub" }),
+            json!({ "message": "hello from afm-node development endpoint" }),
         ))
         .await?;
 

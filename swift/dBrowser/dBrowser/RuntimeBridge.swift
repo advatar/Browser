@@ -58,7 +58,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         decentralizedGatewayHost: String = "dweb.link",
         ensGatewaySuffix: String = "limo",
         walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
-        nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = .localDefaults,
+        nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = DWebEngineManager.production.adapterConfiguration,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
@@ -880,7 +880,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let summary: String
         switch expert.transport {
         case .localEmbedded:
-            summary = "Prepared local embedded expert preview for \(expert.displayName) using its local adapter artifact. Foundation Model weight export remains a future adapter boundary."
+            summary = "Prepared local embedded expert preview for \(expert.displayName) using its local adapter artifact. Foundation Model weight export is an external adapter boundary."
         case .registryIngest:
             summary = "Prepared A2A request envelope for \(expert.displayName). Production peer transport remains brokered by AFMarket routing."
         case .unavailable:

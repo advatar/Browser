@@ -2,6 +2,13 @@
 
 Issue: [#133](https://github.com/advatar/Browser/issues/133)
 
+Implementation anchor:
+
+- Swift contract: `DWebEngineManifest` and `DWebEngineManager`.
+- Helper packaging scripts: `scripts/dweb-engines/build-all.sh`, `build-storage-adapters.sh`, `package-macos.sh`, and `smoke.sh`.
+- macOS helper payload layout emitted by the scripts: `dist/dweb-engines/macos/Contents/Library/DWebEngines/` plus `Contents/Resources/DWebEngines/manifest.json`.
+- Test coverage: `dwebEngineManifestCoversEveryResolverBackedProtocol`, `dwebEngineManifestReportsCredentialsAndPlatformLimits`, and the storage-adapter Node smoke tests.
+
 ## Requirement
 
 dBrowser users must not be expected to install protocol daemons, runtimes, CLIs, Node packages, Python packages, wallets, or storage services before protocol URIs work. The app should bundle the needed engines wherever platform rules allow it, start and supervise them itself, and expose one consistent Swift resolver surface to the rest of the browser.
@@ -88,12 +95,12 @@ The scripts must document every installed tool and must fail when versions drift
 | Walrus | Swift HTTP client plus optional local aggregator helper. | Swift HTTP client and verifier. | High. Walrus exposes HTTP aggregator/publisher flows and verification can be Swift-owned. | Wallet/payment approval for writes. |
 | Iroh | Rust `iroh`/`iroh-blobs` helper or Rust FFI library. | Rust `xcframework` via UniFFI if QUIC/networking behavior is acceptable on device. | Medium after FFI; pure Swift is not the first move. | Peer identity and optional relay/bootstrap policy. |
 | Hypercore/Hyperdrive | Bundle Node/Pear helper with Hypercore storage under app support. | Not daemon-native initially; research bundled JSCore viability, otherwise remote/helper fallback. | Low short-term; pure Swift port is a separate project. | Write keys for private feeds. |
-| Sia | Bundle `renterd` helper on macOS. | Use remote renterd or future Go `xcframework` only if size/network behavior is acceptable. | Low for full renter; Swift HTTP client for bundled/remote renterd. | Wallet seed, renterd password, Siacoin funding. |
+| Sia | Bundle `renterd` helper on macOS. | Use configured renterd endpoint unless a signed Go `xcframework` is shipped inside the app. | Low for full renter; Swift HTTP client for bundled/remote renterd. | Wallet seed, renterd password, Siacoin funding. |
 | Storj | Bundle `libuplink` through Go/C bindings or use hosted gateway mode. | Bundle `libuplink` as an `xcframework` if buildable; otherwise gateway mode. | Medium for wrapper; pure Swift network stack is not first. | Access grant, passphrase, project credentials. |
 | Tahoe-LAFS | Bundle Python-based Tahoe node/helper and expose WebAPI locally. | Remote gateway fallback unless a viable embedded Python/static rewrite exists. | Low for full node; Swift WebAPI client only. | Grid introducer/config and read/write caps. |
 | Autonomi | Bundle Rust Autonomi client via helper or UniFFI library. | Rust `xcframework` target if upstream builds cleanly for iOS. | Medium after FFI. | Wallet, keys, payment approval for writes. |
 | BitTorrent/WebTorrent | Bundle `libtorrent` helper/library for BitTorrent; bundle WebTorrent/Node path only for WebRTC mode. | Prefer `libtorrent` `xcframework`; WebTorrent limited by WebRTC/browser peer behavior. | Medium for wrapper; pure Swift torrent engine is not first. | User consent and legal/content policy controls. |
-| Ceramic | Bundle `ceramic-one` helper on macOS; Swift HTTP client to it. | Remote Ceramic node or future Rust/HTTP client if embeddable. | Medium for client, low for full node now. | DID keys and stream write permissions. |
+| Ceramic | Bundle `ceramic-one` helper on macOS; Swift HTTP client to it. | Configured Ceramic node unless a signed Rust/HTTP client is shipped inside the app. | Medium for client, low for full node now. | DID keys and stream write permissions. |
 | OrbitDB/IPFS | Bundle Helia/IPFS/libp2p plus OrbitDB JS helper on macOS. | Not full-native initially; investigate bundled JSCore but assume remote/helper fallback. | Low short-term. | Database write keys/identity. |
 | Radicle | Bundle `radicle-node` and `radicle-httpd` helper. | Read-only remote/seed access first; Rust FFI later. | Medium for Rust wrapper, low for pure Swift. | Node identity and repo seeding policy. |
 

@@ -313,7 +313,7 @@ struct BrowserAdvantageScorecard: Equatable {
                 action: BrowserAdvantageAction(
                     id: "page-action-coverage",
                     title: "Expand action coverage",
-                    detail: "Add select/menu, download, new-tab, upload metadata, and fixture-backed UI tests.",
+                    detail: "Add select/menu, download, new-tab, upload metadata, and deterministic UI tests.",
                     targetPanel: .copilot
                 )
             ),
@@ -1416,15 +1416,15 @@ struct DecentralizedStorageNativeAdapterConfiguration: Equatable {
         ]
     )
 
-    var enabledNetworkIDs: Set<String> {
+    nonisolated var enabledNetworkIDs: Set<String> {
         Set(endpoints.keys)
     }
 
-    func endpoint(for networkID: String) -> DecentralizedStorageNativeAdapterEndpoint? {
+    nonisolated func endpoint(for networkID: String) -> DecentralizedStorageNativeAdapterEndpoint? {
         endpoints[networkID]
     }
 
-    func disabling(_ networkIDs: Set<String>) -> DecentralizedStorageNativeAdapterConfiguration {
+    nonisolated func disabling(_ networkIDs: Set<String>) -> DecentralizedStorageNativeAdapterConfiguration {
         var copy = self
         for networkID in networkIDs {
             copy.endpoints.removeValue(forKey: networkID)
@@ -2264,24 +2264,24 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "The optional privacy relay hides the client IP from the gateway, while the gateway still decrypts for provider-bound inference and enforces replay protection with nullifiers.",
                     "The visible HTTPS starting points are https://zerok.cloud for ZeroK and https://llmos.showntell.dev for the LLM Gateway and LLM OS surface.",
                     "The app should send only selected, redacted page context to the gateway; browser history, long-term memory, and tab state remain in the Swift app unless a user action shares them.",
-                    "Provider boundary: upstream LLM infrastructure can still correlate decrypted prompt content and timing unless future confidential inference or enclave-backed execution is added."
+                    "Provider boundary: upstream LLM infrastructure can still correlate decrypted prompt content and timing unless confidential inference or enclave-backed execution is selected."
                 ]
             )
         case .chainTrust:
             RuntimeFeatureExplanation(
                 overview: "Reports chain trust state through one Swift registry for browser resolution, wallet state, Copilot actions, and AFM settlement evidence.",
-                bridgeBehavior: "The current bridge labels gateway/RPC fallback separately from proof-checked settlement evidence and future embedded light-client verification.",
+                bridgeBehavior: "The current bridge labels gateway/RPC fallback separately from proof-checked settlement evidence and configured embedded light-client verification.",
                 detailPoints: [
                     "Bitcoin, Ethereum/EVM/L2s, Solana, Cosmos/Tendermint, Polkadot/Substrate, Avalanche, TRON, XRP Ledger, Sui, and Aptos report through the same status model.",
                     "Bitcoin has a Swift light-client contract for SPV header sync, BIP157/158 compact-filter readiness, Merkle inclusion checks, stale peers, and reorg transitions.",
                     "Gateway or RPC data stays marked as fallback and is not presented as local verification.",
                     "AFMarket settlement receipts can raise a chain entry to proof-checked without implying full light-client verification.",
-                    "Future chain-specific clients can plug in verified, syncing, stale, failed, and unavailable states without changing UI contracts."
+                    "Chain-specific clients plug in verified, syncing, stale, failed, and unavailable states without changing UI contracts."
                 ]
             )
         case .mcpServers:
             RuntimeFeatureExplanation(
-                overview: "Connects Model Context Protocol servers so Copilot and future agent workflows can use external tools, resources, and prompts.",
+                overview: "Connects Model Context Protocol servers so Copilot and scheduled agent workflows can use external tools, resources, and prompts.",
                 bridgeBehavior: "The Swift bridge keeps editable MCP server configuration and connection state in app state today; the same contract can be backed by the desktop MCP profile service later.",
                 detailPoints: [
                     "HTTP, WebSocket, and STDIO transports are modeled explicitly so endpoint and program validation match the desktop manifest shape.",
@@ -2301,7 +2301,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Resolved button actions are logged locally today and can be routed through the same approval boundaries used by Copilot, wallet, MCP, ZeroK, and LLM Gateway flows.",
                     "A2UI apps can stay in the native SwiftUI profile or target Logos Basecamp when they need decentralized storage, messaging, blockchain, wallet, or AI-inspection modules.",
                     "A2UI apps can target Aztec Network when they need PXE-backed private execution, Noir smart contracts, private state, public state, or Ethereum L1/L2 messaging.",
-                    "The renderer is isolated behind a Swift wrapper so future tokens from https://zerok.cloud and https://llmos.showntell.dev can use the same surface contract."
+                    "The renderer is isolated behind a Swift wrapper so tokens from https://zerok.cloud and https://llmos.showntell.dev can use the same surface contract."
                 ]
             )
         case .logosRuntime:
@@ -2347,7 +2347,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                 overview: "Creates a mobile command surface for Copilot tasks tied to the active browsing context.",
                 bridgeBehavior: "The bridge routes through AFM services when available and falls back to deterministic local summaries when those services are offline.",
                 detailPoints: [
-                    "Prompts can carry the active page URL so Copilot has a target for future page-context extraction.",
+                    "Prompts can carry the active page URL so Copilot has a target for page-context extraction.",
                     "Suggested actions stay explicit so wallet and download operations can remain approval-gated.",
                     "The bridge API is asynchronous, matching the shape needed for real model runs and cancellation."
                 ]
@@ -2367,7 +2367,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                 overview: "Starts, tracks, cancels, and completes browser downloads through native iOS networking.",
                 bridgeBehavior: "The bridge stores download items in Swift state and uses URLSession for real transfer work.",
                 detailPoints: [
-                    "Queued mode lets tests and future approval flows create download records without touching the network.",
+                    "Queued mode lets tests and approval flows create download records without touching the network.",
                     "Completed files are moved into the app temporary directory with the response filename when available.",
                     "Cancellation and failures update typed states so the UI can avoid pretending unsupported actions worked."
                 ]

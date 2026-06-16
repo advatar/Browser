@@ -458,7 +458,7 @@ private struct AdvantagePanelView: View {
                 PanelHeaderView(
                     title: "Advantage",
                     systemImage: BrowserPanel.advantage.systemImage,
-                    subtitle: "Track where dBrowser beats Strawberry and jump directly to the work that closes remaining UX gaps."
+                    subtitle: "Track where dBrowser beats Strawberry and jump directly to the tracked UX gap work."
                 )
 
                 LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 10) {

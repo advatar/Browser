@@ -21,7 +21,7 @@ use libp2p_identity::{Keypair, PeerId};
 use libp2p_noise as noise; // Alias noise crate for noise::Config
 use libp2p_swarm::{Swarm, SwarmEvent};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 // Common re-exports and type definitions
 
@@ -166,7 +166,7 @@ impl P2PService {
         let transport = Self::build_transport(&local_key)?;
 
         // Create the swarm using Swarm::new without a built-in executor (feature-gate free)
-        let mut swarm = Swarm::new(
+        let swarm = Swarm::new(
             transport,
             behaviour,
             peer_id,
@@ -363,6 +363,7 @@ impl P2PService {
                 }
                 #[cfg(not(feature = "kad"))]
                 {
+                    let _ = key;
                     warn!("Kademlia feature not enabled, cannot start providing");
                 }
             }
@@ -375,6 +376,7 @@ impl P2PService {
                 }
                 #[cfg(not(feature = "kad"))]
                 {
+                    let _ = key;
                     warn!("Kademlia feature not enabled, cannot get record");
                 }
             }
@@ -401,11 +403,6 @@ impl P2PService {
             }
         }
 
-        Ok(())
-    }
-
-    /// Attempt to build a dummy transport for dependency compatibility testing
-    fn build_dummy_transport() -> anyhow::Result<()> {
         Ok(())
     }
 

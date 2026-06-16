@@ -184,7 +184,7 @@ Current limitations:
 - Typed `WKWebView` automation, DOM snapshots, page actions, Copilot run state,
   model switching, saved workflows, Smart History, wallet/explorer state, and
   the Strawberry parity scorecard are implemented in Swift, but still need
-  deeper production UX, fixture-backed UI coverage, and public benchmark
+  deeper production UX, deterministic UI coverage, and public benchmark
   artifacts.
 - Browser import/switcher, companion onboarding, research source ledger,
   recurring workflow automation, and benchmark proof currently exist as tested
@@ -249,10 +249,10 @@ Create Swift packages under `swift/Packages` as capabilities move out of old Rus
 | `EUDIIdentityKit` | EUDI Wallet credential presentation, OpenID4VCI/OpenID4VP, ISO 18013-5, SD-JWT VC, pseudonym labels, relying-party fixtures | EUDI Wallet reference implementation and ARF |
 | `AgentPaymentMandateKit` | AP2-style intent/cart/payment mandates, payment policy decisions, hashes, expiry, revocation, and local receipts | Google AP2 and dBrowser approval policy |
 | `TrustedAgentKit` | Visa Trusted Agent Protocol request-signature verification, key-source metadata, agent recognition state, and merchant-facing trust labels | Visa TAP and HTTP message signature concepts |
-| `AgenticCommerceKit` | ACP checkout drafts, merchant order handoff, shared-payment-token placeholders, and checkout receipt models | Stripe/OpenAI ACP |
+| `AgenticCommerceKit` | ACP checkout drafts, merchant order handoff, shared-payment-token drafts, and checkout receipt models | Stripe/OpenAI ACP |
 | `X402PaymentsKit` | HTTP 402 payment requirements, buyer/server/facilitator fixtures, wallet policy binding, and API/content micropayment receipts | x402 |
 | `BlockchainAuthorizationKit` | Notabene TAP-style transfer requests, encrypted counterparty-message metadata, pre-settlement approval receipts | Notabene Transaction Authorization Protocol |
-| `DecentralizedContentKit` | IPFS/IPNS resolution, content verification, gateway fallback labels, future embedded node | Old IPFS/p2p concepts |
+| `DecentralizedContentKit` | IPFS/IPNS resolution, content verification, gateway fallback labels, and manifest-backed engine contracts | Old IPFS/p2p concepts |
 | `BundledLLMKit` | Local MLX model discovery, loading, inference, token accounting | Current `BundledLLM.swift` extracted into package |
 | `LLMGatewayKit` | ZeroK/LLM Gateway encrypted envelopes, token-class padding, usage tickets, provider boundary labels | ZeroK/LLM Gateway contracts |
 | `UpdateDistributionKit` | Signed update manifests, content-addressed release fetch, integrity checks | Old updater concepts |

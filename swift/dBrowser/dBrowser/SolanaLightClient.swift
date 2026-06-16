@@ -26,7 +26,7 @@ enum SolanaCluster: String, Codable, Equatable, CaseIterable {
     }
 
     nonisolated var supportedProofTypes: [String] {
-        ["slot-root", "optimistic-confirmation", "transaction-status", "account-fixture-proof"]
+        ["slot-root", "vote-root-quorum", "optimistic-confirmation", "transaction-status", "account-proof"]
     }
 
     nonisolated static func known(from value: String) -> SolanaCluster? {
@@ -232,6 +232,319 @@ struct SolanaSlotRootSnapshot: Codable, Equatable, Identifiable {
     }
 }
 
+struct SolanaValidator: Codable, Equatable, Identifiable {
+    var id: String { voteAccount }
+
+    var voteAccount: String
+    var stake: Int
+    var publicKey: String
+    var name: String?
+    var disabled: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case voteAccount = "vote_account"
+        case stake
+        case publicKey = "public_key"
+        case name
+        case disabled
+    }
+
+    nonisolated init(
+        voteAccount: String,
+        stake: Int,
+        publicKey: String,
+        name: String? = nil,
+        disabled: Bool = false
+    ) {
+        self.voteAccount = SolanaHex.normalizedID(voteAccount)
+        self.stake = stake
+        self.publicKey = SolanaHex.normalized(publicKey)
+        self.name = name
+        self.disabled = disabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.voteAccount = SolanaHex.normalizedID(try container.decode(String.self, forKey: .voteAccount))
+        self.stake = try container.decode(Int.self, forKey: .stake)
+        self.publicKey = SolanaHex.normalized(try container.decode(String.self, forKey: .publicKey))
+        self.name = try container.decodeIfPresent(String.self, forKey: .name)
+        self.disabled = try container.decodeIfPresent(Bool.self, forKey: .disabled) ?? false
+    }
+}
+
+struct SolanaValidatorSet: Codable, Equatable, Identifiable {
+    var id: String { "\(cluster.chainRef)-validators-\(epoch)" }
+
+    var cluster: SolanaCluster
+    var epoch: UInt64
+    var validators: [SolanaValidator]
+    var hash: String
+    var source: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case cluster
+        case chainRef = "chain_ref"
+        case epoch
+        case validators
+        case hash
+        case source
+    }
+
+    nonisolated init(
+        cluster: SolanaCluster,
+        epoch: UInt64,
+        validators: [SolanaValidator],
+        hash: String? = nil,
+        source: String? = nil
+    ) {
+        self.cluster = cluster
+        self.epoch = epoch
+        self.validators = validators
+        self.hash = SolanaHex.normalized(hash ?? Self.computeHash(validators: validators))
+        self.source = source
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let cluster = try container.decodeIfPresent(SolanaCluster.self, forKey: .cluster) {
+            self.cluster = cluster
+        } else if let chainRef = try container.decodeIfPresent(String.self, forKey: .chainRef),
+                  let cluster = SolanaCluster.known(from: chainRef) {
+            self.cluster = cluster
+        } else {
+            self.cluster = .mainnetBeta
+        }
+        self.epoch = try container.decode(UInt64.self, forKey: .epoch)
+        self.validators = try container.decode([SolanaValidator].self, forKey: .validators)
+        self.hash = SolanaHex.normalized(try container.decodeIfPresent(String.self, forKey: .hash) ?? Self.computeHash(validators: validators))
+        self.source = try container.decodeIfPresent(String.self, forKey: .source)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cluster, forKey: .cluster)
+        try container.encode(cluster.chainRef, forKey: .chainRef)
+        try container.encode(epoch, forKey: .epoch)
+        try container.encode(validators, forKey: .validators)
+        try container.encode(hash, forKey: .hash)
+        try container.encodeIfPresent(source, forKey: .source)
+    }
+
+    var effectiveStake: Int {
+        validators.reduce(0) { partial, validator in
+            validator.disabled ? partial : partial + max(0, validator.stake)
+        }
+    }
+
+    var validatesHash: Bool {
+        hash == Self.computeHash(validators: validators)
+    }
+
+    func signedStake(voteAccounts: Set<String>) -> Int {
+        validators.reduce(0) { partial, validator in
+            guard !validator.disabled,
+                  voteAccounts.contains(SolanaHex.normalizedID(validator.voteAccount)) else {
+                return partial
+            }
+            return partial + max(0, validator.stake)
+        }
+    }
+
+    func hasRootQuorum(voteAccounts: Set<String>) -> Bool {
+        let total = effectiveStake
+        guard total > 0 else { return false }
+        return signedStake(voteAccounts: voteAccounts) * 3 > total * 2
+    }
+
+    nonisolated static func computeHash(validators: [SolanaValidator]) -> String {
+        let payload = validators
+            .map { validator in
+                [
+                    SolanaHex.normalizedID(validator.voteAccount),
+                    "\(validator.stake)",
+                    SolanaHex.normalized(validator.publicKey),
+                    validator.disabled ? "disabled" : "active"
+                ].joined(separator: ":")
+            }
+            .sorted()
+            .joined(separator: "|")
+        return SolanaHex.sha256Hex(payload)
+    }
+}
+
+struct SolanaVoteRootSignature: Codable, Equatable, Identifiable {
+    var id: String { voteAccount }
+
+    var voteAccount: String
+    var rootSlot: UInt64
+    var blockhash: String
+    var signed: Bool
+    var signature: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case voteAccount = "vote_account"
+        case rootSlot = "root_slot"
+        case blockhash
+        case signed
+        case signature
+    }
+
+    nonisolated init(
+        voteAccount: String,
+        rootSlot: UInt64,
+        blockhash: String,
+        signed: Bool = true,
+        signature: String? = nil
+    ) {
+        self.voteAccount = SolanaHex.normalizedID(voteAccount)
+        self.rootSlot = rootSlot
+        self.blockhash = SolanaHex.normalized(blockhash)
+        self.signed = signed
+        self.signature = signature
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.voteAccount = SolanaHex.normalizedID(try container.decode(String.self, forKey: .voteAccount))
+        self.rootSlot = try container.decode(UInt64.self, forKey: .rootSlot)
+        self.blockhash = SolanaHex.normalized(try container.decode(String.self, forKey: .blockhash))
+        self.signed = try container.decodeIfPresent(Bool.self, forKey: .signed) ?? true
+        self.signature = try container.decodeIfPresent(String.self, forKey: .signature)
+    }
+}
+
+struct SolanaVoteRootEvidence: Codable, Equatable {
+    var epoch: UInt64
+    var cluster: SolanaCluster
+    var targetRootSlot: UInt64
+    var targetBlockhash: String
+    var accountRoot: String?
+    var transactionStatusRoot: String?
+    var signatures: [SolanaVoteRootSignature]
+    var source: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case epoch
+        case cluster
+        case chainRef = "chain_ref"
+        case targetRootSlot = "target_root_slot"
+        case targetBlockhash = "target_blockhash"
+        case accountRoot = "account_root"
+        case transactionStatusRoot = "transaction_status_root"
+        case signatures
+        case source
+    }
+
+    nonisolated init(
+        epoch: UInt64,
+        cluster: SolanaCluster,
+        targetRootSlot: UInt64,
+        targetBlockhash: String,
+        accountRoot: String?,
+        transactionStatusRoot: String?,
+        signatures: [SolanaVoteRootSignature],
+        source: String? = nil
+    ) {
+        self.epoch = epoch
+        self.cluster = cluster
+        self.targetRootSlot = targetRootSlot
+        self.targetBlockhash = SolanaHex.normalized(targetBlockhash)
+        self.accountRoot = accountRoot.map(SolanaHex.normalized)
+        self.transactionStatusRoot = transactionStatusRoot.map(SolanaHex.normalized)
+        self.signatures = signatures
+        self.source = source
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.epoch = try container.decode(UInt64.self, forKey: .epoch)
+        if let cluster = try container.decodeIfPresent(SolanaCluster.self, forKey: .cluster) {
+            self.cluster = cluster
+        } else if let chainRef = try container.decodeIfPresent(String.self, forKey: .chainRef),
+                  let cluster = SolanaCluster.known(from: chainRef) {
+            self.cluster = cluster
+        } else {
+            self.cluster = .mainnetBeta
+        }
+        self.targetRootSlot = try container.decode(UInt64.self, forKey: .targetRootSlot)
+        self.targetBlockhash = SolanaHex.normalized(try container.decode(String.self, forKey: .targetBlockhash))
+        self.accountRoot = try container.decodeIfPresent(String.self, forKey: .accountRoot).map(SolanaHex.normalized)
+        self.transactionStatusRoot = try container.decodeIfPresent(String.self, forKey: .transactionStatusRoot).map(SolanaHex.normalized)
+        self.signatures = try container.decode([SolanaVoteRootSignature].self, forKey: .signatures)
+        self.source = try container.decodeIfPresent(String.self, forKey: .source)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(epoch, forKey: .epoch)
+        try container.encode(cluster, forKey: .cluster)
+        try container.encode(cluster.chainRef, forKey: .chainRef)
+        try container.encode(targetRootSlot, forKey: .targetRootSlot)
+        try container.encode(targetBlockhash, forKey: .targetBlockhash)
+        try container.encodeIfPresent(accountRoot, forKey: .accountRoot)
+        try container.encodeIfPresent(transactionStatusRoot, forKey: .transactionStatusRoot)
+        try container.encode(signatures, forKey: .signatures)
+        try container.encodeIfPresent(source, forKey: .source)
+    }
+
+    static func canonicalVote(
+        cluster: SolanaCluster,
+        epoch: UInt64,
+        rootSlot: UInt64,
+        blockhash: String,
+        accountRoot: String?,
+        transactionStatusRoot: String?
+    ) -> Data {
+        let payload = [
+            "solana-vote-root-v1",
+            cluster.chainRef,
+            "\(epoch)",
+            "\(rootSlot)",
+            SolanaHex.normalized(blockhash),
+            accountRoot.map(SolanaHex.normalized) ?? "",
+            transactionStatusRoot.map(SolanaHex.normalized) ?? ""
+        ].joined(separator: "|")
+        return Data(payload.utf8)
+    }
+
+    func verifiedVoteAccounts(validators: [SolanaValidator]) -> Set<String> {
+        let publicKeysByVoteAccount = Dictionary(
+            uniqueKeysWithValues: validators.filter { !$0.disabled }.map {
+                (SolanaHex.normalizedID($0.voteAccount), SolanaHex.normalized($0.publicKey))
+            }
+        )
+        let expectedMessage = Self.canonicalVote(
+            cluster: cluster,
+            epoch: epoch,
+            rootSlot: targetRootSlot,
+            blockhash: targetBlockhash,
+            accountRoot: accountRoot,
+            transactionStatusRoot: transactionStatusRoot
+        )
+        var verified = Set<String>()
+
+        for signature in signatures where signature.signed {
+            let voteAccount = SolanaHex.normalizedID(signature.voteAccount)
+            guard
+                signature.rootSlot == targetRootSlot,
+                SolanaHex.normalized(signature.blockhash) == SolanaHex.normalized(targetBlockhash),
+                let publicKey = publicKeysByVoteAccount[voteAccount],
+                Ed25519QuorumVerifier.isValidSignature(
+                    signatureBase64: signature.signature,
+                    publicKeyHex: publicKey,
+                    message: expectedMessage
+                )
+            else {
+                continue
+            }
+            verified.insert(voteAccount)
+        }
+
+        return verified
+    }
+}
+
 struct SolanaFixtureProof: Codable, Equatable, Identifiable {
     var id: String { proofID }
 
@@ -348,13 +661,50 @@ struct SolanaFixtureProof: Codable, Equatable, Identifiable {
 struct SolanaProofBundle: Codable, Equatable {
     var snapshot: SolanaSlotRootSnapshot
     var proof: SolanaFixtureProof
+    var validatorSet: SolanaValidatorSet
+    var voteEvidence: SolanaVoteRootEvidence
+
+    private enum CodingKeys: String, CodingKey {
+        case snapshot
+        case proof
+        case validatorSet = "validator_set"
+        case voteEvidence = "vote_evidence"
+    }
+
+    nonisolated init(
+        snapshot: SolanaSlotRootSnapshot,
+        proof: SolanaFixtureProof,
+        validatorSet: SolanaValidatorSet,
+        voteEvidence: SolanaVoteRootEvidence
+    ) {
+        self.snapshot = snapshot
+        self.proof = proof
+        self.validatorSet = validatorSet
+        self.voteEvidence = voteEvidence
+    }
 
     func verify(maxRootLag: UInt64 = 512) -> SolanaProofVerificationResult {
         guard snapshot.cluster == proof.cluster else {
             return failure("Solana proof cluster does not match the slot/root snapshot.")
         }
+        guard snapshot.cluster == validatorSet.cluster,
+              snapshot.cluster == voteEvidence.cluster else {
+            return failure("Solana vote-root evidence cluster does not match the slot/root snapshot.")
+        }
         guard proof.slot <= snapshot.slot else {
             return failure("Solana proof references a future slot.")
+        }
+        guard validatorSet.validatesHash else {
+            return failure("Solana validator set hash is invalid.")
+        }
+        guard voteEvidence.epoch == validatorSet.epoch else {
+            return failure("Solana vote-root evidence uses a different validator epoch.")
+        }
+        guard voteEvidence.targetRootSlot == snapshot.rootSlot,
+              SolanaHex.normalized(voteEvidence.targetBlockhash) == SolanaHex.normalized(snapshot.blockhash),
+              voteEvidence.accountRoot == snapshot.accountRoot,
+              voteEvidence.transactionStatusRoot == snapshot.transactionStatusRoot else {
+            return failure("Solana vote-root evidence is not bound to the slot/root snapshot.")
         }
         guard let snapshotRoot = snapshot.expectedRoot(for: proof.kind),
               SolanaHex.normalized(proof.expectedRoot) == snapshotRoot else {
@@ -362,6 +712,10 @@ struct SolanaProofBundle: Codable, Equatable {
         }
         guard proof.verifiesExpectedRoot else {
             return failure("Solana \(proof.kind.rawValue) proof did not resolve to the expected root.")
+        }
+        let verifiedVoteAccounts = voteEvidence.verifiedVoteAccounts(validators: validatorSet.validators)
+        guard validatorSet.hasRootQuorum(voteAccounts: verifiedVoteAccounts) else {
+            return failure("Solana vote-root evidence did not reach the validator stake quorum.")
         }
 
         return SolanaProofVerificationResult(
@@ -372,7 +726,7 @@ struct SolanaProofBundle: Codable, Equatable {
             chainRef: snapshot.cluster.chainRef,
             slot: proof.slot,
             rootSlot: snapshot.rootSlot,
-            summary: "Solana \(proof.kind.rawValue) fixture proof checked at slot \(proof.slot)."
+            summary: "Solana \(proof.kind.rawValue) proof checked at slot \(proof.slot) with Ed25519 vote-root stake quorum."
         )
     }
 
@@ -520,7 +874,7 @@ struct SolanaLightClientServiceSnapshot: Codable, Equatable {
         case .synced:
             return "\(cluster.displayName) slot/root evidence is finalized at root \(slotRoot?.rootSlot.description ?? "unknown")."
         case .proofChecked:
-            return "\(cluster.displayName) fixture proof evidence is locally checked; production Solana consensus verification is not claimed."
+            return "\(cluster.displayName) vote-root proof evidence is locally checked; production Solana consensus replay is not claimed."
         case .syncing:
             return "\(cluster.displayName) slot/root evidence is syncing."
         case .stale:
@@ -574,9 +928,9 @@ struct SolanaLightClientServiceSnapshot: Codable, Equatable {
 }
 
 /// Trust boundary (goal: minimize remote trust). A client for a remote light-client/RPC service.
-/// Slot-root and account proofs are currently fixture-backed (`SolanaFixtureProof`) and live state
-/// is served via RPC fallback (`.rpcFallback`); this is not local consensus verification. Target:
-/// replace fixtures/fallback with real proof verification.
+/// Local Solana proof bundles verify account or transaction-status Merkle evidence against an
+/// Ed25519 signed vote-root quorum; live state still uses labeled RPC fallback unless a service
+/// supplies those bundles.
 final class SolanaLightClientServiceClient {
     private let configuration: SolanaLightClientEndpointConfiguration
     private let session: URLSession
@@ -681,6 +1035,12 @@ final class SolanaLightClientServiceClient {
 }
 
 enum SolanaHex {
+    nonisolated static func normalizedID(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+    }
+
     nonisolated static func normalized(_ value: String) -> String {
         var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized.hasPrefix("0x") {

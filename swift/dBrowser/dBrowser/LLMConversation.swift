@@ -99,7 +99,7 @@ struct LLMContextMinimizationProfile: Codable, Equatable {
                 maxPromptTokens: min(contextWindowTokens, 12_288),
                 rules: baseRules + [
                     "Strip unrelated ledger turns before remote gateway routing.",
-                    "Use commitments for omitted context so follow-up retrieval remains auditable."
+                    "Use commitments for omitted context so later retrieval remains auditable."
                 ]
             )
         }

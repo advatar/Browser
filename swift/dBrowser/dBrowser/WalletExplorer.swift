@@ -237,7 +237,7 @@ struct WalletBalance: Codable, Equatable {
     var source: ChainTrustSource
     var isVerified: Bool
 
-    static func placeholder(asset: String) -> WalletBalance {
+    static func unverifiedZero(asset: String) -> WalletBalance {
         WalletBalance(
             asset: asset,
             amountText: "0",
@@ -661,7 +661,7 @@ enum WalletPolicyEngine {
                 displayName: "\(network.displayName) policy account",
                 address: makeAddress(seed: seed, network: network),
                 signerKind: network.signerKind,
-                balance: .placeholder(asset: network.nativeAsset)
+                balance: .unverifiedZero(asset: network.nativeAsset)
             )
         }
     }

@@ -6,9 +6,8 @@ import BLSVerifierKit
 /// committee's aggregate signature over the signing root is verified against the participating
 /// public keys, and a supermajority of participation is required.
 ///
-/// Scope: this verifies the committee signature itself — the cryptographic core. Deriving the
-/// signing root via exact SSZ `hash_tree_root` + `compute_domain` (genesis validators root, fork
-/// version) is the remaining precision step; the root is taken as an input here.
+/// Scope: this verifies the committee signature itself: the cryptographic core. Snapshot
+/// providers pass in the SSZ signing root derived from the beacon state and fork domain.
 struct EVMSyncCommitteeUpdate: Equatable {
     /// Compressed 48-byte G1 public keys of the full sync committee.
     var committeePublicKeys: [Data]

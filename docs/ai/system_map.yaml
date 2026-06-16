@@ -23,7 +23,7 @@ components:
       - runtime_status
 
   browser_runtime_bridge:
-    description: Swift boundary for decentralized resolution, Copilot, AFMarket services, wallet policy, downloads, and future package integrations.
+    description: Swift boundary for decentralized resolution, Copilot, AFMarket services, wallet policy, downloads, and package integrations.
     path: swift/dBrowser/dBrowser/RuntimeBridge.swift
     target_packages:
       - BrowserAutomationKit

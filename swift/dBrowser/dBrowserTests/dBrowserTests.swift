@@ -280,6 +280,56 @@ struct dBrowserTests {
         }
     }
 
+    @Test func dwebEngineManifestCoversEveryResolverBackedProtocol() {
+        let resolverBackedNetworkIDs = Set(DecentralizedStorageNetwork.supported.compactMap { network -> String? in
+            if case .remoteRuntime = network.gatewayStrategy {
+                return network.id
+            }
+            return nil
+        })
+        let manager = DWebEngineManager.production
+
+        #expect(manager.manifest.version == "dweb-engine-manifest-v1")
+        #expect(manager.manifest.networkIDs == resolverBackedNetworkIDs)
+        #expect(manager.manifest.validationErrors().isEmpty)
+        #expect(manager.adapterConfiguration.enabledNetworkIDs == resolverBackedNetworkIDs)
+
+        for network in DecentralizedStorageNetwork.supported where resolverBackedNetworkIDs.contains(network.id) {
+            guard let report = manager.report(for: network.id) else {
+                Issue.record("Missing DWeb engine report for \(network.id)")
+                continue
+            }
+
+            #expect(report.descriptor.trackingIssue == 133)
+            #expect(report.descriptor.protocolIssue == network.adapter.issueNumber)
+            #expect(report.descriptor.handlerID == network.adapter.handlerID)
+            #expect(report.descriptor.schemes == network.schemes)
+            #expect(report.support.runtimeKind == .managedHelper)
+            #expect(report.support.readiness == .appManaged)
+            #expect(report.isRoutableThroughLocalAdapter)
+            #expect(report.endpoint?.routePath == expectedNativeAdapterPath(for: network))
+            #expect(report.summary.contains("users do not install protocol daemons"))
+        }
+    }
+
+    @Test func dwebEngineManifestReportsCredentialsAndPlatformLimits() {
+        let manager = DWebEngineManager.production
+        let iOSManager = DWebEngineManager(platform: .iOS)
+        let sia = manager.manifest.engine(for: "sia")
+        let tahoe = manager.manifest.engine(for: "tahoe-lafs")
+        let walrusIOS = iOSManager.report(for: "walrus")
+        let hypercoreIOS = iOSManager.report(for: "hypercore")
+
+        #expect(sia?.credentialRequirements.map(\.name).contains("renterd auth") == true)
+        #expect(sia?.credentialRequirements.map(\.name).contains("Siacoin funding") == true)
+        #expect(tahoe?.requirements.contains(where: { $0.kind == .credential && $0.name == "Tahoe capability" }) == true)
+        #expect(walrusIOS?.support.runtimeKind == .inProcessSwift)
+        #expect(walrusIOS?.support.readiness == .builtInGateway)
+        #expect(walrusIOS?.isRoutableThroughLocalAdapter == false)
+        #expect(hypercoreIOS?.support.readiness == .requiresConfiguredBackend)
+        #expect(hypercoreIOS?.support.launchPolicy.contains("No downloaded executable code") == true)
+    }
+
     @Test func decentralizedStorageURIsDelegateToRuntimeBridgeBeforeSearchFallback() {
         for network in DecentralizedStorageNetwork.supported {
             for scheme in network.schemes {
@@ -3138,7 +3188,7 @@ struct dBrowserTests {
         #expect(rpcSnapshot.statusSummary.contains("trusted RPC fallback remains labeled"))
     }
 
-    @Test func solanaFixtureProofVerifiesAccountAndTransactionStatus() {
+    @Test func solanaVoteRootProofVerifiesAccountAndTransactionStatus() {
         let accountBundle = Self.solanaProofBundle(kind: .account)
         let transactionBundle = Self.solanaProofBundle(kind: .transactionStatus)
         let accountResult = accountBundle.verify()
@@ -3147,8 +3197,36 @@ struct dBrowserTests {
         #expect(accountResult.verified)
         #expect(accountResult.state == .synced)
         #expect(accountResult.chainRef == "solana-mainnet")
+        #expect(accountResult.summary.contains("Ed25519 vote-root stake quorum"))
         #expect(transactionResult.verified)
         #expect(transactionResult.kind == .transactionStatus)
+    }
+
+    @Test func solanaVoteRootProofRejectsFlagOnlyAndWrongKeyVotes() {
+        var flagOnly = Self.solanaProofBundle(kind: .account)
+        flagOnly.voteEvidence.signatures[1] = SolanaVoteRootSignature(
+            voteAccount: flagOnly.voteEvidence.signatures[1].voteAccount,
+            rootSlot: flagOnly.voteEvidence.targetRootSlot,
+            blockhash: flagOnly.voteEvidence.targetBlockhash,
+            signed: true,
+            signature: nil
+        )
+
+        var wrongKey = Self.solanaProofBundle(kind: .account)
+        let forgedKey = try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 0xEE, count: 32))
+        wrongKey.voteEvidence.signatures[1] = Self.solanaVoteRootSignature(
+            forgedKey,
+            voteAccount: wrongKey.validatorSet.validators[1].voteAccount,
+            evidence: wrongKey.voteEvidence
+        )
+
+        let flagOnlyResult = flagOnly.verify()
+        let wrongKeyResult = wrongKey.verify()
+
+        #expect(!flagOnlyResult.verified)
+        #expect(flagOnlyResult.summary.contains("stake quorum"))
+        #expect(!wrongKeyResult.verified)
+        #expect(wrongKeyResult.summary.contains("stake quorum"))
     }
 
     @MainActor
@@ -8574,6 +8652,9 @@ struct dBrowserTests {
         kind: SolanaFixtureProofKind,
         cluster: SolanaCluster = .mainnetBeta
     ) -> SolanaProofBundle {
+        let keyA = try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 0x51, count: 32))
+        let keyB = try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 0x52, count: 32))
+        let keyC = try! Curve25519.Signing.PrivateKey(rawRepresentation: Data(repeating: 0x53, count: 32))
         let accountSubject = "So11111111111111111111111111111111111111112"
         let transactionSubject = "5sUjfixtureTransactionStatus111111111111111111111111111111111"
         let accountLeaf = SolanaFixtureProof.fixtureLeafHash(
@@ -8597,6 +8678,36 @@ struct dBrowserTests {
             transactionStatusRoot: transactionLeaf,
             source: "fixture"
         )
+        let validatorSet = SolanaValidatorSet(
+            cluster: cluster,
+            epoch: 42,
+            validators: [
+                SolanaValidator(voteAccount: "solana-vote-a", stake: 40, publicKey: ed25519PublicKeyHex(keyA), name: "solana-a"),
+                SolanaValidator(voteAccount: "solana-vote-b", stake: 35, publicKey: ed25519PublicKeyHex(keyB), name: "solana-b"),
+                SolanaValidator(voteAccount: "solana-vote-c", stake: 25, publicKey: ed25519PublicKeyHex(keyC), name: "solana-c")
+            ],
+            source: "deterministic-test-vector"
+        )
+        let unsignedVote = SolanaVoteRootSignature(
+            voteAccount: validatorSet.validators[2].voteAccount,
+            rootSlot: snapshot.rootSlot,
+            blockhash: snapshot.blockhash,
+            signed: false
+        )
+        let voteEvidence = SolanaVoteRootEvidence(
+            epoch: validatorSet.epoch,
+            cluster: cluster,
+            targetRootSlot: snapshot.rootSlot,
+            targetBlockhash: snapshot.blockhash,
+            accountRoot: snapshot.accountRoot,
+            transactionStatusRoot: snapshot.transactionStatusRoot,
+            signatures: [
+                solanaVoteRootSignature(keyA, voteAccount: validatorSet.validators[0].voteAccount, snapshot: snapshot, epoch: validatorSet.epoch),
+                solanaVoteRootSignature(keyB, voteAccount: validatorSet.validators[1].voteAccount, snapshot: snapshot, epoch: validatorSet.epoch),
+                unsignedVote
+            ],
+            source: "deterministic-test-vector"
+        )
         let proof = SolanaFixtureProof(
             proofID: kind == .account ? "solana-account-proof" : "solana-transaction-proof",
             kind: kind,
@@ -8608,7 +8719,52 @@ struct dBrowserTests {
             witnesses: [],
             source: "fixture"
         )
-        return SolanaProofBundle(snapshot: snapshot, proof: proof)
+        return SolanaProofBundle(
+            snapshot: snapshot,
+            proof: proof,
+            validatorSet: validatorSet,
+            voteEvidence: voteEvidence
+        )
+    }
+
+    private static func solanaVoteRootSignature(
+        _ key: Curve25519.Signing.PrivateKey,
+        voteAccount: String,
+        snapshot: SolanaSlotRootSnapshot,
+        epoch: UInt64
+    ) -> SolanaVoteRootSignature {
+        let evidence = SolanaVoteRootEvidence(
+            epoch: epoch,
+            cluster: snapshot.cluster,
+            targetRootSlot: snapshot.rootSlot,
+            targetBlockhash: snapshot.blockhash,
+            accountRoot: snapshot.accountRoot,
+            transactionStatusRoot: snapshot.transactionStatusRoot,
+            signatures: []
+        )
+        return solanaVoteRootSignature(key, voteAccount: voteAccount, evidence: evidence)
+    }
+
+    private static func solanaVoteRootSignature(
+        _ key: Curve25519.Signing.PrivateKey,
+        voteAccount: String,
+        evidence: SolanaVoteRootEvidence
+    ) -> SolanaVoteRootSignature {
+        let message = SolanaVoteRootEvidence.canonicalVote(
+            cluster: evidence.cluster,
+            epoch: evidence.epoch,
+            rootSlot: evidence.targetRootSlot,
+            blockhash: evidence.targetBlockhash,
+            accountRoot: evidence.accountRoot,
+            transactionStatusRoot: evidence.transactionStatusRoot
+        )
+        let signature = try! key.signature(for: message).base64EncodedString()
+        return SolanaVoteRootSignature(
+            voteAccount: voteAccount,
+            rootSlot: evidence.targetRootSlot,
+            blockhash: evidence.targetBlockhash,
+            signature: signature
+        )
     }
 
     static func cosmosValidatorKey(_ seed: UInt8) -> Curve25519.Signing.PrivateKey {
