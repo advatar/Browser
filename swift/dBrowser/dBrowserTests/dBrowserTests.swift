@@ -9,6 +9,7 @@ import Testing
 import Foundation
 import CryptoKit
 import MLXLMCommon
+import UniversalInteractionKit
 @testable import dBrowser
 
 @MainActor
@@ -6610,7 +6611,7 @@ struct dBrowserTests {
         #expect(!BrowserPanel.advancedPanels.contains(.wallet))
         // The three primary surfaces are Browser (nil selection), Copilot, and Wallet & Identity.
         #expect(BrowserPanel.primaryPanels == [.copilot, .wallet])
-        #expect(BrowserPanel.advancedPanels == [.history, .bookmarks, .mcp, .a2ui, .advantage, .localLLM, .runtime])
+        #expect(BrowserPanel.advancedPanels == [.history, .bookmarks, .mcp, .a2ui, .hyperactiveWeb, .advantage, .localLLM, .runtime])
     }
 
     @Test func advantagePanelIsTopLevelNavigationAndTracksStrawberryBaseline() {
@@ -7623,6 +7624,104 @@ struct dBrowserTests {
         #expect(tapReview.bindingHashes.contains(transfer.transferHash))
     }
 
+    @Test func hyperactiveWebX402BridgeMapsRequirementsAndAuthorization() {
+        let expiresAt = AgenticPaymentFixtures.now.addingTimeInterval(300)
+        let requirements = PaymentRequirements(
+            scheme: "MPP",
+            price: CapabilityPrice(amount: "0.42", currency: "usdc"),
+            payTo: "0x1111111111111111111111111111111111111111",
+            resource: "https://api.example.test/research",
+            detail: "Paid research result",
+            rails: ["stablecoin"],
+            nonce: "nonce-42",
+            expiresAt: expiresAt,
+            metadata: [
+                "network": .string("base"),
+                "facilitator": .string("https://facilitator.example.test")
+            ]
+        )
+
+        let requirement = X402Bridge.requirement(
+            from: requirements,
+            resourceURLString: "https://fallback.example.test"
+        )
+        #expect(requirement.id == "nonce-42")
+        #expect(requirement.resourceURLString == "https://api.example.test/research")
+        #expect(requirement.amountMinorUnits == 42)
+        #expect(requirement.asset == "USDC")
+        #expect(requirement.network == "base")
+        #expect(requirement.payTo == "0x1111111111111111111111111111111111111111")
+        #expect(requirement.facilitatorURLString == "https://facilitator.example.test")
+        #expect(requirement.expiresAt == expiresAt)
+
+        let payload = X402PaymentPayload(
+            requirementHash: requirement.requirementHash,
+            walletAccount: "0x2222222222222222222222222222222222222222",
+            transactionReference: "tx-fixture",
+            signatureReference: "sig-fixture"
+        )
+        let authorization = X402Bridge.authorization(from: payload, price: requirements.price)
+        #expect(authorization.scheme == "x402")
+        #expect(authorization.rail == "x402")
+        #expect(authorization.proof == "sig-fixture")
+        #expect(authorization.amount == requirements.price)
+        #expect(authorization.metadata["walletAccount"]?.stringValue == payload.walletAccount)
+        #expect(authorization.metadata["requirementHash"]?.stringValue == requirement.requirementHash)
+    }
+
+    @MainActor
+    @Test func hyperactiveWebPaymentAuthorizationUsesWalletPolicyReceipt() async {
+        let bridge = MobileRuntimeBridge()
+        _ = await bridge.createEmbeddedWallet(label: "Hyperactive test wallet")
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        let requirement = X402PaymentRequirement(
+            id: "hyperactive-x402",
+            resourceURLString: "https://api.example.test/research",
+            amountMinorUnits: 125,
+            asset: "USDC",
+            network: "base",
+            payTo: "0x1111111111111111111111111111111111111111",
+            facilitatorURLString: "https://facilitator.example.test",
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300)
+        )
+
+        let payload = await model.authorizeHyperactiveWebPayment(requirement)
+
+        #expect(payload?.requirementHash == requirement.requirementHash)
+        #expect(payload?.isSigned == true)
+        #expect(payload?.signatureReference.hasPrefix("wallet-policy:") == true)
+        #expect(payload?.walletAccount == bridge.walletPortfolio.account(forChainRef: "base-mainnet")?.address)
+        #expect(model.walletPortfolio.recentReceipts.first?.status == .policySigned)
+        #expect(model.walletPortfolio.recentReceipts.first?.destination == requirement.payTo)
+        guard let payload else {
+            Issue.record("Expected signed Hyperactive Web x402 payload")
+            return
+        }
+        #expect(BrowserViewModel.hyperactiveWebPaymentPolicyAllows(requirement: requirement, payload: payload, now: AgenticPaymentFixtures.now))
+    }
+
+    @MainActor
+    @Test func hyperactiveWebPaymentAuthorizationFailsClosedAboveWalletPolicyLimit() async {
+        let bridge = MobileRuntimeBridge()
+        _ = await bridge.createEmbeddedWallet(label: "Hyperactive test wallet")
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        let requirement = X402PaymentRequirement(
+            id: "hyperactive-x402-large",
+            resourceURLString: "https://api.example.test/research",
+            amountMinorUnits: 10_000,
+            asset: "USDC",
+            network: "base",
+            payTo: "0x1111111111111111111111111111111111111111",
+            facilitatorURLString: nil,
+            expiresAt: AgenticPaymentFixtures.now.addingTimeInterval(300)
+        )
+
+        let payload = await model.authorizeHyperactiveWebPayment(requirement)
+
+        #expect(payload == nil)
+        #expect(model.walletPortfolio.recentReceipts.isEmpty)
+    }
+
     private static func ap2Mandate(id: String, kind: AP2MandateKind, prior: [String]) -> AP2Mandate {
         AP2Mandate(
             id: id,
@@ -7816,6 +7915,7 @@ struct dBrowserTests {
         initialURL: String = "about:home",
         runtimeBridge: MobileRuntimeBridge? = nil,
         workflowStore: CopilotWorkflowStore = .ephemeral(),
+        researchLedgerStore: ResearchLedgerStore = .ephemeral(),
         smartHistoryStore: SmartHistoryStore = .ephemeral(),
         llmConversationStore: LLMConversationStore = .ephemeral(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
@@ -7825,6 +7925,7 @@ struct dBrowserTests {
             initialURL: initialURL,
             runtimeBridge: runtimeBridge ?? MobileRuntimeBridge(),
             copilotWorkflowStore: workflowStore,
+            researchLedgerStore: researchLedgerStore,
             smartHistoryStore: smartHistoryStore,
             llmConversationStore: llmConversationStore,
             openMindMemoryClient: openMindMemoryClient,

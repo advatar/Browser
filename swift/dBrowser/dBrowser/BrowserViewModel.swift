@@ -118,6 +118,10 @@ final class BrowserViewModel: ObservableObject {
             rootDirectory: Self.hyperactiveWebRoot(),
             openMind: self.openMindMemoryClient
         )
+        self.hyperactiveWeb?.walletAuthorize = { [weak self] requirement in
+            guard let self else { return nil }
+            return await self.authorizeHyperactiveWebPayment(requirement)
+        }
         Self.shared = self
     }
 
@@ -127,6 +131,116 @@ final class BrowserViewModel: ObservableObject {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return base.appendingPathComponent("dBrowser/HyperactiveWeb", isDirectory: true)
+    }
+
+    func authorizeHyperactiveWebPayment(_ requirement: X402PaymentRequirement) async -> X402PaymentPayload? {
+        guard requirement.expiresAt > Date(),
+              requirement.amountMinorUnits > 0,
+              !requirement.payTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let chainRef = Self.hyperactiveWebChainRef(for: requirement.network, portfolio: runtimeBridge.walletPortfolio)
+        else { return nil }
+
+        let transfer = WalletTransferRequest(
+            chainRef: chainRef,
+            amount: Self.hyperactiveWebPaymentAmount(fromMinorUnits: requirement.amountMinorUnits),
+            asset: requirement.asset,
+            destination: requirement.payTo,
+            memo: requirement.facilitatorURLString,
+            reason: "Hyperactive Web x402 payment for \(requirement.resourceURLString)"
+        )
+        let preview = await runtimeBridge.previewWalletTransfer(transfer)
+        guard preview.status == .ready else { return nil }
+
+        let receipt = await runtimeBridge.signWalletTransfer(transfer)
+        walletPortfolio = runtimeBridge.walletPortfolio
+        runtimeFeatureStates = runtimeBridge.featureStates
+        guard receipt.status == .policySigned, let signatureDigest = receipt.signatureDigest else { return nil }
+        let payload = X402PaymentPayload(
+            requirementHash: requirement.requirementHash,
+            walletAccount: receipt.fromAddress,
+            transactionReference: receipt.transactionHash,
+            signatureReference: "wallet-policy:\(signatureDigest)"
+        )
+        guard Self.hyperactiveWebPaymentPolicyAllows(requirement: requirement, payload: payload) else {
+            return nil
+        }
+        return payload
+    }
+
+    static func hyperactiveWebChainRef(for network: String, portfolio: WalletPortfolioSnapshot) -> String? {
+        let normalized = network
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "_", with: "-")
+        guard !normalized.isEmpty else { return portfolio.activeChainRef }
+        if portfolio.network(forChainRef: normalized) != nil { return normalized }
+
+        let aliases = [
+            "eth": "ethereum-mainnet",
+            "ethereum": "ethereum-mainnet",
+            "ethereum-mainnet": "ethereum-mainnet",
+            "mainnet": "ethereum-mainnet",
+            "base": "base-mainnet",
+            "base-mainnet": "base-mainnet",
+            "base-sepolia": "base-sepolia",
+            "arbitrum": "arbitrum-one",
+            "arbitrum-one": "arbitrum-one",
+            "optimism": "optimism-mainnet",
+            "optimism-mainnet": "optimism-mainnet",
+            "polygon": "polygon-mainnet",
+            "polygon-mainnet": "polygon-mainnet",
+            "matic": "polygon-mainnet",
+            "bnb": "bnb-smart-chain",
+            "bsc": "bnb-smart-chain",
+            "bnb-smart-chain": "bnb-smart-chain",
+            "avalanche": "avalanche-c",
+            "avalanche-c": "avalanche-c"
+        ]
+        if let chainRef = aliases[normalized], portfolio.network(forChainRef: chainRef) != nil {
+            return chainRef
+        }
+
+        return portfolio.networks.first { network in
+            network.chainRef.contains(normalized) || network.displayName.lowercased().contains(normalized)
+        }?.chainRef
+    }
+
+    static func hyperactiveWebPaymentAmount(fromMinorUnits minorUnits: Int, decimals: Int = 2) -> Decimal {
+        let scale = Decimal(pow(10.0, Double(decimals)))
+        return Decimal(minorUnits) / scale
+    }
+
+    static func hyperactiveWebPaymentPolicyAllows(
+        requirement: X402PaymentRequirement,
+        payload: X402PaymentPayload,
+        now: Date = Date()
+    ) -> Bool {
+        let intent = AgenticPaymentIntent(
+            id: "hyperactive-web-\(requirement.id)",
+            objective: "Authorize Hyperactive Web x402 payment for \(requirement.resourceURLString)",
+            merchantID: URL(string: requirement.resourceURLString)?.host ?? requirement.payTo,
+            counterpartyID: requirement.payTo,
+            amountMinorUnits: requirement.amountMinorUnits,
+            currencyOrAsset: requirement.asset,
+            protocolName: .x402,
+            risk: .low,
+            pageSnapshotHash: requirement.requirementHash,
+            expiresAt: requirement.expiresAt,
+            recurringPolicy: nil
+        )
+        let review = AgenticPaymentReview(
+            id: "review-\(intent.id)",
+            intent: intent,
+            eudiDecision: nil,
+            visaTrustedAgent: nil,
+            acpCheckout: nil,
+            ap2Mandates: [],
+            x402Requirement: requirement,
+            x402Payload: payload,
+            notabeneTransfer: nil,
+            userApproved: true
+        )
+        return AgenticPaymentPolicyEngine.evaluate(review, now: now).kind == .allow
     }
 
     var activeTabIndex: Int? {

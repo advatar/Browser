@@ -37,6 +37,18 @@ Bridge lives in `dBrowser/HyperactiveWeb/`; UIK added as a local SPM package (pr
 - [x] UIK addition: `CapabilityResolver.registerAdapter(_:)` lets the host grow the transport set as the user navigates (A2A agents discovered at nav time). UIK builds + 56 tests pass.
 - [x] macOS build verified (`xcodebuild ... build` → BUILD SUCCEEDED) after every slice.
 
+Closure pass:
+
+- [x] Wire `HyperactiveWebCoordinator.walletAuthorize` from `BrowserViewModel` into the existing wallet/x402 policy path: UIK 402 requirements now preview/sign through the existing wallet policy receipt path, bind to `X402PaymentPayload`, and pass `AgenticPaymentPolicyEngine` x402 review before the resolver receives a proof.
+- [x] Add focused Swift tests for x402 bridge mapping and host authorization fail-closed behavior; update the panel-tier assertion for the new Hyperactive Web advanced panel.
+- [x] Verify focused tests, full unit tests, and the macOS build locally, then push the scoped Hyperactive Web commits.
+
+Validation notes:
+
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-hyperactive-tests` with focused Hyperactive Web x402 `-only-testing` filters passed.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-hyperactive-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-hyperactive-build` passed.
+
 ## Avalanche / XRPL / Move Ed25519 Quorum Closure (#148)
 
 Closing the remaining signed-flag quorum gaps for the chains that match the shared Ed25519 verifier pattern.
