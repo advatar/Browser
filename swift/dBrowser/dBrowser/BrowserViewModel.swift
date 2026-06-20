@@ -21,6 +21,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var chainTrustSnapshot: ChainTrustRegistry
     @Published var afmServiceSnapshot: AFMServiceSnapshot
     @Published var llmRouterServiceSnapshot: LLMRouterServiceSnapshot
+    @Published var llmGatewayServiceSnapshot: LLMGatewayServiceSnapshot
     @Published var walletPortfolio: WalletPortfolioSnapshot
     @Published var mcpServers: [MCPServerConfiguration]
     @Published var selectedAFMPackID: String?
@@ -75,7 +76,8 @@ final class BrowserViewModel: ObservableObject {
         let historyService = BrowserHistoryService(store: smartHistoryStore)
         let initialLLMModelOptions = LLMModelRegistry.models(
             afmSnapshot: runtimeBridge.afmServiceSnapshot,
-            llmRouterSnapshot: runtimeBridge.llmRouterServiceSnapshot
+            llmRouterSnapshot: runtimeBridge.llmRouterServiceSnapshot,
+            llmGatewaySnapshot: runtimeBridge.llmGatewayServiceSnapshot
         )
         let restoredLLMState = Self.restoredLLMState(
             from: llmConversationStore.load(),
@@ -92,6 +94,7 @@ final class BrowserViewModel: ObservableObject {
         self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         self.llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
+        self.llmGatewayServiceSnapshot = runtimeBridge.llmGatewayServiceSnapshot
         self.walletPortfolio = runtimeBridge.walletPortfolio
         self.mcpServers = runtimeBridge.mcpServers
         self.afmTrainingJobs = runtimeBridge.afmTrainingJobs
@@ -282,11 +285,13 @@ final class BrowserViewModel: ObservableObject {
             ?? LLMModelRegistry.model(
                 withID: selectedLLMModelID,
                 afmSnapshot: afmServiceSnapshot,
-                llmRouterSnapshot: llmRouterServiceSnapshot
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot
             )
             ?? LLMModelRegistry.models(
                 afmSnapshot: afmServiceSnapshot,
-                llmRouterSnapshot: llmRouterServiceSnapshot
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot
             )[0]
     }
 
@@ -381,13 +386,15 @@ final class BrowserViewModel: ObservableObject {
         chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
         llmRouterServiceSnapshot = runtimeBridge.llmRouterServiceSnapshot
+        llmGatewayServiceSnapshot = runtimeBridge.llmGatewayServiceSnapshot
         walletPortfolio = runtimeBridge.walletPortfolio
         mcpServers = runtimeBridge.mcpServers
         afmTrainingJobs = runtimeBridge.afmTrainingJobs
         latestAFMA2ACallResult = runtimeBridge.latestAFMA2ACallResult
         llmModelOptions = LLMModelRegistry.models(
             afmSnapshot: afmServiceSnapshot,
-            llmRouterSnapshot: llmRouterServiceSnapshot
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot
         )
         normalizeSelectedLLMModelIfNeeded()
         async let openMindState = openMindMemoryClient.refreshRuntimeState()
@@ -542,7 +549,8 @@ final class BrowserViewModel: ObservableObject {
         runtimeFeatureStates = runtimeBridge.featureStates
         llmModelOptions = LLMModelRegistry.models(
             afmSnapshot: afmServiceSnapshot,
-            llmRouterSnapshot: llmRouterServiceSnapshot
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot
         )
         normalizeSelectedLLMModelIfNeeded()
         return job
@@ -926,6 +934,7 @@ final class BrowserViewModel: ObservableObject {
             )
             appendAFMarketEvents(runID: runID, result: result)
             appendLLMRouterEvents(runID: runID, result: result)
+            appendLLMGatewayEvents(runID: runID, result: result)
             if recordsAssistantMessage, result.mode != model.runtimeMode {
                 appendProviderFallback(runID: runID, requestedModel: model, actualMode: result.mode)
             }
@@ -1428,6 +1437,16 @@ final class BrowserViewModel: ObservableObject {
                 message: "LLM router proposed tool \(toolCall.name); approval is required before execution."
             )
         }
+    }
+
+    private func appendLLMGatewayEvents(runID: UUID, result: CopilotRunResult) {
+        guard let response = result.llmGatewayResponse else { return }
+        let billed = response.billedTokenClass?.rawValue ?? response.tokenClass.rawValue
+        appendCopilotEvent(
+            runID: runID,
+            kind: .modelCompleted,
+            message: "LLM Gateway completed \(response.modelID) with \(billed) token-class billing."
+        )
     }
 
     private func isCopilotRunActive(_ id: UUID) -> Bool {

@@ -190,7 +190,8 @@ enum LLMModelRegistry {
 
     static func models(
         afmSnapshot: AFMServiceSnapshot = .unknown,
-        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown
+        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown,
+        llmGatewaySnapshot: LLMGatewayServiceSnapshot = .unknown
     ) -> [LLMModelProfile] {
         let localProfile = BundledLLMSelection.recommended.profile
         let localAvailability: LLMModelAvailability = localProfile.loaderSupport.isRunnableWithCurrentSwiftLoader
@@ -203,6 +204,10 @@ enum LLMModelRegistry {
         let routerAvailability: LLMModelAvailability = llmRouterSnapshot.isModelAvailable(provider: .appleFoundation)
             ? .available
             : .unavailable(llmRouterSnapshot.serviceStatusText)
+        let gatewayModel = llmGatewaySnapshot.selectedModel
+        let gatewayAvailability: LLMModelAvailability = llmGatewaySnapshot.isModelAvailable
+            ? .available
+            : .unavailable(llmGatewaySnapshot.serviceStatusText)
 
         return [
             LLMModelProfile(
@@ -243,15 +248,15 @@ enum LLMModelRegistry {
             ),
             LLMModelProfile(
                 id: llmGatewayID,
-                displayName: "LLM Gateway",
+                displayName: gatewayModel?.displayName ?? "LLM Gateway",
                 providerKind: .llmGateway,
                 trustBoundary: .remoteGateway,
-                contextWindowTokens: 128_000,
-                supportsTools: true,
+                contextWindowTokens: gatewayModel?.contextWindowTokens ?? llmGatewaySnapshot.tokenClass.contextWindowTokens,
+                supportsTools: gatewayModel?.supportsTools ?? true,
                 supportsMemoryCitations: true,
                 runtimeMode: .remote,
-                availability: .unavailable("No LLM Gateway endpoint is configured for the Swift runtime."),
-                detail: "Reserved provider slot for a remote LLM Gateway adapter."
+                availability: gatewayAvailability,
+                detail: gatewayModel?.detail ?? "Encrypted ZeroK LLM Gateway route with token-class padding, usage tickets, and explicit upstream provider boundary labels."
             )
         ]
     }
@@ -259,9 +264,14 @@ enum LLMModelRegistry {
     static func model(
         withID id: String,
         afmSnapshot: AFMServiceSnapshot = .unknown,
-        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown
+        llmRouterSnapshot: LLMRouterServiceSnapshot = .unknown,
+        llmGatewaySnapshot: LLMGatewayServiceSnapshot = .unknown
     ) -> LLMModelProfile? {
-        models(afmSnapshot: afmSnapshot, llmRouterSnapshot: llmRouterSnapshot).first { $0.id == id }
+        models(
+            afmSnapshot: afmSnapshot,
+            llmRouterSnapshot: llmRouterSnapshot,
+            llmGatewaySnapshot: llmGatewaySnapshot
+        ).first { $0.id == id }
     }
 }
 

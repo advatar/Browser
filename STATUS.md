@@ -21,6 +21,23 @@
 
 ## Active Task
 
+## ZeroK LLM Gateway Privacy Path (#151)
+
+Wire the ZeroK/LLM Gateway into the native Swift conversation runtime so the reserved LLM Gateway model sends only minimized, redacted context through encrypted SDK envelopes.
+
+- [x] Add the local Swift SDK package and app-side gateway service client.
+- [x] Surface gateway configuration, health/model availability, and provider-boundary labels in the model registry/runtime state.
+- [x] Route selected LLM Gateway conversation runs through encrypted `/v1/infer` with ticket/token-class controls.
+- [x] Add focused Swift tests for configuration, availability, run completion, and conversation selection.
+- [x] Verify focused tests and macOS build locally, then commit and push scoped changes.
+
+Validation notes:
+
+- `swift test` passed in `../ZeroK/zk-llm-gateway/zk-llm-gateway-swift-sdk`; the Swift client SDK needed no changes.
+- Focused gateway Swift tests passed: `llmGatewayConfigFromEnvironmentEnablesRelayAndTokenClass`, `llmGatewayServiceClientLoadsSnapshot`, and `swiftLLMConversationUsesLLMGatewaySelectedModel`.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-gateway-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-gateway-build` passed.
+
 ## Open Issue And Placeholder Closure (#150)
 
 Close the open GitHub issues (#146, #133) and retire actionable temporary markers from active implementation paths.

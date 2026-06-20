@@ -1196,6 +1196,176 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func llmGatewayConfigFromEnvironmentEnablesRelayAndTokenClass() throws {
+        let config = try LLMGatewayEndpointConfiguration.fromEnvironment([
+            "GATEWAY_BASE_URL": "https://proxy.zerok.cloud",
+            "GATEWAY_PUBLIC_KEY_B64": Data(repeating: 7, count: 32).base64EncodedString(),
+            "GATEWAY_USE_RELAY": "true",
+            "GATEWAY_USE_DUMMY_TICKETS": "true",
+            "GATEWAY_MODEL": "privacy-model",
+            "GATEWAY_TOKEN_CLASS": "c1024",
+            "GATEWAY_TEMPERATURE": "0.3",
+            "GATEWAY_TIMEOUT_SECS": "12"
+        ])
+
+        #expect(config.baseURL?.absoluteString == "https://proxy.zerok.cloud")
+        #expect(config.inferPath == "/relay")
+        #expect(config.tickets == .dummy)
+        #expect(config.modelID == "privacy-model")
+        #expect(config.tokenClass == .c1024)
+        #expect(config.temperature == 0.3)
+        #expect(config.timeout == 12)
+        #expect(config.isConfigured)
+    }
+
+    @MainActor
+    @Test func llmGatewayServiceClientLoadsSnapshot() async {
+        let harness = Self.makeLLMGatewaySession(key: "llmgatewayclient") { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/healthz" {
+                return Self.jsonResponse(for: request, body: [
+                    "ok": true,
+                    "message": "gateway ready"
+                ])
+            }
+
+            if path == "/v1/models" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "privacy-model",
+                            "display_name": "Privacy Gateway Model",
+                            "context_window_tokens": 32_768,
+                            "supports_tools": true,
+                            "available": true,
+                            "detail": "Provider model behind encrypted gateway"
+                        ]
+                    ]
+                ])
+            }
+
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let client = LLMGatewayServiceClient(configuration: harness.configuration, session: harness.session)
+
+        let snapshot = await client.snapshot()
+        let renderedContext = LLMRenderedConversationContext(
+            prompt: """
+            Approved memory citations:
+            - mem-1 [OpenMind]: Keep travel preferences in mind.
+
+            Conversation messages:
+            USER: Summarize the page.
+            memory citations: mem-1
+            """,
+            includedMessageIDs: [],
+            compressedMessageIDs: [],
+            estimatedPromptTokens: 32,
+            wasCompressed: false,
+            snapshotCommitment: "fnv1a64:test",
+            memoryContextIDs: ["mem-1"],
+            contextMinimization: LLMContextMinimizationProfile.profile(
+                providerKind: .llmGateway,
+                trustBoundary: .remoteGateway,
+                contextWindowTokens: 8_192
+            )
+        )
+        let completionRequest = client.completionRequest(
+            prompt: "Summarize the page.",
+            conversationID: UUID(),
+            runID: UUID(),
+            pageURLString: "https://example.com",
+            renderedContext: renderedContext,
+            memoryRecall: nil
+        )
+
+        #expect(snapshot.serviceAvailable)
+        #expect(snapshot.configured)
+        #expect(snapshot.isModelAvailable)
+        #expect(snapshot.selectedModel?.displayName == "Privacy Gateway Model")
+        #expect(snapshot.selectedModel?.contextWindowTokens == 32_768)
+        #expect(snapshot.tokenClass == .c1024)
+        #expect(completionRequest.modelID == "privacy-model")
+        #expect(completionRequest.tokenClass == .c1024)
+        #expect(completionRequest.maxTokens == 1_024)
+        #expect(!completionRequest.prompt.contains("mem-1"))
+        #expect(completionRequest.prompt.contains("approved-memory-1"))
+        #expect(completionRequest.context.memoryContextIDs == ["mem-1"])
+    }
+
+    @MainActor
+    @Test func swiftLLMConversationUsesLLMGatewaySelectedModel() async {
+        let gatewaySnapshot = LLMGatewayServiceSnapshot(
+            serviceAvailable: true,
+            configured: true,
+            models: [
+                LLMGatewayModelDescriptor(
+                    id: "privacy-model",
+                    displayName: "Privacy Gateway Model",
+                    contextWindowTokens: 32_768,
+                    supportsTools: true,
+                    available: true,
+                    detail: "Encrypted test gateway"
+                ),
+            ],
+            selectedModelID: "privacy-model",
+            tokenClass: .c1024,
+            message: "gateway ready"
+        )
+        let gatewayClient = MockLLMGatewayServiceClient(
+            snapshot: gatewaySnapshot,
+            response: LLMGatewayCompletionResponse(
+                text: "Gateway answer for the Swift conversation.",
+                modelID: "privacy-model",
+                tokenClass: .c1024,
+                billedTokenClass: .c1024,
+                usage: LLMGatewayUsage(promptTokens: 40, completionTokens: 11, totalTokens: 51),
+                boundarySummary: "Unit-test boundary summary."
+            )
+        )
+        let offlineAFM = Self.makeAFMServiceSession(key: "llmgatewayafm") { request in
+            Self.jsonResponse(for: request, status: 503, body: ["ok": false])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                afmServices: offlineAFM.configuration,
+                llmRouter: .disabled
+            ),
+            afmServicesClient: AFMServicesClient(
+                configuration: offlineAFM.configuration,
+                session: offlineAFM.session
+            ),
+            llmRouterServiceClient: LLMRouterServiceClient(configuration: .disabled),
+            llmGatewayServiceClient: gatewayClient
+        )
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+        model.navigate("https://example.com")
+        await model.refreshRuntimeBridgeStatus()
+
+        model.selectLLMModel(LLMModelRegistry.llmGatewayID)
+        guard let runID = model.sendLLMMessage("Use the gateway and keep context minimal.") else {
+            Issue.record("Expected LLM Gateway conversation run ID")
+            return
+        }
+        let completed = await waitForCopilotRun(in: model, runID, status: .completed)
+        let run = model.copilotRuns.first { $0.id == runID }
+        let request = gatewayClient.completedRequests.first
+
+        #expect(completed)
+        #expect(model.selectedLLMModelID == LLMModelRegistry.llmGatewayID)
+        #expect(model.llmConversation.messages.contains { $0.role == .assistant && $0.modelID == LLMModelRegistry.llmGatewayID })
+        #expect(model.llmConversation.latestAssistantMessage?.text.contains("Gateway answer for the Swift conversation.") == true)
+        #expect(request?.prompt.contains("Conversation messages") == true)
+        #expect(request?.prompt.contains("Use the gateway and keep context minimal.") == true)
+        #expect(request?.tokenClass == .c1024)
+        #expect(run?.result?.mode == .remote)
+        #expect(run?.result?.usageProviderKey == "llm_gateway")
+        #expect(run?.events.contains { $0.kind == .modelCompleted && $0.message.contains("LLM Gateway completed privacy-model") } == true)
+        #expect(run?.result?.suggestions.contains { $0.contains("encrypted /v1/infer") } == true)
+    }
+
+    @MainActor
     @Test func swiftLLMConversationUsesLLMRouterSelectedModel() async {
         let capturedRequests = JSONRequestCapture()
         let routerHarness = Self.makeLLMRouterSession(key: "llmroutervm") { request in
@@ -8258,6 +8428,27 @@ struct dBrowserTests {
         return (endpoint, URLSession(configuration: configuration))
     }
 
+    private static func makeLLMGatewaySession(
+        key: String,
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> (configuration: LLMGatewayEndpointConfiguration, session: URLSession) {
+        AFMServiceMockURLProtocol.register(key: key, handler: handler)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AFMServiceMockURLProtocol.self]
+        let endpoint = LLMGatewayEndpointConfiguration(
+            baseURL: URL(string: "http://\(key)-llm-gateway.test:4860")!,
+            inferPath: "/v1/infer",
+            gatewayPublicKeyBase64: Data(repeating: 9, count: 32).base64EncodedString(),
+            tickets: .dummy,
+            modelID: "privacy-model",
+            displayName: "Privacy Gateway Model",
+            tokenClass: .c1024,
+            temperature: 0.2,
+            timeout: 10
+        )
+        return (endpoint, URLSession(configuration: configuration))
+    }
+
     private static func makeBitcoinLightClientSession(
         key: String,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
@@ -9968,6 +10159,60 @@ private final class MockLocalLLMManager: LocalLLMManaging {
     private func update() -> LocalLLMManagementState {
         currentState = refreshState
         return refreshState
+    }
+}
+
+@MainActor
+private final class MockLLMGatewayServiceClient: LLMGatewayServicing {
+    private let snapshotValue: LLMGatewayServiceSnapshot
+    private let response: LLMGatewayCompletionResponse
+    private(set) var completedRequests: [LLMGatewayCompletionRequest] = []
+
+    init(snapshot: LLMGatewayServiceSnapshot, response: LLMGatewayCompletionResponse) {
+        self.snapshotValue = snapshot
+        self.response = response
+    }
+
+    func snapshot() async -> LLMGatewayServiceSnapshot {
+        snapshotValue
+    }
+
+    func complete(_ request: LLMGatewayCompletionRequest) async throws -> LLMGatewayCompletionResponse {
+        completedRequests.append(request)
+        return response
+    }
+
+    func completionRequest(
+        prompt: String,
+        conversationID: UUID?,
+        runID: UUID?,
+        pageURLString: String?,
+        renderedContext: LLMRenderedConversationContext?,
+        memoryRecall: OpenMindMemoryRecallResult?
+    ) -> LLMGatewayCompletionRequest {
+        let memoryContextIDs = renderedContext?.memoryContextIDs ?? memoryRecall?.memories.map(\.id) ?? []
+        var providerPrompt = renderedContext?.prompt ?? prompt
+        for (index, id) in memoryContextIDs.enumerated() where !id.isEmpty {
+            providerPrompt = providerPrompt.replacingOccurrences(of: id, with: "approved-memory-\(index + 1)")
+        }
+        return LLMGatewayCompletionRequest(
+            prompt: providerPrompt,
+            modelID: snapshotValue.selectedModelID,
+            tokenClass: snapshotValue.tokenClass,
+            temperature: 0.2,
+            maxTokens: snapshotValue.tokenClass.maxOutputTokensHint,
+            systemPrompt: "Unit-test LLM Gateway system prompt.",
+            context: LLMGatewayCompletionContext(
+                conversationID: conversationID,
+                runID: runID,
+                pageURLString: pageURLString,
+                snapshotCommitment: renderedContext?.snapshotCommitment,
+                memoryContextIDs: memoryContextIDs,
+                estimatedPromptTokens: renderedContext?.estimatedPromptTokens,
+                includedMessageIDs: renderedContext?.includedMessageIDs ?? [],
+                compressedMessageIDs: renderedContext?.compressedMessageIDs ?? []
+            )
+        )
     }
 }
 

@@ -41,6 +41,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
     var llmRouter: LLMRouterEndpointConfiguration
+    var llmGateway: LLMGatewayEndpointConfiguration
     var bitcoinLightClient: BitcoinLightClientEndpointConfiguration
     var evmLightClient: EVMLightClientEndpointConfiguration
     var solanaLightClient: SolanaLightClientEndpointConfiguration
@@ -63,6 +64,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
         llmRouter: LLMRouterEndpointConfiguration = .local,
+        llmGateway: LLMGatewayEndpointConfiguration = .disabled,
         bitcoinLightClient: BitcoinLightClientEndpointConfiguration = .disabled,
         evmLightClient: EVMLightClientEndpointConfiguration = .disabled,
         solanaLightClient: SolanaLightClientEndpointConfiguration = .disabled,
@@ -84,6 +86,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
         self.llmRouter = llmRouter
+        self.llmGateway = llmGateway
         self.bitcoinLightClient = bitcoinLightClient
         self.evmLightClient = evmLightClient
         self.solanaLightClient = solanaLightClient
@@ -180,6 +183,7 @@ struct CopilotRunResult: Equatable, Identifiable {
     let afmInstall: AFMNodeInstallResult?
     let afmNodeTask: AFMNodeTaskResult?
     let llmRouterResponse: LLMRouterCompletionResponse?
+    let llmGatewayResponse: LLMGatewayCompletionResponse?
     let chainTrustUpdate: ChainTrustStatus?
     let usageProviderKey: String?
 
@@ -193,6 +197,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         afmInstall: AFMNodeInstallResult? = nil,
         afmNodeTask: AFMNodeTaskResult? = nil,
         llmRouterResponse: LLMRouterCompletionResponse? = nil,
+        llmGatewayResponse: LLMGatewayCompletionResponse? = nil,
         chainTrustUpdate: ChainTrustStatus? = nil,
         usageProviderKey: String? = nil
     ) {
@@ -205,6 +210,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.afmInstall = afmInstall
         self.afmNodeTask = afmNodeTask
         self.llmRouterResponse = llmRouterResponse
+        self.llmGatewayResponse = llmGatewayResponse
         self.chainTrustUpdate = chainTrustUpdate
         self.usageProviderKey = usageProviderKey
     }
@@ -336,6 +342,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let explorerCatalog: BlockchainExplorerCatalog = .default
     private let afmServicesClient: AFMServicesClient
     private let llmRouterServiceClient: LLMRouterServiceClient
+    private let llmGatewayServiceClient: any LLMGatewayServicing
     private let bitcoinLightClientServiceClient: BitcoinLightClientServiceClient
     private let evmLightClientServiceClient: EVMLightClientServiceClient
     private let solanaLightClientServiceClient: SolanaLightClientServiceClient
@@ -348,6 +355,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let aptosMoveLightClientServiceClient: MoveLightClientServiceClient
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
+    @Published private(set) var llmGatewayServiceSnapshot: LLMGatewayServiceSnapshot = .unknown
     @Published private(set) var bitcoinLightClientSnapshot: BitcoinLightClientServiceSnapshot = .fallback(
         network: .mainnet,
         lastError: "Bitcoin light-client service not checked yet."
@@ -395,13 +403,18 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private var downloadTasks: [UUID: Task<Void, Never>] = [:]
 
     convenience init() {
-        self.init(configuration: RuntimeBridgeConfiguration())
+        self.init(
+            configuration: RuntimeBridgeConfiguration(
+                llmGateway: .fromEnvironmentOrDisabled()
+            )
+        )
     }
 
     init(
         configuration: RuntimeBridgeConfiguration,
         afmServicesClient: AFMServicesClient? = nil,
         llmRouterServiceClient: LLMRouterServiceClient? = nil,
+        llmGatewayServiceClient: (any LLMGatewayServicing)? = nil,
         bitcoinLightClientServiceClient: BitcoinLightClientServiceClient? = nil,
         evmLightClientServiceClient: EVMLightClientServiceClient? = nil,
         solanaLightClientServiceClient: SolanaLightClientServiceClient? = nil,
@@ -416,6 +429,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
         self.llmRouterServiceClient = llmRouterServiceClient ?? LLMRouterServiceClient(configuration: configuration.llmRouter)
+        self.llmGatewayServiceClient = llmGatewayServiceClient ?? LLMGatewayServiceClient(configuration: configuration.llmGateway)
         self.bitcoinLightClientServiceClient = bitcoinLightClientServiceClient ?? BitcoinLightClientServiceClient(configuration: configuration.bitcoinLightClient)
         self.evmLightClientServiceClient = evmLightClientServiceClient ?? EVMLightClientServiceClient(configuration: configuration.evmLightClient)
         self.solanaLightClientServiceClient = solanaLightClientServiceClient ?? SolanaLightClientServiceClient(configuration: configuration.solanaLightClient)
@@ -473,6 +487,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: .unknown,
             llmRouterSnapshot: .unknown,
+            llmGatewaySnapshot: .unknown,
             chainTrustSnapshot: configuration.chainTrustRegistry,
             mcpServers: initialMCPServers
         )
@@ -494,8 +509,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let xrplSnapshot = xrplLightClientServiceClient.snapshot()
         async let suiMoveSnapshot = suiMoveLightClientServiceClient.snapshot()
         async let aptosMoveSnapshot = aptosMoveLightClientServiceClient.snapshot()
+        let gatewaySnapshot = await llmGatewayServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
+        llmGatewayServiceSnapshot = gatewaySnapshot
         bitcoinLightClientSnapshot = await bitcoinSnapshot
         evmLightClientSnapshot = await evmSnapshot
         solanaLightClientSnapshot = await solanaSnapshot
@@ -521,6 +538,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot,
             chainTrustSnapshot: chainTrustSnapshot,
             mcpServers: mcpServers
         )
@@ -605,6 +623,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         } ?? ""
         let snapshotCommitment = OpenMindMemoryClient.snapshotCommitment(for: request.pageSnapshot)
         var llmRouterFailureMessage: String?
+        var llmGatewayFailureMessage: String?
 
         if request.preferredModelID == LLMModelRegistry.llmRouterAppleFoundationID {
             do {
@@ -614,6 +633,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     configuration: configuration,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: routerSnapshot,
+                    llmGatewaySnapshot: llmGatewayServiceSnapshot,
                     chainTrustSnapshot: chainTrustSnapshot,
                     mcpServers: mcpServers
                 )
@@ -660,6 +680,57 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             }
         }
 
+        if request.preferredModelID == LLMModelRegistry.llmGatewayID {
+            do {
+                let gatewaySnapshot = await llmGatewayServiceClient.snapshot()
+                llmGatewayServiceSnapshot = gatewaySnapshot
+                featureStates = Self.makeFeatureStates(
+                    configuration: configuration,
+                    afmSnapshot: afmServiceSnapshot,
+                    llmRouterSnapshot: llmRouterServiceSnapshot,
+                    llmGatewaySnapshot: gatewaySnapshot,
+                    chainTrustSnapshot: chainTrustSnapshot,
+                    mcpServers: mcpServers
+                )
+                refreshWalletFeatureState()
+                guard gatewaySnapshot.isModelAvailable else {
+                    throw LLMGatewayServiceClientError.invalidResponse(gatewaySnapshot.serviceStatusText)
+                }
+
+                let completionRequest = llmGatewayServiceClient.completionRequest(
+                    prompt: task,
+                    conversationID: request.conversationID,
+                    runID: request.runID,
+                    pageURLString: target,
+                    renderedContext: request.renderedConversationContext,
+                    memoryRecall: request.memoryRecall
+                )
+                let response = try await llmGatewayServiceClient.complete(completionRequest)
+                var suggestions = [
+                    "LLM Gateway completed encrypted /v1/infer for \(page) using \(completionRequest.tokenClass.rawValue) token-class padding.",
+                    request.renderedConversationContext == nil ? "Gateway received the current prompt without rendered conversation context." : "Gateway received rendered, minimized conversation context with \(request.renderedConversationContext?.estimatedPromptTokens ?? 0) estimated prompt tokens.",
+                    memoryIDs.isEmpty ? "No governed memory IDs were disclosed to the gateway." : "Only approved memory-derived context was included; \(memoryIDs.count) local memory ID\(memoryIDs.count == 1 ? "" : "s") remained local.",
+                    response.boundarySummary
+                ]
+                if let usage = response.usage {
+                    suggestions.append("Gateway usage: \(usage.promptTokens ?? 0) prompt, \(usage.completionTokens ?? 0) completion, \(usage.totalTokens ?? 0) total tokens.")
+                }
+                if let billed = response.billedTokenClass {
+                    suggestions.append("Gateway billed token class: \(billed.rawValue).")
+                }
+                return CopilotRunResult(
+                    title: "LLM Gateway Copilot",
+                    summary: response.text,
+                    suggestions: suggestions,
+                    mode: .remote,
+                    llmGatewayResponse: response,
+                    usageProviderKey: "llm_gateway"
+                )
+            } catch {
+                llmGatewayFailureMessage = "LLM Gateway unavailable for selected model: \(error.localizedDescription)."
+            }
+        }
+
         do {
             let snapshot = await afmServicesClient.snapshot()
             afmServiceSnapshot = snapshot
@@ -667,6 +738,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 configuration: configuration,
                 afmSnapshot: snapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot,
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
@@ -715,6 +787,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ]
             if let llmRouterFailureMessage {
                 suggestions.insert(llmRouterFailureMessage, at: 0)
+            }
+            if let llmGatewayFailureMessage {
+                suggestions.insert(llmGatewayFailureMessage, at: 0)
             }
             if let routeRequest = route.request {
                 suggestions.append("Route \(route.contract) used chain \(routeRequest.chainRef), reward \(routeRequest.reward) \(routeRequest.rewardToken), SLA \(routeRequest.sla.maxLatencyMS.map { "\($0) ms" } ?? "default").")
@@ -779,6 +854,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 configuration: configuration,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot,
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
@@ -790,6 +866,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(conversationContext)\(memoryContext)",
             suggestions: [
                 llmRouterFailureMessage,
+                llmGatewayFailureMessage,
                 request.renderedConversationContext == nil ? "Attach page text from WKWebView before model execution." : "Use the rendered conversation ledger as local model context.",
                 request.memoryRecall?.decision.status == .allowed ? "Use only the approved OpenMind memory context." : "Continue without personal memory unless OpenMind grants access.",
                 "Send the prepared run to the desktop or cloud runtime when configured.",
@@ -835,6 +912,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 configuration: configuration,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot,
                 chainTrustSnapshot: chainTrustSnapshot,
                 mcpServers: mcpServers
             )
@@ -1240,6 +1318,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         configuration: RuntimeBridgeConfiguration,
         afmSnapshot: AFMServiceSnapshot,
         llmRouterSnapshot: LLMRouterServiceSnapshot,
+        llmGatewaySnapshot: LLMGatewayServiceSnapshot,
         chainTrustSnapshot: ChainTrustRegistry,
         mcpServers: [MCPServerConfiguration]
     ) -> [RuntimeFeatureState] {
@@ -1248,6 +1327,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         if llmRouterSnapshot.isModelAvailable(provider: .appleFoundation) {
             copilotStatus = "LLM router + local-first provider"
             copilotMode = .service
+        } else if llmGatewaySnapshot.isModelAvailable {
+            copilotStatus = "LLM Gateway encrypted privacy path"
+            copilotMode = .remote
         } else if afmSnapshot.coreCopilotServicesAvailable {
             copilotStatus = "AFM router + pipelines"
             copilotMode = .service
@@ -1344,6 +1426,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             configuration: configuration,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot,
             chainTrustSnapshot: chainTrustSnapshot,
             mcpServers: mcpServers
         )
