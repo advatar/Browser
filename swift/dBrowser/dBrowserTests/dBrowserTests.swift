@@ -1205,7 +1205,11 @@ struct dBrowserTests {
             "GATEWAY_MODEL": "privacy-model",
             "GATEWAY_TOKEN_CLASS": "c1024",
             "GATEWAY_TEMPERATURE": "0.3",
-            "GATEWAY_TIMEOUT_SECS": "12"
+            "GATEWAY_TIMEOUT_SECS": "12",
+            "GATEWAY_TOKEN_PURCHASE_PAY_TO": "0xGatewayTokenSeller",
+            "GATEWAY_TOKEN_PURCHASE_AMOUNT_MINOR": "250",
+            "GATEWAY_TOKEN_PACKAGE_TICKETS": "5",
+            "GATEWAY_TOKEN_PURCHASE_NETWORK": "base-mainnet"
         ])
 
         #expect(config.baseURL?.absoluteString == "https://proxy.zerok.cloud")
@@ -1216,6 +1220,9 @@ struct dBrowserTests {
         #expect(config.temperature == 0.3)
         #expect(config.timeout == 12)
         #expect(config.isConfigured)
+        #expect(config.fallbackTokenPackage?.payTo == "0xGatewayTokenSeller")
+        #expect(config.fallbackTokenPackage?.amountMinorUnits == 250)
+        #expect(config.fallbackTokenPackage?.ticketCount == 5)
     }
 
     @MainActor
@@ -1240,6 +1247,24 @@ struct dBrowserTests {
                             "supports_tools": true,
                             "available": true,
                             "detail": "Provider model behind encrypted gateway"
+                        ]
+                    ]
+                ])
+            }
+
+            if path == "/v1/tokens/packages" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "starter",
+                            "display_name": "Starter Gateway Tokens",
+                            "token_class": "c1024",
+                            "ticket_count": 3,
+                            "amount_minor_units": 199,
+                            "asset": "USDC",
+                            "network": "base-mainnet",
+                            "pay_to": "0xGatewayTokenSeller",
+                            "detail": "Three encrypted gateway calls"
                         ]
                     ]
                 ])
@@ -1286,12 +1311,147 @@ struct dBrowserTests {
         #expect(snapshot.selectedModel?.displayName == "Privacy Gateway Model")
         #expect(snapshot.selectedModel?.contextWindowTokens == 32_768)
         #expect(snapshot.tokenClass == .c1024)
+        #expect(snapshot.tokenPackages.first?.id == "starter")
+        #expect(snapshot.tokenPackages.first?.purchaseURLString?.contains("/v1/tokens/purchases") == true)
         #expect(completionRequest.modelID == "privacy-model")
         #expect(completionRequest.tokenClass == .c1024)
         #expect(completionRequest.maxTokens == 1_024)
         #expect(!completionRequest.prompt.contains("mem-1"))
         #expect(completionRequest.prompt.contains("approved-memory-1"))
         #expect(completionRequest.context.memoryContextIDs == ["mem-1"])
+    }
+
+    @MainActor
+    @Test func llmGatewayTokenPurchaseUsesWalletX402AndStoresTickets() async throws {
+        let ticketURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        try Data("[]".utf8).write(to: ticketURL)
+        defer { try? FileManager.default.removeItem(at: ticketURL) }
+        let capturedRequests = JSONRequestCapture()
+        let harness = Self.makeLLMGatewaySession(key: "llmgatewaypurchase", ticketPath: ticketURL.path) { request in
+            let path = request.url?.path ?? ""
+
+            if path == "/healthz" {
+                return Self.jsonResponse(for: request, body: ["ok": true, "message": "gateway ready"])
+            }
+            if path == "/v1/models" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+            if path == "/v1/tokens/packages" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "starter",
+                            "display_name": "Starter Gateway Tokens",
+                            "token_class": "c1024",
+                            "ticket_count": 2,
+                            "amount_minor_units": 199,
+                            "asset": "USDC",
+                            "network": "base-mainnet",
+                            "pay_to": "0xGatewayTokenSeller"
+                        ]
+                    ]
+                ])
+            }
+            if path == "/v1/tokens/purchases" {
+                capturedRequests.capture(request)
+                return Self.jsonResponse(for: request, body: [
+                    "receipt_id": "purchase-1",
+                    "message": "tickets issued",
+                    "tickets": [
+                        [
+                            "commitment_root": "cm9vdA==",
+                            "nullifier": "cHVyY2hhc2VkLTE=",
+                            "token_class": "c1024",
+                            "proof": "cHJvb2Y="
+                        ]
+                    ]
+                ])
+            }
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                llmRouter: .disabled,
+                llmGateway: harness.configuration
+            ),
+            llmGatewayServiceClient: LLMGatewayServiceClient(
+                configuration: harness.configuration,
+                session: harness.session
+            )
+        )
+        _ = await bridge.createEmbeddedWallet(label: "Gateway token wallet")
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+
+        let receipt = await model.buyLLMGatewayTokens(packageID: "starter")
+        let purchaseBody = capturedRequests.body(for: "/v1/tokens/purchases")
+        let paymentBody = purchaseBody?["payment"] as? [String: Any]
+        let storedTickets = try JSONSerialization.jsonObject(with: Data(contentsOf: ticketURL)) as? [[String: Any]]
+
+        #expect(receipt?.id == "purchase-1")
+        #expect(receipt?.ticketCount == 1)
+        #expect(receipt?.storedTicketCount == 1)
+        #expect(model.latestLLMGatewayTokenPurchase?.packageID == "starter")
+        #expect(model.llmGatewayTokenPurchaseError == nil)
+        #expect(purchaseBody?["package_id"] as? String == "starter")
+        #expect(paymentBody?["walletAccount"] as? String != nil || paymentBody?["wallet_account"] as? String != nil)
+        #expect((paymentBody?["signatureReference"] as? String)?.hasPrefix("wallet-policy:") == true || (paymentBody?["signature_reference"] as? String)?.hasPrefix("wallet-policy:") == true)
+        #expect(storedTickets?.first?["nullifier"] as? String == "cHVyY2hhc2VkLTE=")
+    }
+
+    @MainActor
+    @Test func llmGatewayTokenPurchaseFailsClosedAboveWalletPolicyLimit() async throws {
+        let ticketURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("json")
+        try Data("[]".utf8).write(to: ticketURL)
+        defer { try? FileManager.default.removeItem(at: ticketURL) }
+        let capturedRequests = JSONRequestCapture()
+        let harness = Self.makeLLMGatewaySession(key: "llmgatewaylargepurchase", ticketPath: ticketURL.path) { request in
+            let path = request.url?.path ?? ""
+            if path == "/healthz" {
+                return Self.jsonResponse(for: request, body: ["ok": true])
+            }
+            if path == "/v1/models" {
+                return Self.jsonResponse(for: request, body: ["data": []])
+            }
+            if path == "/v1/tokens/packages" {
+                return Self.jsonResponse(for: request, body: [
+                    "data": [
+                        [
+                            "id": "large",
+                            "display_name": "Large Gateway Tokens",
+                            "token_class": "c1024",
+                            "ticket_count": 100,
+                            "amount_minor_units": 3000,
+                            "asset": "USDC",
+                            "network": "base-mainnet",
+                            "pay_to": "0xGatewayTokenSeller"
+                        ]
+                    ]
+                ])
+            }
+            if path == "/v1/tokens/purchases" {
+                capturedRequests.capture(request)
+                return Self.jsonResponse(for: request, status: 500, body: ["error": "should not be called"])
+            }
+            return Self.jsonResponse(for: request, status: 404, body: ["error": "not found"])
+        }
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                llmRouter: .disabled,
+                llmGateway: harness.configuration
+            ),
+            llmGatewayServiceClient: LLMGatewayServiceClient(
+                configuration: harness.configuration,
+                session: harness.session
+            )
+        )
+        _ = await bridge.createEmbeddedWallet(label: "Gateway token wallet")
+        let model = makeIsolatedBrowserViewModel(runtimeBridge: bridge)
+
+        let receipt = await model.buyLLMGatewayTokens(packageID: "large")
+
+        #expect(receipt == nil)
+        #expect(model.llmGatewayTokenPurchaseError?.contains("Wallet policy") == true)
+        #expect(capturedRequests.body(for: "/v1/tokens/purchases") == nil)
     }
 
     @MainActor
@@ -8430,6 +8590,7 @@ struct dBrowserTests {
 
     private static func makeLLMGatewaySession(
         key: String,
+        ticketPath: String? = nil,
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> (configuration: LLMGatewayEndpointConfiguration, session: URLSession) {
         AFMServiceMockURLProtocol.register(key: key, handler: handler)
@@ -8439,7 +8600,7 @@ struct dBrowserTests {
             baseURL: URL(string: "http://\(key)-llm-gateway.test:4860")!,
             inferPath: "/v1/infer",
             gatewayPublicKeyBase64: Data(repeating: 9, count: 32).base64EncodedString(),
-            tickets: .dummy,
+            tickets: ticketPath.map(LLMGatewayTicketSourceConfig.file(path:)) ?? .dummy,
             modelID: "privacy-model",
             displayName: "Privacy Gateway Model",
             tokenClass: .c1024,
@@ -10175,6 +10336,32 @@ private final class MockLLMGatewayServiceClient: LLMGatewayServicing {
 
     func snapshot() async -> LLMGatewayServiceSnapshot {
         snapshotValue
+    }
+
+    func tokenPackages() async -> [LLMGatewayTokenPackage] {
+        snapshotValue.tokenPackages
+    }
+
+    func purchaseTokens(
+        package: LLMGatewayTokenPackage,
+        paymentPayload: X402PaymentPayload
+    ) async throws -> LLMGatewayTokenPurchaseReceipt {
+        LLMGatewayTokenPurchaseReceipt(
+            id: "mock-token-purchase-\(package.id)",
+            packageID: package.id,
+            tokenClass: package.tokenClass,
+            ticketCount: package.ticketCount,
+            amountMinorUnits: package.amountMinorUnits,
+            asset: package.asset,
+            network: package.network,
+            payTo: package.payTo,
+            requirementHash: paymentPayload.requirementHash,
+            walletAccount: paymentPayload.walletAccount,
+            transactionReference: paymentPayload.transactionReference,
+            storedTicketCount: package.ticketCount,
+            message: "Mock LLM Gateway token purchase.",
+            createdAt: Date()
+        )
     }
 
     func complete(_ request: LLMGatewayCompletionRequest) async throws -> LLMGatewayCompletionResponse {

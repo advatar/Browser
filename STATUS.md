@@ -21,6 +21,23 @@
 
 ## Active Task
 
+## LLM Gateway Token Purchase Flow (#152)
+
+Make it easy to buy ZeroK LLM Gateway usage tokens from dBrowser without hand-editing ticket JSON, while keeping wallet/x402 policy receipts and explicit user approval in the loop.
+
+- [x] Add gateway token package discovery and purchase configuration to the Swift gateway service client.
+- [x] Route token purchases through wallet/x402 authorization with a bound local receipt.
+- [x] Surface token package availability, purchase status, and receipts in the LLM Gateway/Copilot UI.
+- [x] Add focused Swift tests for discovery, purchase authorization, policy rejection, and state/UI plumbing.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally, then commit and push scoped changes.
+
+Validation notes:
+
+- `swift test` passed in `../ZeroK/zk-llm-gateway/zk-llm-gateway-swift-sdk` after fixing ticket-file persistence and append behavior.
+- Focused gateway token Swift tests passed for env config, snapshot package discovery, wallet/x402 purchase, and fail-closed wallet policy rejection.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-gateway-token-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-llm-gateway-token-build` passed.
+
 ## ZeroK LLM Gateway Privacy Path (#151)
 
 Wire the ZeroK/LLM Gateway into the native Swift conversation runtime so the reserved LLM Gateway model sends only minimized, redacted context through encrypted SDK envelopes.

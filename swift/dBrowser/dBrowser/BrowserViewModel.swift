@@ -39,6 +39,9 @@ final class BrowserViewModel: ObservableObject {
     @Published var llmModelOptions: [LLMModelProfile]
     @Published var selectedLLMModelID: String
     @Published var localLLMState: LocalLLMManagementState
+    @Published var latestLLMGatewayTokenPurchase: LLMGatewayTokenPurchaseReceipt?
+    @Published var llmGatewayTokenPurchaseError: String?
+    @Published var isBuyingLLMGatewayTokens: Bool = false
 
     /// The Hyperactive Web navigation fabric (UIK): discovers service cards from
     /// `/.well-known/agent-card.json` as the user navigates and renders their
@@ -137,6 +140,82 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func authorizeHyperactiveWebPayment(_ requirement: X402PaymentRequirement) async -> X402PaymentPayload? {
+        guard let payload = await authorizeX402Payment(
+            requirement,
+            reason: "Hyperactive Web x402 payment for \(requirement.resourceURLString)"
+        ) else {
+            return nil
+        }
+        guard Self.hyperactiveWebPaymentPolicyAllows(requirement: requirement, payload: payload) else {
+            return nil
+        }
+        return payload
+    }
+
+    func refreshLLMGatewayTokenPackages() async {
+        let snapshot = await runtimeBridge.refreshLLMGatewayTokenPackages()
+        llmGatewayServiceSnapshot = snapshot
+        runtimeFeatureStates = runtimeBridge.featureStates
+        llmModelOptions = LLMModelRegistry.models(
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: snapshot
+        )
+        normalizeSelectedLLMModelIfNeeded()
+    }
+
+    @discardableResult
+    func buyLLMGatewayTokens(packageID: String) async -> LLMGatewayTokenPurchaseReceipt? {
+        guard isBuyingLLMGatewayTokens == false else { return nil }
+        isBuyingLLMGatewayTokens = true
+        llmGatewayTokenPurchaseError = nil
+        defer { isBuyingLLMGatewayTokens = false }
+
+        let snapshot = await runtimeBridge.refreshLLMGatewayTokenPackages()
+        llmGatewayServiceSnapshot = snapshot
+        guard let package = snapshot.tokenPackages.first(where: { $0.id == packageID }) else {
+            llmGatewayTokenPurchaseError = "LLM Gateway token package is no longer available."
+            return nil
+        }
+
+        let resourceURLString = package.purchaseURLString ?? "llm-gateway://tokens/\(package.id)"
+        let requirement = package.x402Requirement(resourceURLString: resourceURLString)
+        guard let paymentPayload = await authorizeX402Payment(
+            requirement,
+            reason: "LLM Gateway token purchase for \(package.displayName)"
+        ) else {
+            llmGatewayTokenPurchaseError = "Wallet policy did not authorize the LLM Gateway token purchase."
+            walletPortfolio = runtimeBridge.walletPortfolio
+            runtimeFeatureStates = runtimeBridge.featureStates
+            return nil
+        }
+
+        do {
+            let receipt = try await runtimeBridge.purchaseLLMGatewayTokens(
+                package: package,
+                paymentPayload: paymentPayload
+            )
+            latestLLMGatewayTokenPurchase = receipt
+            llmGatewayServiceSnapshot = runtimeBridge.llmGatewayServiceSnapshot
+            walletPortfolio = runtimeBridge.walletPortfolio
+            runtimeFeatureStates = runtimeBridge.featureStates
+            llmModelOptions = LLMModelRegistry.models(
+                afmSnapshot: afmServiceSnapshot,
+                llmRouterSnapshot: llmRouterServiceSnapshot,
+                llmGatewaySnapshot: llmGatewayServiceSnapshot
+            )
+            normalizeSelectedLLMModelIfNeeded()
+            return receipt
+        } catch {
+            llmGatewayTokenPurchaseError = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func authorizeX402Payment(
+        _ requirement: X402PaymentRequirement,
+        reason: String
+    ) async -> X402PaymentPayload? {
         guard requirement.expiresAt > Date(),
               requirement.amountMinorUnits > 0,
               !requirement.payTo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -149,7 +228,7 @@ final class BrowserViewModel: ObservableObject {
             asset: requirement.asset,
             destination: requirement.payTo,
             memo: requirement.facilitatorURLString,
-            reason: "Hyperactive Web x402 payment for \(requirement.resourceURLString)"
+            reason: reason
         )
         let preview = await runtimeBridge.previewWalletTransfer(transfer)
         guard preview.status == .ready else { return nil }
@@ -158,16 +237,12 @@ final class BrowserViewModel: ObservableObject {
         walletPortfolio = runtimeBridge.walletPortfolio
         runtimeFeatureStates = runtimeBridge.featureStates
         guard receipt.status == .policySigned, let signatureDigest = receipt.signatureDigest else { return nil }
-        let payload = X402PaymentPayload(
+        return X402PaymentPayload(
             requirementHash: requirement.requirementHash,
             walletAccount: receipt.fromAddress,
             transactionReference: receipt.transactionHash,
             signatureReference: "wallet-policy:\(signatureDigest)"
         )
-        guard Self.hyperactiveWebPaymentPolicyAllows(requirement: requirement, payload: payload) else {
-            return nil
-        }
-        return payload
     }
 
     static func hyperactiveWebChainRef(for network: String, portfolio: WalletPortfolioSnapshot) -> String? {

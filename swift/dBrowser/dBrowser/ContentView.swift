@@ -910,6 +910,10 @@ private struct CopilotPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                    if browser.activeLLMModel.providerKind == .llmGateway || !browser.llmGatewayServiceSnapshot.tokenPackages.isEmpty {
+                        LLMGatewayTokenPurchaseSectionView(browser: browser)
+                    }
+
                     LLMConversationTranscriptView(browser: browser)
 
                     TextEditor(text: $draftMessage)
@@ -1272,6 +1276,101 @@ private struct CopilotPanelView: View {
         case .unavailable:
             return "Unavailable: \(recall.decision.reason)"
         }
+    }
+}
+
+private struct LLMGatewayTokenPurchaseSectionView: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    private var packages: [LLMGatewayTokenPackage] {
+        browser.llmGatewayServiceSnapshot.tokenPackages
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Gateway Tokens", systemImage: "ticket")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    Task { await browser.refreshLLMGatewayTokenPackages() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Refresh gateway token packages")
+                .accessibilityIdentifier("llm-gateway-token-refresh")
+            }
+
+            if let message = browser.llmGatewayServiceSnapshot.tokenPurchaseMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if packages.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No token packages")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Configure a gateway token package or connect to a gateway that advertises token packages.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(Array(packages.enumerated()), id: \.element.id) { index, package in
+                    VStack(spacing: 8) {
+                        if index > 0 {
+                            Divider()
+                        }
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(package.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(package.ticketCount) \(package.tokenClass.rawValue) tickets - \(package.amountText) - \(package.network)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let detail = package.detail, !detail.isEmpty {
+                                    Text(detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer()
+                            Button {
+                                Task { await browser.buyLLMGatewayTokens(packageID: package.id) }
+                            } label: {
+                                Label("Buy", systemImage: "cart.badge.plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(browser.isBuyingLLMGatewayTokens || !package.isPurchasable)
+                            .accessibilityIdentifier("llm-gateway-token-buy-\(package.id)")
+                        }
+                    }
+                }
+            }
+
+            if let receipt = browser.latestLLMGatewayTokenPurchase {
+                Label(
+                    "Stored \(receipt.ticketCount) \(receipt.tokenClass.rawValue) tickets from \(receipt.packageID).",
+                    systemImage: "checkmark.seal"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            if let error = browser.llmGatewayTokenPurchaseError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("llm-gateway-token-purchase")
     }
 }
 

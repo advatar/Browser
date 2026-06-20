@@ -303,6 +303,11 @@ protocol RuntimeBridge: AnyObject {
     func refreshStatus() async -> [RuntimeFeatureState]
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
+    func refreshLLMGatewayTokenPackages() async -> LLMGatewayServiceSnapshot
+    func purchaseLLMGatewayTokens(
+        package: LLMGatewayTokenPackage,
+        paymentPayload: X402PaymentPayload
+    ) async throws -> LLMGatewayTokenPurchaseReceipt
     func createAFMExpertTrainingJob(_ request: AFMExpertTrainingRequest) async -> AFMExpertTrainingJob
     func publishAFMExpertTrainingJob(_ id: UUID) async -> AFMExpertTrainingJob?
     func callAFMPeerExpert(_ request: AFMA2ACallRequest) async -> AFMA2ACallResult
@@ -337,6 +342,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var mcpServers: [MCPServerConfiguration]
     @Published private(set) var afmTrainingJobs: [AFMExpertTrainingJob] = []
     @Published private(set) var latestAFMA2ACallResult: AFMA2ACallResult?
+    @Published private(set) var latestLLMGatewayTokenPurchase: LLMGatewayTokenPurchaseReceipt?
 
     private let configuration: RuntimeBridgeConfiguration
     private let explorerCatalog: BlockchainExplorerCatalog = .default
@@ -545,6 +551,43 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         refreshWalletFeatureState()
         refreshAFMTrainingFeatureState()
         return featureStates
+    }
+
+    func refreshLLMGatewayTokenPackages() async -> LLMGatewayServiceSnapshot {
+        let snapshot = await llmGatewayServiceClient.snapshot()
+        llmGatewayServiceSnapshot = snapshot
+        featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: snapshot,
+            chainTrustSnapshot: chainTrustSnapshot,
+            mcpServers: mcpServers
+        )
+        refreshWalletFeatureState()
+        return snapshot
+    }
+
+    func purchaseLLMGatewayTokens(
+        package: LLMGatewayTokenPackage,
+        paymentPayload: X402PaymentPayload
+    ) async throws -> LLMGatewayTokenPurchaseReceipt {
+        let receipt = try await llmGatewayServiceClient.purchaseTokens(
+            package: package,
+            paymentPayload: paymentPayload
+        )
+        latestLLMGatewayTokenPurchase = receipt
+        llmGatewayServiceSnapshot = await llmGatewayServiceClient.snapshot()
+        featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot,
+            chainTrustSnapshot: chainTrustSnapshot,
+            mcpServers: mcpServers
+        )
+        refreshWalletFeatureState()
+        return receipt
     }
 
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution {
