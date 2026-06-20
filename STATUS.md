@@ -21,6 +21,17 @@
 
 ## Active Task
 
+## macOS 27 Siri And System Integration (#153)
+
+Add a macOS 27-gated App Intents layer for deeper Siri, Shortcuts, Spotlight, and Apple Intelligence integration while preserving dBrowser privacy boundaries.
+
+- [x] Keep the existing saved-workflow and research-export intents compatible with the current deployment target.
+- [x] Add macOS 27-gated foreground intents for opening key dBrowser destinations and starting visible Copilot prompts.
+- [x] Add a single main-actor handoff path so intent invocations route into the live browser scene or queue until the scene is ready.
+- [x] Keep sensitive data out of Siri/system entity exposure: no browsing history, bookmarks, wallet state, chain state, memory IDs, or conversations.
+- [x] Add focused Swift tests for gated availability metadata and app-intent handoff behavior.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally, then commit and push scoped changes.
+
 ## LLM Gateway Token Purchase Flow (#152)
 
 Make it easy to buy ZeroK LLM Gateway usage tokens from dBrowser without hand-editing ticket JSON, while keeping wallet/x402 policy receipts and explicit user approval in the loop.

@@ -49,7 +49,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var hyperactiveWeb: HyperactiveWebCoordinator?
 
     /// Most-recently-created view model, used so App Intents can reach the live
-    /// browser to run a saved workflow.
+    /// browser for foreground-only system handoffs.
     static weak var shared: BrowserViewModel?
 
     let runtimeBridge: MobileRuntimeBridge
@@ -129,6 +129,7 @@ final class BrowserViewModel: ObservableObject {
             return await self.authorizeHyperactiveWebPayment(requirement)
         }
         Self.shared = self
+        DBrowserAppIntentHandoffCenter.drainPendingHandoffs(into: self)
     }
 
     /// On-disk retention root for the Hyperactive Web (durable artifacts +
@@ -385,6 +386,34 @@ final class BrowserViewModel: ObservableObject {
 
     func selectPanel(_ panel: BrowserPanel?) {
         selectedPanel = panel
+    }
+
+    @discardableResult
+    func handleSystemHandoff(_ handoff: DBrowserAppIntentHandoff) -> String {
+        switch handoff {
+        case .openDestination(let destination):
+            selectPanel(destination.panel)
+            return "Opened \(destination.title) in dBrowser."
+        case .startCopilotPrompt(let prompt):
+            let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            selectPanel(.copilot)
+            guard !trimmedPrompt.isEmpty else {
+                return "Opened dBrowser Copilot."
+            }
+            if sendLLMMessage(trimmedPrompt) != nil {
+                return "Started Copilot in dBrowser."
+            }
+            return "Could not start Copilot in dBrowser."
+        case .runWorkflow(let id, let title):
+            selectPanel(.copilot)
+            guard copilotWorkflows.contains(where: { $0.id == id && $0.isEnabled }) else {
+                return "“\(title)” is disabled or no longer exists."
+            }
+            if runWorkflow(id) != nil {
+                return "Running “\(title)” in dBrowser."
+            }
+            return "Could not start “\(title)”."
+        }
     }
 
     func closeTab(_ id: UUID) {

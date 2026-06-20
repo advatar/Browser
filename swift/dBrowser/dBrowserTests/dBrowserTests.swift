@@ -7010,6 +7010,63 @@ struct dBrowserTests {
         #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
     }
 
+    @Test func macOS27SystemIntegrationGateKeepsPrivacyBoundary() {
+        #expect(DBrowserMacOS27SystemIntegrationGate.minimumMacOSMajorVersion == 27)
+        #expect(DBrowserMacOS27SystemIntegrationGate.availabilityLabel == "macOS 27+")
+        #expect(DBrowserMacOS27SystemIntegrationGate.privacyBoundary.contains("no history"))
+        #expect(DBrowserMacOS27SystemIntegrationGate.privacyBoundary.contains("wallet state"))
+        #expect(DBrowserMacOS27SystemIntegrationGate.privacyBoundary.contains("conversations"))
+
+        let exposedDestinationIDs = Set(DBrowserSystemDestination.allCases.map(\.rawValue))
+        #expect(!exposedDestinationIDs.contains("history"))
+        #expect(!exposedDestinationIDs.contains("bookmarks"))
+        #expect(DBrowserSystemDestination.wallet.panel == .wallet)
+    }
+
+    @Test func macOS27DestinationHandoffRoutesOnlyFixedPanels() {
+        DBrowserAppIntentHandoffCenter.resetForTesting()
+        let model = makeIsolatedBrowserViewModel()
+
+        let runtimeDialog = model.handleSystemHandoff(.openDestination(.runtime))
+        #expect(runtimeDialog == "Opened Runtime in dBrowser.")
+        #expect(model.selectedPanel == .runtime)
+
+        let browserDialog = model.handleSystemHandoff(.openDestination(.browser))
+        #expect(browserDialog == "Opened Browser in dBrowser.")
+        #expect(model.selectedPanel == nil)
+
+        #expect(!DBrowserSystemDestination.allCases.contains { $0.panel == .history || $0.panel == .bookmarks })
+    }
+
+    @Test func macOS27SiriHandoffQueuesUntilBrowserSceneIsReady() {
+        BrowserViewModel.shared = nil
+        DBrowserAppIntentHandoffCenter.resetForTesting()
+
+        let dialog = DBrowserAppIntentHandoffCenter.routeOrEnqueue(.openDestination(.localLLM))
+        #expect(dialog == "Opening Local LLMs in dBrowser.")
+        #expect(DBrowserAppIntentHandoffCenter.pendingHandoffCountForTesting == 1)
+
+        let model = makeIsolatedBrowserViewModel()
+        #expect(DBrowserAppIntentHandoffCenter.pendingHandoffCountForTesting == 0)
+        #expect(model.selectedPanel == .localLLM)
+    }
+
+    @Test func macOS27SiriCopilotPromptHandoffStartsVisibleRun() {
+        DBrowserAppIntentHandoffCenter.resetForTesting()
+        let model = makeIsolatedBrowserViewModel()
+
+        let dialog = model.handleSystemHandoff(.startCopilotPrompt("  Summarize this page  "))
+
+        #expect(dialog == "Started Copilot in dBrowser.")
+        #expect(model.selectedPanel == .copilot)
+        #expect(model.llmConversation.messages.last?.text == "Summarize this page")
+        guard let runID = model.copilotRuns.first?.id else {
+            Issue.record("Expected visible Copilot run from Siri handoff")
+            return
+        }
+        model.cancelCopilotRun(runID)
+    }
+
     @Test func walletPanelIsPrimarySurface() {
         #expect(BrowserPanel.allCases.contains(.wallet))
         #expect(BrowserPanel.wallet.title == "Wallet & Identity")
