@@ -29,6 +29,7 @@ final class BrowserHistoryService {
     func recording(title: String, urlString: String, into history: [BrowserHistoryEntry]) -> [BrowserHistoryEntry] {
         guard urlString != BrowserURLResolver.homeURLString else { return history }
         guard !PrivateOverlayNetwork.isPrivateOverlayAddress(urlString) else { return history }
+        guard !DecentralizedStorageNetwork.isPrivacyScopedTransferAddress(urlString) else { return history }
         var updated = history
         let previousEntry = updated.first { $0.urlString == urlString }
         updated.removeAll { $0.urlString == urlString }
@@ -55,6 +56,7 @@ final class BrowserHistoryService {
 
     func updatingSummary(from snapshot: PageSnapshot, in history: [BrowserHistoryEntry]) -> [BrowserHistoryEntry] {
         guard !PrivateOverlayNetwork.isPrivateOverlayAddress(snapshot.urlString) else { return history }
+        guard !DecentralizedStorageNetwork.isPrivacyScopedTransferAddress(snapshot.urlString) else { return history }
         guard isIndexable(snapshot.urlString) else { return history }
         guard let index = history.firstIndex(where: { $0.urlString == snapshot.urlString }) else { return history }
         var updated = history
@@ -104,6 +106,7 @@ final class BrowserHistoryService {
 
     func isIndexable(_ urlString: String) -> Bool {
         guard !PrivateOverlayNetwork.isPrivateOverlayAddress(urlString) else { return false }
+        guard !DecentralizedStorageNetwork.isPrivacyScopedTransferAddress(urlString) else { return false }
         guard let host = URL(string: urlString)?.host?.lowercased() else { return true }
         return !excludedDomains.contains(host)
     }

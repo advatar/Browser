@@ -21,6 +21,18 @@
 
 ## Active Task
 
+## BitTorrent And Built-In VPN Client Support (#155)
+
+Add first-class BitTorrent/WebTorrent handling and a built-in VPN client contract so peer-network activity is explicit, privacy-scoped, and surfaced through the runtime without unsafe fallback.
+
+- [x] Create the GitHub issue with scope, privacy constraints, and verification plan.
+- [x] Promote BitTorrent/WebTorrent routing to a privacy-aware local transfer adapter path instead of direct web-seed fallback.
+- [x] Suppress browser history, smart-history indexing, bookmarks, snapshots, and Copilot/OpenMind page context for torrent transfer tabs.
+- [x] Add a built-in VPN client registry/configuration surface covering WireGuard, IKEv2/IPSec, OpenVPN, and custom packet tunnels with explicit entitlement/runtime availability.
+- [x] Surface VPN runtime state and guidance through runtime feature states.
+- [x] Add focused Swift tests for torrent routing, trace-minimized torrent navigation, and VPN client availability/configuration.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally, then commit and push scoped changes.
+
 ## Private Overlay Dark-Web Protocol Support (#154)
 
 Add first-class support for Tor onion services and adjacent private-overlay protocols while minimizing local traces and avoiding unsafe clearnet fallback.

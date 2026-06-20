@@ -38,6 +38,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var walrusAggregatorBaseURL: URL
     var nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration
     var privateOverlayAdapters: PrivateOverlayAdapterConfiguration
+    var vpnClient: BuiltInVPNClientConfiguration
     var remoteRuntimeBaseURL: URL?
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
@@ -62,6 +63,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
         nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = DWebEngineManager.production.adapterConfiguration,
         privateOverlayAdapters: PrivateOverlayAdapterConfiguration = .localDefaults,
+        vpnClient: BuiltInVPNClientConfiguration = .localDefaults,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
@@ -85,6 +87,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.walrusAggregatorBaseURL = walrusAggregatorBaseURL
         self.nativeStorageAdapters = nativeStorageAdapters
         self.privateOverlayAdapters = privateOverlayAdapters
+        self.vpnClient = vpnClient
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
@@ -1430,6 +1433,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 status: configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty
                     ? "Private-overlay adapters disabled"
                     : "Local adapters for Tor, I2P, Hyphanet, ZeroNet, and Lokinet"
+            ),
+            RuntimeFeatureState(
+                feature: .vpnClient,
+                mode: configuration.vpnClient.isRuntimeAvailable ? .native : .unavailable,
+                isAvailable: configuration.vpnClient.isRuntimeAvailable,
+                status: configuration.vpnClient.statusText
             ),
             RuntimeFeatureState(
                 feature: .architectureOverview,

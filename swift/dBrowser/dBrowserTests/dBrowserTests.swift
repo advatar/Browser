@@ -109,6 +109,83 @@ struct dBrowserTests {
         #expect(blocked.message?.contains("clearnet fallback") == true)
     }
 
+    @Test func bittorrentRoutingUsesPrivacyScopedLocalAdapterAndFailsClosed() async {
+        let magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&ws=https%3A%2F%2Fexample.com%2Fbundle.car"
+        let resolvedAddress = BrowserURLResolver.resolve(magnet)
+        guard case .unsupported(let raw, let message) = resolvedAddress else {
+            Issue.record("Expected runtime bridge routing for torrent transfer")
+            return
+        }
+        #expect(raw == magnet)
+        #expect(message.contains("privacy-scoped transfer adapter"))
+
+        let bridge = MobileRuntimeBridge(configuration: RuntimeBridgeConfiguration())
+        let torrent = await bridge.resolve(magnet)
+        let torrentURL = torrent.resolvedURLString.flatMap { URLComponents(string: $0) }
+        let torrentQuery = remoteResolverQueryItems(for: torrent.resolvedURLString)
+
+        #expect(torrent.source == .decentralizedStorageNativeAdapter)
+        #expect(torrent.contentAccess == .nativeAdapter)
+        #expect(torrentURL?.host == "127.0.0.1")
+        #expect(torrentURL?.port == 4889)
+        #expect(torrentURL?.path == "/dweb/bittorrent/native")
+        #expect(torrentQuery["network"] == "bittorrent")
+        #expect(torrentQuery["privacy"] == "ephemeral")
+        #expect(torrentQuery["transfer_mode"] == "peer-network")
+        #expect(torrentQuery["web_seed_policy"] == "adapter-owned")
+        #expect(torrentQuery["uri"] == magnet)
+
+        let disabled = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(
+                nativeStorageAdapters: .disabled,
+                remoteRuntimeBaseURL: RuntimeBridgeConfiguration.exampleRemoteRuntimeBaseURL
+            )
+        )
+        let blocked = await disabled.resolve(magnet)
+        #expect(blocked.source == .decentralizedStorageResolverRequired)
+        #expect(blocked.resolvedURLString == nil)
+        #expect(blocked.message?.contains("local transfer adapter") == true)
+        #expect(blocked.message?.contains("privacy boundary") == true)
+    }
+
+    @Test func builtInVPNClientProfilesCoverTunnelProtocols() {
+        let config = BuiltInVPNClientConfiguration.localDefaults
+        #expect(config.supportedProtocols == BuiltInVPNProtocol.allCases)
+        #expect(Set(config.profiles.map(\.protocolKind)) == Set(BuiltInVPNProtocol.allCases))
+        #expect(config.profile(for: .wireGuard)?.title == "WireGuard tunnel")
+        #expect(BuiltInVPNProtocol.wireGuard.requiresPacketTunnelProvider)
+        #expect(!BuiltInVPNProtocol.ikev2IPSec.requiresPacketTunnelProvider)
+        #expect(config.availability == .entitlementRequired)
+        #expect(config.statusText.contains("NetworkExtension entitlement required"))
+
+        var entitled = config
+        entitled.networkExtensionEntitled = true
+        #expect(entitled.availability == .available)
+        #expect(entitled.isRuntimeAvailable)
+        #expect(entitled.statusText.contains("WireGuard"))
+
+        #expect(BuiltInVPNClientConfiguration.disabled.availability == .disabled)
+    }
+
+    @MainActor
+    @Test func runtimeBridgeSurfacesBuiltInVPNClientState() {
+        let bridge = MobileRuntimeBridge(configuration: RuntimeBridgeConfiguration())
+        let defaultVPNState = bridge.featureStates.first { $0.feature == .vpnClient }
+        #expect(defaultVPNState?.mode == .unavailable)
+        #expect(defaultVPNState?.isAvailable == false)
+        #expect(defaultVPNState?.status.contains("NetworkExtension entitlement required") == true)
+
+        var vpnClient = BuiltInVPNClientConfiguration.localDefaults
+        vpnClient.networkExtensionEntitled = true
+        let entitledBridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(vpnClient: vpnClient)
+        )
+        let entitledState = entitledBridge.featureStates.first { $0.feature == .vpnClient }
+        #expect(entitledState?.mode == .native)
+        #expect(entitledState?.isAvailable == true)
+        #expect(entitledState?.status.contains("Built-in VPN ready") == true)
+    }
+
     @Test func decentralizedStorageRegistryCoversAppDistributionNetworks() {
         let requiredNetworkIDs = [
             "ipfs",
@@ -283,6 +360,7 @@ struct dBrowserTests {
             decentralizedGatewayHost: "dweb.link",
             walrusAggregatorBaseURL: URL(string: "https://aggregator.walrus-mainnet.walrus.space")!
         )
+        let magnetQuery = remoteResolverQueryItems(for: magnetResolution?.url?.absoluteString)
 
         #expect(filecoinResolution?.state == .loadableGateway)
         #expect(filecoinResolution?.url?.absoluteString == "https://dweb.link/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/app.json")
@@ -292,8 +370,13 @@ struct dBrowserTests {
         #expect(irohResolution?.state == .localResolverRequired)
         #expect(irohResolution?.isLoadable == false)
         #expect(irohResolution?.requirement?.resolverName.contains("Iroh") == true)
-        #expect(magnetResolution?.state == .loadableGateway)
-        #expect(magnetResolution?.url?.absoluteString == "https://example.com/bundle.car")
+        #expect(magnetResolution?.state == .nativeAdapter)
+        #expect(magnetResolution?.url?.host == "127.0.0.1")
+        #expect(magnetResolution?.url?.path == "/dweb/bittorrent/native")
+        #expect(magnetQuery["privacy"] == "ephemeral")
+        #expect(magnetQuery["transfer_mode"] == "peer-network")
+        #expect(magnetQuery["web_seed_policy"] == "adapter-owned")
+        #expect(magnetQuery["uri"] == magnetInput)
     }
 
     @Test func decentralizedStorageNativeAdaptersCoverResolverBackedProtocols() {
@@ -1883,7 +1966,11 @@ struct dBrowserTests {
                 #expect(URL(string: resolution.resolvedURLString ?? "")?.path == expectedNativeAdapterPath(for: network))
                 #expect(resolution.isContentLoadable)
                 #expect(resolution.contentAccess == .nativeAdapter)
-                #expect(resolution.message?.contains(network.adapter.handlerID) == true)
+                if network.isPrivacyScopedTransfer {
+                    #expect(resolution.message?.contains("privacy-scoped transfer") == true)
+                } else {
+                    #expect(resolution.message?.contains(network.adapter.handlerID) == true)
+                }
             }
         }
     }
@@ -1905,7 +1992,6 @@ struct dBrowserTests {
             "storj",
             "tahoe-lafs",
             "autonomi",
-            "bittorrent",
             "ceramic",
             "orbitdb",
             "radicle"
@@ -5716,6 +5802,82 @@ struct dBrowserTests {
         #expect(model.requestPageSnapshot() == nil)
 
         let runID = model.sendLLMMessage("Summarize privately")
+        #expect(model.llmConversation.messages.last?.pageURLString == nil)
+        #expect(model.llmConversation.messages.last?.snapshotAttachment == nil)
+        #expect(model.copilotRuns.first?.targetURLString == nil)
+        if let runID {
+            model.cancelCopilotRun(runID)
+        }
+    }
+
+    @MainActor
+    @Test func torrentNavigationUsesLocalTransferAdapterAndSkipsLocalTraces() async {
+        let model = makeIsolatedBrowserViewModel()
+        let magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&ws=https%3A%2F%2Fexample.com%2Fbundle.car"
+
+        model.navigate(magnet)
+
+        let resolved = await waitForActiveLoadURL(in: model, containing: "/dweb/bittorrent/native")
+        guard resolved, let tab = model.activeTab, let loadURLString = tab.loadURLString else {
+            Issue.record("Expected torrent transfer tab to resolve to a local adapter URL")
+            return
+        }
+        let query = remoteResolverQueryItems(for: loadURLString)
+
+        #expect(tab.isTorrentTransfer)
+        #expect(tab.isTraceMinimized)
+        #expect(tab.torrentTransferNetworkID == "bittorrent")
+        #expect(tab.urlString == magnet)
+        #expect(loadURLString.contains("127.0.0.1:4889"))
+        #expect(query["privacy"] == "ephemeral")
+        #expect(query["transfer_mode"] == "peer-network")
+        #expect(query["web_seed_policy"] == "adapter-owned")
+        #expect(model.addressText == magnet)
+        #expect(model.history.isEmpty)
+
+        model.addActivePageBookmark()
+        #expect(!model.bookmarks.contains { $0.urlString == magnet })
+
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: tab.id,
+                urlString: loadURLString,
+                title: "Torrent transfer",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false
+            )
+        )
+        #expect(model.history.isEmpty)
+        #expect(model.activeTab?.urlString == magnet)
+
+        let snapshot = PageSnapshot(
+            urlString: loadURLString,
+            title: "Torrent transfer",
+            visibleText: "torrent transfer view",
+            headings: [],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 0
+        )
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: tab.id,
+                status: .success,
+                message: "Snapshot complete",
+                pageSnapshot: snapshot
+            )
+        )
+
+        #expect(model.latestPageSnapshot == nil)
+        #expect(model.automationResults.first?.pageSnapshot == nil)
+        #expect(model.requestPageSnapshot() == nil)
+
+        let runID = model.sendLLMMessage("Summarize this transfer")
         #expect(model.llmConversation.messages.last?.pageURLString == nil)
         #expect(model.llmConversation.messages.last?.snapshotAttachment == nil)
         #expect(model.copilotRuns.first?.targetURLString == nil)

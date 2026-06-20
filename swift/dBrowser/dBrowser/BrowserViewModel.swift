@@ -459,6 +459,8 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].isLoading = false
             tabs[index].isPrivateOverlay = false
             tabs[index].privateOverlayNetworkID = nil
+            tabs[index].isTorrentTransfer = false
+            tabs[index].torrentTransferNetworkID = nil
             addressText = BrowserURLResolver.homeURLString
         case .web(let url):
             let title = titleForURL(url)
@@ -469,6 +471,8 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].isLoading = true
             tabs[index].isPrivateOverlay = false
             tabs[index].privateOverlayNetworkID = nil
+            tabs[index].isTorrentTransfer = false
+            tabs[index].torrentTransferNetworkID = nil
             addressText = url.absoluteString
             recordHistory(title: title, urlString: url.absoluteString)
             probeHyperactiveWeb(url)
@@ -759,7 +763,7 @@ final class BrowserViewModel: ObservableObject {
     func addActivePageBookmark() {
         guard let tab = activeTab else { return }
         guard tab.urlString != BrowserURLResolver.homeURLString else { return }
-        guard !tab.isPrivateOverlay else { return }
+        guard !tab.isTraceMinimized else { return }
         guard bookmarks.contains(where: { $0.urlString == tab.urlString }) == false else { return }
         bookmarks.insert(BrowserBookmark(title: tab.title, urlString: tab.urlString), at: 0)
     }
@@ -790,7 +794,7 @@ final class BrowserViewModel: ObservableObject {
 
     @discardableResult
     func requestPageSnapshot(_ request: PageSnapshotRequest = PageSnapshotRequest()) -> BrowserAutomationRequest? {
-        guard activeTab?.isPrivateOverlay != true else { return nil }
+        guard activeTab?.isTraceMinimized != true else { return nil }
         return issueAutomationRequest(.pageSnapshot(request))
     }
 
@@ -819,9 +823,9 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func applyAutomationResult(_ result: BrowserAutomationResult) {
-        let isPrivateOverlayResult = tabs.first(where: { $0.id == result.tabID })?.isPrivateOverlay == true
+        let isTraceMinimizedResult = tabs.first(where: { $0.id == result.tabID })?.isTraceMinimized == true
         var storedResult = result
-        if isPrivateOverlayResult {
+        if isTraceMinimizedResult {
             storedResult.domQuery = nil
             storedResult.pageSnapshot = nil
             latestDOMQueryResult = nil
@@ -865,12 +869,12 @@ final class BrowserViewModel: ObservableObject {
         guard !prompt.isEmpty else { return nil }
 
         let model = activeLLMModel
-        let isPrivateOverlay = tab.isPrivateOverlay
-        let snapshot = !isPrivateOverlay && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let isTraceMinimized = tab.isTraceMinimized
+        let snapshot = !isTraceMinimized && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
         let userMessage = LLMConversationMessage(
             role: .user,
             text: prompt,
-            pageURLString: isPrivateOverlay ? nil : tab.urlString,
+            pageURLString: isTraceMinimized ? nil : tab.urlString,
             snapshotAttachment: snapshot.map(LLMPageSnapshotAttachment.init(snapshot:))
         )
         llmConversation.appendMessage(userMessage)
@@ -941,17 +945,18 @@ final class BrowserViewModel: ObservableObject {
     ) -> UUID? {
         guard let tab = activeTab else { return nil }
         let runID = UUID()
-        let isPrivateOverlay = tab.isPrivateOverlay
-        let targetURLString = isPrivateOverlay ? nil : tab.urlString
-        let snapshot = !isPrivateOverlay && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let isTraceMinimized = tab.isTraceMinimized
+        let targetURLString = isTraceMinimized ? nil : tab.urlString
+        let snapshot = !isTraceMinimized && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let traceMinimizedDescription = tab.isTorrentTransfer ? "a torrent transfer tab" : "a private-overlay tab"
         let preferredPackID = selectedAFMPackID
         let usage = CopilotCreditUsage.estimate(prompt: renderedContext?.prompt ?? prompt, snapshot: snapshot, provider: model.providerKind.rawValue)
         var events = [
-            CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(isPrivateOverlay ? "a private-overlay tab" : tab.displayURL) with \(model.displayName).")
+            CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(isTraceMinimized ? traceMinimizedDescription : tab.displayURL) with \(model.displayName).")
         ]
-        if isPrivateOverlay {
+        if isTraceMinimized {
             events.append(
-                CopilotRunEvent(kind: .pageSnapshotRequested, message: "Skipped page snapshot and page URL context for a private-overlay tab.")
+                CopilotRunEvent(kind: .pageSnapshotRequested, message: "Skipped page snapshot and page URL context for \(traceMinimizedDescription).")
             )
         } else {
             events.append(
@@ -990,7 +995,7 @@ final class BrowserViewModel: ObservableObject {
             assert(conversationID == llmConversation.id)
             persistLLMConversation()
         }
-        if !isPrivateOverlay {
+        if !isTraceMinimized {
             requestPageSnapshot()
         }
 
@@ -1155,7 +1160,7 @@ final class BrowserViewModel: ObservableObject {
                 source: OpenMindActionSource(
                     product: "dBrowser.swift",
                     runID: run?.id,
-                    pageURLString: run?.targetURLString ?? (activeTab?.isPrivateOverlay == true ? nil : activeTab?.urlString),
+                    pageURLString: run?.targetURLString ?? (activeTab?.isTraceMinimized == true ? nil : activeTab?.urlString),
                     snapshotCommitment: OpenMindMemoryClient.snapshotCommitment(for: snapshot),
                     prompt: run?.prompt
                 ),
@@ -1298,20 +1303,20 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].title = title
         }
         if let urlString = update.urlString, !urlString.isEmpty {
-            if tabs[index].isPrivateOverlay {
+            if tabs[index].isTraceMinimized {
                 tabs[index].loadURLString = urlString
             } else {
                 tabs[index].urlString = urlString
             }
             if update.tabID == activeTabID {
-                addressText = tabs[index].isPrivateOverlay ? tabs[index].urlString : urlString
+                addressText = tabs[index].isTraceMinimized ? tabs[index].urlString : urlString
             }
         }
         tabs[index].isLoading = update.isLoading
         tabs[index].canGoBack = update.canGoBack
         tabs[index].canGoForward = update.canGoForward
 
-        if !tabs[index].isPrivateOverlay, !update.isLoading, let urlString = update.urlString, !urlString.isEmpty {
+        if !tabs[index].isTraceMinimized, !update.isLoading, let urlString = update.urlString, !urlString.isEmpty {
             recordHistory(title: tabs[index].title, urlString: urlString)
         }
     }
@@ -1336,18 +1341,25 @@ final class BrowserViewModel: ObservableObject {
         privateOverlayNetwork: PrivateOverlayNetwork? = nil
     ) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
-        tabs[index].title = privateOverlayNetwork?.title ?? "Runtime bridge"
+        let torrentTransferNetwork = DecentralizedStorageNetwork.privacyScopedTransferProfile(forInput: raw)
+        tabs[index].title = privateOverlayNetwork?.title ?? torrentTransferNetwork?.title ?? "Runtime bridge"
         tabs[index].urlString = raw
         tabs[index].loadURLString = nil
-        tabs[index].mobileNotice = privateOverlayNetwork == nil
-            ? "Resolving through the iOS runtime bridge."
-            : "Resolving through the local private-overlay adapter."
+        if privateOverlayNetwork != nil {
+            tabs[index].mobileNotice = "Resolving through the local private-overlay adapter."
+        } else if torrentTransferNetwork != nil {
+            tabs[index].mobileNotice = "Resolving through the local torrent transfer adapter."
+        } else {
+            tabs[index].mobileNotice = "Resolving through the iOS runtime bridge."
+        }
         tabs[index].isLoading = true
         tabs[index].canGoBack = false
         tabs[index].canGoForward = false
         tabs[index].isPrivateOverlay = privateOverlayNetwork != nil
         tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
-        if privateOverlayNetwork != nil {
+        tabs[index].isTorrentTransfer = torrentTransferNetwork != nil
+        tabs[index].torrentTransferNetworkID = torrentTransferNetwork?.id
+        if privateOverlayNetwork != nil || torrentTransferNetwork != nil {
             latestDOMQueryResult = nil
             latestPageSnapshot = nil
         }
@@ -1367,11 +1379,15 @@ final class BrowserViewModel: ObservableObject {
     ) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
         let privateOverlayNetwork = PrivateOverlayNetwork.profile(forInput: resolution.originalInput)
+        let torrentTransferNetwork = DecentralizedStorageNetwork.privacyScopedTransferProfile(forInput: resolution.originalInput)
         let isPrivateOverlayResolution = resolution.source == .privateOverlayLocalAdapter
             || resolution.source == .privateOverlayAdapterRequired
             || privateOverlayNetwork != nil
+        let isTorrentTransferResolution = torrentTransferNetwork != nil
+            && (resolution.source == .decentralizedStorageNativeAdapter
+                || resolution.source == .decentralizedStorageResolverRequired)
         guard let resolvedURLString = resolution.resolvedURLString, let url = URL(string: resolvedURLString) else {
-            tabs[index].title = privateOverlayNetwork?.title ?? "Mobile runtime"
+            tabs[index].title = privateOverlayNetwork?.title ?? torrentTransferNetwork?.title ?? "Mobile runtime"
             tabs[index].urlString = resolution.originalInput
             tabs[index].loadURLString = nil
             tabs[index].mobileNotice = resolution.message ?? fallbackMessage
@@ -1380,6 +1396,8 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].canGoForward = false
             tabs[index].isPrivateOverlay = isPrivateOverlayResolution
             tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
+            tabs[index].isTorrentTransfer = isTorrentTransferResolution
+            tabs[index].torrentTransferNetworkID = torrentTransferNetwork?.id
             if tabID == activeTabID {
                 addressText = resolution.originalInput
             }
@@ -1394,6 +1412,24 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].isLoading = true
             tabs[index].isPrivateOverlay = true
             tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
+            tabs[index].isTorrentTransfer = false
+            tabs[index].torrentTransferNetworkID = nil
+            if tabID == activeTabID {
+                addressText = resolution.originalInput
+            }
+            return
+        }
+
+        if isTorrentTransferResolution {
+            tabs[index].title = torrentTransferNetwork?.title ?? "Torrent transfer"
+            tabs[index].urlString = resolution.originalInput
+            tabs[index].loadURLString = resolvedURLString
+            tabs[index].mobileNotice = nil
+            tabs[index].isLoading = true
+            tabs[index].isPrivateOverlay = false
+            tabs[index].privateOverlayNetworkID = nil
+            tabs[index].isTorrentTransfer = true
+            tabs[index].torrentTransferNetworkID = torrentTransferNetwork?.id
             if tabID == activeTabID {
                 addressText = resolution.originalInput
             }
@@ -1408,6 +1444,8 @@ final class BrowserViewModel: ObservableObject {
         tabs[index].isLoading = true
         tabs[index].isPrivateOverlay = false
         tabs[index].privateOverlayNetworkID = nil
+        tabs[index].isTorrentTransfer = false
+        tabs[index].torrentTransferNetworkID = nil
         if tabID == activeTabID {
             addressText = resolvedURLString
         }

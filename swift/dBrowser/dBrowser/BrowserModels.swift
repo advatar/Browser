@@ -1107,6 +1107,8 @@ struct BrowserTab: Identifiable, Equatable {
     var mobileNotice: String?
     var isPrivateOverlay: Bool
     var privateOverlayNetworkID: String?
+    var isTorrentTransfer: Bool
+    var torrentTransferNetworkID: String?
 
     init(
         id: UUID = UUID(),
@@ -1118,7 +1120,9 @@ struct BrowserTab: Identifiable, Equatable {
         canGoForward: Bool = false,
         mobileNotice: String? = nil,
         isPrivateOverlay: Bool = false,
-        privateOverlayNetworkID: String? = nil
+        privateOverlayNetworkID: String? = nil,
+        isTorrentTransfer: Bool = false,
+        torrentTransferNetworkID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -1130,6 +1134,8 @@ struct BrowserTab: Identifiable, Equatable {
         self.mobileNotice = mobileNotice
         self.isPrivateOverlay = isPrivateOverlay
         self.privateOverlayNetworkID = privateOverlayNetworkID
+        self.isTorrentTransfer = isTorrentTransfer
+        self.torrentTransferNetworkID = torrentTransferNetworkID
     }
 
     var loadableURL: URL? {
@@ -1137,6 +1143,10 @@ struct BrowserTab: Identifiable, Equatable {
         let targetURLString = loadURLString ?? urlString
         guard targetURLString != BrowserURLResolver.homeURLString else { return nil }
         return URL(string: targetURLString)
+    }
+
+    var isTraceMinimized: Bool {
+        isPrivateOverlay || isTorrentTransfer
     }
 
     var displayURL: String {
@@ -1519,6 +1529,10 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         schemes.first ?? id
     }
 
+    var isPrivacyScopedTransfer: Bool {
+        id == "bittorrent"
+    }
+
     static let supported: [DecentralizedStorageNetwork] = [
         DecentralizedStorageNetwork(
             id: "ipfs",
@@ -1767,6 +1781,34 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         }
     }
 
+    static func profile(forInput rawInput: String) -> DecentralizedStorageNetwork? {
+        let input = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: input), let scheme = url.scheme?.lowercased() else {
+            return nil
+        }
+        return profile(forScheme: scheme)
+    }
+
+    static func privacyScopedTransferProfile(forInput rawInput: String) -> DecentralizedStorageNetwork? {
+        guard let profile = profile(forInput: rawInput), profile.isPrivacyScopedTransfer else {
+            return nil
+        }
+        return profile
+    }
+
+    static func isPrivacyScopedTransferAddress(_ rawInput: String) -> Bool {
+        privacyScopedTransferProfile(forInput: rawInput) != nil || isPrivacyScopedTransferAdapterURL(rawInput)
+    }
+
+    static func isPrivacyScopedTransferAdapterURL(_ rawInput: String) -> Bool {
+        guard let url = URL(string: rawInput),
+              let host = url.host?.lowercased(),
+              host == "127.0.0.1" || host == "localhost" else {
+            return false
+        }
+        return url.path.contains("/dweb/bittorrent/")
+    }
+
     func gatewayURL(for url: URL) -> URL? {
         guard let locator = Self.locatorAndPath(from: url) else {
             return nil
@@ -1801,6 +1843,18 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
     ) -> DecentralizedStorageContentResolution {
         let locator = adapterLocator(for: url, originalInput: originalInput)
 
+        if isPrivacyScopedTransfer,
+           let endpoint = nativeAdapters.endpoint(for: id),
+           let resolvedURL = nativeAdapterURL(for: originalInput, url: url, endpoint: endpoint) {
+            return DecentralizedStorageContentResolution(
+                state: .nativeAdapter,
+                url: resolvedURL,
+                locator: locator,
+                message: "Routed \(title) URI through \(endpoint.displayName) as a privacy-scoped transfer. Trust boundary: \(endpoint.trustBoundary)",
+                requirement: nil
+            )
+        }
+
         if let resolvedURL = gatewayURL(for: url) {
             return DecentralizedStorageContentResolution(
                 state: .loadableGateway,
@@ -1811,7 +1865,8 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             )
         }
 
-        if let resolvedURL = opportunisticContentGatewayURL(
+        if !isPrivacyScopedTransfer,
+           let resolvedURL = opportunisticContentGatewayURL(
             for: url,
             decentralizedGatewayHost: decentralizedGatewayHost,
             walrusAggregatorBaseURL: walrusAggregatorBaseURL
@@ -1825,7 +1880,8 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             )
         }
 
-        if let endpoint = nativeAdapters.endpoint(for: id),
+        if !isPrivacyScopedTransfer,
+           let endpoint = nativeAdapters.endpoint(for: id),
            let resolvedURL = nativeAdapterURL(for: originalInput, url: url, endpoint: endpoint) {
             return DecentralizedStorageContentResolution(
                 state: .nativeAdapter,
@@ -1836,7 +1892,8 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
             )
         }
 
-        if let remoteRuntimeBaseURL,
+        if !isPrivacyScopedTransfer,
+           let remoteRuntimeBaseURL,
            let resolvedURL = remoteRuntimeURL(for: originalInput, url: url, baseURL: remoteRuntimeBaseURL) {
             return DecentralizedStorageContentResolution(
                 state: .remoteRuntime,
@@ -1911,6 +1968,11 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         queryItems.append(URLQueryItem(name: "locator_kind", value: adapter.locatorKind))
         queryItems.append(URLQueryItem(name: "locator", value: adapterLocator(for: url, originalInput: originalInput)))
         queryItems.append(URLQueryItem(name: "credential_scoped", value: endpoint.requiresCredentialScope ? "true" : "false"))
+        if isPrivacyScopedTransfer {
+            queryItems.append(URLQueryItem(name: "privacy", value: "ephemeral"))
+            queryItems.append(URLQueryItem(name: "transfer_mode", value: "peer-network"))
+            queryItems.append(URLQueryItem(name: "web_seed_policy", value: "adapter-owned"))
+        }
         if let issueNumber = adapter.issueNumber {
             queryItems.append(URLQueryItem(name: "native_issue", value: "\(issueNumber)"))
         }
@@ -2081,8 +2143,8 @@ struct DecentralizedStorageNetwork: Identifiable, Equatable {
         case "bittorrent":
             return DecentralizedStorageResolverRequirement(
                 resolverName: "a BitTorrent/WebTorrent engine",
-                reason: "Magnet links without HTTP web seeds need tracker/DHT or WebRTC peer discovery plus infohash verification.",
-                configurationHint: "a native torrent engine, WebTorrent runtime, or remote storage resolver",
+                reason: "Torrent locators require a local transfer adapter so tracker, DHT, WebRTC, web-seed, and peer-discovery behavior stays inside a user-visible privacy boundary.",
+                configurationHint: "the built-in local torrent transfer adapter",
                 issueNumber: adapter.issueNumber
             )
         case "ceramic":
@@ -2154,6 +2216,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case tabs
     case decentralizedProtocols
     case privateOverlayProtocols
+    case vpnClient
     case architectureOverview
     case chainTrust
     case mcpServers
@@ -2173,6 +2236,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "Tabs and history"
         case .decentralizedProtocols: "DWeb URI resolution"
         case .privateOverlayProtocols: "Private overlays"
+        case .vpnClient: "Built-in VPN"
         case .architectureOverview: "Architecture"
         case .chainTrust: "Chain trust"
         case .mcpServers: "MCP servers"
@@ -2192,6 +2256,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Native/local adapters"
         case .privateOverlayProtocols: "Local privacy adapters"
+        case .vpnClient: "NetworkExtension client"
         case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .chainTrust: "Gateway/RPC fallback"
         case .mcpServers: "HTTP, WebSocket, STDIO"
@@ -2211,6 +2276,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .tabs: "rectangle.on.rectangle"
         case .decentralizedProtocols: "link"
         case .privateOverlayProtocols: "eye.slash"
+        case .vpnClient: "shield.lefthalf.filled"
         case .architectureOverview: "square.stack.3d.up"
         case .chainTrust: "checkmark.shield"
         case .mcpServers: "network"
@@ -2253,12 +2319,13 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .decentralizedProtocols:
             RuntimeFeatureExplanation(
                 overview: "Recognizes decentralized web, app distribution, and storage URIs before search fallback, including IPFS, IPNS, ENS, Swarm, Arweave, Filecoin, Walrus, Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle.",
-                bridgeBehavior: "Today the iOS bridge resolves to content-loadable URLs for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, Arweave through arweave.net, Filecoin data CIDs through the IPFS-compatible gateway path, Walrus blob IDs through the configured Walrus aggregator, and magnet links that include HTTP web seeds. Other Filecoin locators plus Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent without web seeds, Ceramic, OrbitDB, and Radicle route through protocol-specific local native adapter endpoints before any configured remote resolver is considered. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
+                bridgeBehavior: "Today the iOS bridge resolves to content-loadable URLs for IPFS/IPNS through dweb.link, ENS through .limo, Swarm through gateway.ethswarm.org, Arweave through arweave.net, Filecoin data CIDs through the IPFS-compatible gateway path, and Walrus blob IDs through the configured Walrus aggregator. Other Filecoin locators plus Iroh, Hypercore, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle route through protocol-specific local native adapter endpoints before any configured remote resolver is considered. BitTorrent/WebTorrent is privacy-scoped and does not use direct web-seed or remote resolver fallback by default. This preserves the embedded light-client contract for chain-backed state: Ethereum and Substrate/Polkadot resolution must graduate to local verification instead of trusting centralized RPC endpoints.",
                 detailPoints: [
                     "ipfs:// and ipns:// inputs are converted into HTTPS gateway paths before WKWebView loads them.",
-                    "bzz://, swarm://, ar://, arweave://, Filecoin data-CID, Walrus blob-ID, and HTTP-web-seeded magnet inputs can resolve through content-loadable gateway adapters while keeping their original decentralized source label.",
+                    "bzz://, swarm://, ar://, arweave://, Filecoin data-CID, and Walrus blob-ID inputs can resolve through content-loadable gateway adapters while keeping their original decentralized source label.",
+                    "magnet:, bittorrent:, and webtorrent: inputs are treated as peer-network transfer locators and route through the local torrent adapter with ephemeral privacy metadata.",
                     "Protocols that require peer discovery, user credentials, private capabilities, or daemon state route to local native adapter endpoints with the original URI, network id, scheme, adapter id, locator, native issue, credential-scope flag, and resolution stage preserved for auditability.",
-                    "If a local native adapter endpoint is disabled and a remote storage resolver base URL is explicitly configured, the same protocol metadata is handed to that configured resolver as an opt-in fallback.",
+                    "If a local native adapter endpoint is disabled and a remote storage resolver base URL is explicitly configured, the same protocol metadata is handed to that configured resolver as an opt-in fallback, except privacy-scoped torrent transfers fail closed.",
                     "Each adapter records the native verification target, such as CAR roots, blob hashes, signed feeds, encrypted object checksums, Tahoe capabilities, infohashes, DID commits, operation logs, or signed repository refs.",
                     "ENS-style names are intercepted before the generic HTTPS fallback so they can use decentralized resolution rules.",
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
@@ -2275,6 +2342,17 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "The WebView loads app-local adapter URLs while the address bar keeps the original private-overlay locator visible to the user.",
                     "If the matching local adapter is disabled, navigation fails closed with a runtime notice instead of trying clearnet fallback.",
                     "Copilot page snapshots and OpenMind page context are omitted by default for private-overlay tabs."
+                ]
+            )
+        case .vpnClient:
+            RuntimeFeatureExplanation(
+                overview: "Defines dBrowser's built-in VPN client contract for WireGuard, IKEv2/IPSec, OpenVPN, and custom packet tunnels.",
+                bridgeBehavior: "The runtime exposes configured VPN profiles, local controller state, and NetworkExtension entitlement availability before the app presents tunnel actions.",
+                detailPoints: [
+                    "WireGuard, OpenVPN, and custom providers are modeled as packet-tunnel profiles so tunnel keys and configs stay outside page context.",
+                    "IKEv2/IPSec is modeled through the system NetworkExtension VPN profile path.",
+                    "If the NetworkExtension entitlement or a usable profile is missing, the client reports unavailable instead of pretending a tunnel can start.",
+                    "VPN routing is a transport boundary and does not guarantee anonymity; private-overlay and torrent tabs still keep their own local trace-minimization rules."
                 ]
             )
         case .architectureOverview:
@@ -2441,6 +2519,12 @@ enum BrowserURLResolver {
                 )
             default:
                 if let profile = DecentralizedStorageNetwork.profile(forScheme: scheme) {
+                    if profile.isPrivacyScopedTransfer {
+                        return .unsupported(
+                            raw: input,
+                            message: "The iOS runtime bridge will route this \(profile.title) URI through the local privacy-scoped transfer adapter."
+                        )
+                    }
                     return .unsupported(
                         raw: input,
                         message: "The iOS runtime bridge will resolve this \(profile.title) URI."
