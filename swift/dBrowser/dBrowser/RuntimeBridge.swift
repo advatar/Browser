@@ -37,6 +37,7 @@ struct RuntimeBridgeConfiguration: Equatable {
     var ensGatewaySuffix: String
     var walrusAggregatorBaseURL: URL
     var nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration
+    var privateOverlayAdapters: PrivateOverlayAdapterConfiguration
     var remoteRuntimeBaseURL: URL?
     var afmServices: AFMServiceEndpointConfiguration
     var openMindMemory: OpenMindMemoryEndpointConfiguration
@@ -60,6 +61,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         ensGatewaySuffix: String = "limo",
         walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
         nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = DWebEngineManager.production.adapterConfiguration,
+        privateOverlayAdapters: PrivateOverlayAdapterConfiguration = .localDefaults,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
         openMindMemory: OpenMindMemoryEndpointConfiguration = .disabled,
@@ -82,6 +84,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         self.ensGatewaySuffix = ensGatewaySuffix
         self.walrusAggregatorBaseURL = walrusAggregatorBaseURL
         self.nativeStorageAdapters = nativeStorageAdapters
+        self.privateOverlayAdapters = privateOverlayAdapters
         self.remoteRuntimeBaseURL = remoteRuntimeBaseURL
         self.afmServices = afmServices
         self.openMindMemory = openMindMemory
@@ -110,6 +113,8 @@ enum RuntimeResolutionSource: String, Equatable {
     case decentralizedStorageGateway
     case decentralizedStorageNativeAdapter
     case decentralizedStorageResolverRequired
+    case privateOverlayLocalAdapter
+    case privateOverlayAdapterRequired
     case remoteRuntime
     case unsupported
 }
@@ -601,6 +606,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             )
         }
 
+        if let network = PrivateOverlayNetwork.profile(forInput: input) {
+            return privateOverlayResolution(network: network, originalInput: input)
+        }
+
         if let url = URL(string: input), let scheme = url.scheme?.lowercased() {
             switch scheme {
             case "http", "https":
@@ -628,6 +637,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     message: "No iOS runtime bridge is registered for \(scheme): URI addresses."
                 )
             }
+        }
+
+        if let network = PrivateOverlayNetwork.profile(forInput: input) {
+            return privateOverlayResolution(network: network, originalInput: input)
         }
 
         if Self.isDecentralizedName(input), let resolvedURL = ensGatewayURL(name: input) {
@@ -1411,6 +1424,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     : "Native/local storage adapters"
             ),
             RuntimeFeatureState(
+                feature: .privateOverlayProtocols,
+                mode: configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty ? .unavailable : .local,
+                isAvailable: !configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty,
+                status: configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty
+                    ? "Private-overlay adapters disabled"
+                    : "Local adapters for Tor, I2P, Hyphanet, ZeroNet, and Lokinet"
+            ),
+            RuntimeFeatureState(
                 feature: .architectureOverview,
                 mode: .gateway,
                 isAvailable: true,
@@ -1496,6 +1517,38 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             resolvedURLString: resolvedURL.absoluteString,
             source: namespace == "ipfs" ? .ipfsGateway : .ipnsGateway,
             message: "Resolved \(namespace.uppercased()) through the iOS gateway bridge."
+        )
+    }
+
+    private func privateOverlayResolution(
+        network: PrivateOverlayNetwork,
+        originalInput: String
+    ) -> RuntimeBridgeResolution {
+        let canonicalInput = network.canonicalURI(for: originalInput)
+        guard let endpoint = configuration.privateOverlayAdapters.endpoint(for: network.id) else {
+            return RuntimeBridgeResolution(
+                originalInput: canonicalInput,
+                resolvedURLString: nil,
+                source: .privateOverlayAdapterRequired,
+                message: "\(network.title) requires the local \(network.id) private-overlay adapter. dBrowser will not search, resolve DNS, or use clearnet fallback for this address.",
+                isContentLoadable: false
+            )
+        }
+        guard let adapterURL = network.localAdapterURL(for: canonicalInput, endpoint: endpoint) else {
+            return RuntimeBridgeResolution(
+                originalInput: canonicalInput,
+                resolvedURLString: nil,
+                source: .privateOverlayAdapterRequired,
+                message: "\(endpoint.displayName) could not build a local adapter URL for this private-overlay address.",
+                isContentLoadable: false
+            )
+        }
+
+        return RuntimeBridgeResolution(
+            originalInput: canonicalInput,
+            resolvedURLString: adapterURL.absoluteString,
+            source: .privateOverlayLocalAdapter,
+            message: "Routing \(network.title) through \(endpoint.displayName). dBrowser will not record this tab in history or smart history."
         )
     }
 

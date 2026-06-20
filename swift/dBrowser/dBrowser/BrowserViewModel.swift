@@ -454,18 +454,26 @@ final class BrowserViewModel: ObservableObject {
         case .home:
             tabs[index].title = "Home"
             tabs[index].urlString = BrowserURLResolver.homeURLString
+            tabs[index].loadURLString = nil
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = false
+            tabs[index].isPrivateOverlay = false
+            tabs[index].privateOverlayNetworkID = nil
             addressText = BrowserURLResolver.homeURLString
         case .web(let url):
             let title = titleForURL(url)
             tabs[index].title = title
             tabs[index].urlString = url.absoluteString
+            tabs[index].loadURLString = nil
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = true
+            tabs[index].isPrivateOverlay = false
+            tabs[index].privateOverlayNetworkID = nil
             addressText = url.absoluteString
             recordHistory(title: title, urlString: url.absoluteString)
             probeHyperactiveWeb(url)
+        case .privateOverlay(let raw, let network, let message):
+            resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id, privateOverlayNetwork: network)
         case .unsupported(let raw, let message):
             resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id)
         }
@@ -751,6 +759,7 @@ final class BrowserViewModel: ObservableObject {
     func addActivePageBookmark() {
         guard let tab = activeTab else { return }
         guard tab.urlString != BrowserURLResolver.homeURLString else { return }
+        guard !tab.isPrivateOverlay else { return }
         guard bookmarks.contains(where: { $0.urlString == tab.urlString }) == false else { return }
         bookmarks.insert(BrowserBookmark(title: tab.title, urlString: tab.urlString), at: 0)
     }
@@ -781,7 +790,8 @@ final class BrowserViewModel: ObservableObject {
 
     @discardableResult
     func requestPageSnapshot(_ request: PageSnapshotRequest = PageSnapshotRequest()) -> BrowserAutomationRequest? {
-        issueAutomationRequest(.pageSnapshot(request))
+        guard activeTab?.isPrivateOverlay != true else { return nil }
+        return issueAutomationRequest(.pageSnapshot(request))
     }
 
     @discardableResult
@@ -809,21 +819,30 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func applyAutomationResult(_ result: BrowserAutomationResult) {
-        automationResults.insert(result, at: 0)
+        let isPrivateOverlayResult = tabs.first(where: { $0.id == result.tabID })?.isPrivateOverlay == true
+        var storedResult = result
+        if isPrivateOverlayResult {
+            storedResult.domQuery = nil
+            storedResult.pageSnapshot = nil
+            latestDOMQueryResult = nil
+            latestPageSnapshot = nil
+        }
+
+        automationResults.insert(storedResult, at: 0)
         if automationResults.count > 100 {
             automationResults.removeLast(automationResults.count - 100)
         }
 
-        if let domQuery = result.domQuery {
+        if let domQuery = storedResult.domQuery {
             latestDOMQueryResult = domQuery
         }
 
-        if let snapshot = result.pageSnapshot {
+        if let snapshot = storedResult.pageSnapshot {
             latestPageSnapshot = snapshot
             updateSmartHistorySummary(from: snapshot)
         }
 
-        if let approval = result.approval {
+        if let approval = storedResult.approval {
             appendApproval(approval, tabID: result.tabID)
         }
     }
@@ -846,11 +865,12 @@ final class BrowserViewModel: ObservableObject {
         guard !prompt.isEmpty else { return nil }
 
         let model = activeLLMModel
-        let snapshot = latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let isPrivateOverlay = tab.isPrivateOverlay
+        let snapshot = !isPrivateOverlay && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
         let userMessage = LLMConversationMessage(
             role: .user,
             text: prompt,
-            pageURLString: tab.urlString,
+            pageURLString: isPrivateOverlay ? nil : tab.urlString,
             snapshotAttachment: snapshot.map(LLMPageSnapshotAttachment.init(snapshot:))
         )
         llmConversation.appendMessage(userMessage)
@@ -921,13 +941,23 @@ final class BrowserViewModel: ObservableObject {
     ) -> UUID? {
         guard let tab = activeTab else { return nil }
         let runID = UUID()
-        let snapshot = latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        let isPrivateOverlay = tab.isPrivateOverlay
+        let targetURLString = isPrivateOverlay ? nil : tab.urlString
+        let snapshot = !isPrivateOverlay && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
         let preferredPackID = selectedAFMPackID
         let usage = CopilotCreditUsage.estimate(prompt: renderedContext?.prompt ?? prompt, snapshot: snapshot, provider: model.providerKind.rawValue)
         var events = [
-            CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(tab.displayURL) with \(model.displayName)."),
-            CopilotRunEvent(kind: .pageSnapshotRequested, message: "Requested a bounded page snapshot for context.")
+            CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(isPrivateOverlay ? "a private-overlay tab" : tab.displayURL) with \(model.displayName).")
         ]
+        if isPrivateOverlay {
+            events.append(
+                CopilotRunEvent(kind: .pageSnapshotRequested, message: "Skipped page snapshot and page URL context for a private-overlay tab.")
+            )
+        } else {
+            events.append(
+                CopilotRunEvent(kind: .pageSnapshotRequested, message: "Requested a bounded page snapshot for context.")
+            )
+        }
         if renderedContext?.wasCompressed == true {
             events.append(
                 CopilotRunEvent(
@@ -940,7 +970,7 @@ final class BrowserViewModel: ObservableObject {
             id: runID,
             prompt: prompt,
             activeTabID: tab.id,
-            targetURLString: tab.urlString,
+            targetURLString: targetURLString,
             conversationID: conversationID,
             modelID: model.id,
             status: .running,
@@ -960,7 +990,9 @@ final class BrowserViewModel: ObservableObject {
             assert(conversationID == llmConversation.id)
             persistLLMConversation()
         }
-        requestPageSnapshot()
+        if !isPrivateOverlay {
+            requestPageSnapshot()
+        }
 
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -968,7 +1000,7 @@ final class BrowserViewModel: ObservableObject {
             latestOpenMindStepUpRequest = nil
             let memoryRecall = await openMindMemoryClient.recall(
                 prompt: prompt,
-                pageURLString: tab.urlString,
+                pageURLString: targetURLString,
                 pageSnapshot: snapshot
             )
             latestOpenMindRecall = memoryRecall
@@ -1012,7 +1044,7 @@ final class BrowserViewModel: ObservableObject {
             let result = await runtimeBridge.runCopilot(
                 CopilotRunRequest(
                     prompt: prompt,
-                    pageURLString: tab.urlString,
+                    pageURLString: targetURLString,
                     pageSnapshot: snapshot,
                     preferredAFMPackID: preferredPackID,
                     preferredModelID: model.id,
@@ -1047,7 +1079,7 @@ final class BrowserViewModel: ObservableObject {
                     result: result,
                     runID: runID,
                     model: model,
-                    targetURLString: tab.urlString,
+                    targetURLString: targetURLString,
                     memoryRecall: memoryRecall,
                     usage: finalUsage
                 )
@@ -1123,7 +1155,7 @@ final class BrowserViewModel: ObservableObject {
                 source: OpenMindActionSource(
                     product: "dBrowser.swift",
                     runID: run?.id,
-                    pageURLString: run?.targetURLString ?? activeTab?.urlString,
+                    pageURLString: run?.targetURLString ?? (activeTab?.isPrivateOverlay == true ? nil : activeTab?.urlString),
                     snapshotCommitment: OpenMindMemoryClient.snapshotCommitment(for: snapshot),
                     prompt: run?.prompt
                 ),
@@ -1266,16 +1298,20 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].title = title
         }
         if let urlString = update.urlString, !urlString.isEmpty {
-            tabs[index].urlString = urlString
+            if tabs[index].isPrivateOverlay {
+                tabs[index].loadURLString = urlString
+            } else {
+                tabs[index].urlString = urlString
+            }
             if update.tabID == activeTabID {
-                addressText = urlString
+                addressText = tabs[index].isPrivateOverlay ? tabs[index].urlString : urlString
             }
         }
         tabs[index].isLoading = update.isLoading
         tabs[index].canGoBack = update.canGoBack
         tabs[index].canGoForward = update.canGoForward
 
-        if !update.isLoading, let urlString = update.urlString, !urlString.isEmpty {
+        if !tabs[index].isPrivateOverlay, !update.isLoading, let urlString = update.urlString, !urlString.isEmpty {
             recordHistory(title: tabs[index].title, urlString: urlString)
         }
     }
@@ -1293,14 +1329,28 @@ final class BrowserViewModel: ObservableObject {
         return request
     }
 
-    private func resolveThroughRuntimeBridge(raw: String, fallbackMessage: String, tabID: UUID) {
+    private func resolveThroughRuntimeBridge(
+        raw: String,
+        fallbackMessage: String,
+        tabID: UUID,
+        privateOverlayNetwork: PrivateOverlayNetwork? = nil
+    ) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
-        tabs[index].title = "Runtime bridge"
+        tabs[index].title = privateOverlayNetwork?.title ?? "Runtime bridge"
         tabs[index].urlString = raw
-        tabs[index].mobileNotice = "Resolving through the iOS runtime bridge."
+        tabs[index].loadURLString = nil
+        tabs[index].mobileNotice = privateOverlayNetwork == nil
+            ? "Resolving through the iOS runtime bridge."
+            : "Resolving through the local private-overlay adapter."
         tabs[index].isLoading = true
         tabs[index].canGoBack = false
         tabs[index].canGoForward = false
+        tabs[index].isPrivateOverlay = privateOverlayNetwork != nil
+        tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
+        if privateOverlayNetwork != nil {
+            latestDOMQueryResult = nil
+            latestPageSnapshot = nil
+        }
         addressText = raw
 
         Task { @MainActor [weak self] in
@@ -1316,13 +1366,34 @@ final class BrowserViewModel: ObservableObject {
         fallbackMessage: String
     ) {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        let privateOverlayNetwork = PrivateOverlayNetwork.profile(forInput: resolution.originalInput)
+        let isPrivateOverlayResolution = resolution.source == .privateOverlayLocalAdapter
+            || resolution.source == .privateOverlayAdapterRequired
+            || privateOverlayNetwork != nil
         guard let resolvedURLString = resolution.resolvedURLString, let url = URL(string: resolvedURLString) else {
-            tabs[index].title = "Mobile runtime"
+            tabs[index].title = privateOverlayNetwork?.title ?? "Mobile runtime"
             tabs[index].urlString = resolution.originalInput
+            tabs[index].loadURLString = nil
             tabs[index].mobileNotice = resolution.message ?? fallbackMessage
             tabs[index].isLoading = false
             tabs[index].canGoBack = false
             tabs[index].canGoForward = false
+            tabs[index].isPrivateOverlay = isPrivateOverlayResolution
+            tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
+            if tabID == activeTabID {
+                addressText = resolution.originalInput
+            }
+            return
+        }
+
+        if isPrivateOverlayResolution {
+            tabs[index].title = privateOverlayNetwork?.title ?? "Private overlay"
+            tabs[index].urlString = resolution.originalInput
+            tabs[index].loadURLString = resolvedURLString
+            tabs[index].mobileNotice = nil
+            tabs[index].isLoading = true
+            tabs[index].isPrivateOverlay = true
+            tabs[index].privateOverlayNetworkID = privateOverlayNetwork?.id
             if tabID == activeTabID {
                 addressText = resolution.originalInput
             }
@@ -1332,8 +1403,11 @@ final class BrowserViewModel: ObservableObject {
         let title = titleForURL(url)
         tabs[index].title = title
         tabs[index].urlString = resolvedURLString
+        tabs[index].loadURLString = nil
         tabs[index].mobileNotice = nil
         tabs[index].isLoading = true
+        tabs[index].isPrivateOverlay = false
+        tabs[index].privateOverlayNetworkID = nil
         if tabID == activeTabID {
             addressText = resolvedURLString
         }
@@ -1460,7 +1534,7 @@ final class BrowserViewModel: ObservableObject {
         result: CopilotRunResult,
         runID: UUID,
         model: LLMModelProfile,
-        targetURLString: String,
+        targetURLString: String?,
         memoryRecall: OpenMindMemoryRecallResult,
         usage: CopilotCreditUsage
     ) {

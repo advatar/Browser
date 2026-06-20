@@ -48,6 +48,67 @@ struct dBrowserTests {
         #expect(message.contains("runtime bridge"))
     }
 
+    @Test func privateOverlayRegistryCoversDarkWebProtocols() {
+        #expect(Set(PrivateOverlayNetwork.allCases.map(\.id)) == Set(["tor", "i2p", "hyphanet", "zeronet", "lokinet"]))
+        #expect(PrivateOverlayNetwork.supportedSchemes.isSuperset(of: Set(["onion", "tor", "i2p", "freenet", "hyphanet", "zero", "zeronet", "loki", "lokinet"])))
+        #expect(PrivateOverlayNetwork.supportedHostSuffixes == Set(["onion", "i2p", "loki"]))
+
+        #expect(PrivateOverlayNetwork.profile(forInput: "example.onion/private") == .tor)
+        #expect(PrivateOverlayNetwork.profile(forInput: "http://example.i2p") == .i2p)
+        #expect(PrivateOverlayNetwork.profile(forInput: "USK@example/key/1") == .hyphanet)
+        #expect(PrivateOverlayNetwork.profile(forInput: "zeronet://1HeLLo4uzjaLetFx6NH3PMwFP3qbRbTf3D") == .zeronet)
+        #expect(PrivateOverlayNetwork.profile(forInput: "example.loki") == .lokinet)
+    }
+
+    @Test func privateOverlayInputsRouteBeforeSearchOrHTTPSFallback() {
+        let onion = BrowserURLResolver.resolve("example.onion/private")
+        guard case .privateOverlay(let raw, let network, let message) = onion else {
+            Issue.record("Expected private overlay routing")
+            return
+        }
+        #expect(raw == "http://example.onion/private")
+        #expect(network == .tor)
+        #expect(message.contains("without search or clearnet fallback"))
+
+        guard case .privateOverlay(_, let i2p, _) = BrowserURLResolver.resolve("http://forum.i2p") else {
+            Issue.record("Expected I2P private overlay routing")
+            return
+        }
+        #expect(i2p == .i2p)
+
+        guard case .privateOverlay(let freenetRaw, let hyphanet, _) = BrowserURLResolver.resolve("USK@example/key/1") else {
+            Issue.record("Expected Hyphanet private overlay routing")
+            return
+        }
+        #expect(freenetRaw.hasPrefix("hyphanet:USK@"))
+        #expect(hyphanet == .hyphanet)
+    }
+
+    @Test func runtimeBridgeRoutesPrivateOverlaysToLocalAdaptersAndFailsClosed() async {
+        let bridge = MobileRuntimeBridge(configuration: RuntimeBridgeConfiguration())
+        let onion = await bridge.resolve("example.onion/private")
+        let onionURL = onion.resolvedURLString.flatMap { URLComponents(string: $0) }
+        let onionQuery = remoteResolverQueryItems(for: onion.resolvedURLString)
+
+        #expect(onion.source == .privateOverlayLocalAdapter)
+        #expect(onion.originalInput == "http://example.onion/private")
+        #expect(onionURL?.host == "127.0.0.1")
+        #expect(onionURL?.port == 4893)
+        #expect(onionURL?.path == "/private-overlay/tor/native")
+        #expect(onionQuery["network"] == "tor")
+        #expect(onionQuery["privacy"] == "ephemeral")
+        #expect(onionQuery["uri"] == "http://example.onion/private")
+
+        let disabled = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(privateOverlayAdapters: .disabled)
+        )
+        let blocked = await disabled.resolve("example.onion/private")
+        #expect(blocked.source == .privateOverlayAdapterRequired)
+        #expect(blocked.resolvedURLString == nil)
+        #expect(blocked.message?.contains("will not search") == true)
+        #expect(blocked.message?.contains("clearnet fallback") == true)
+    }
+
     @Test func decentralizedStorageRegistryCoversAppDistributionNetworks() {
         let requiredNetworkIDs = [
             "ipfs",
@@ -5594,6 +5655,76 @@ struct dBrowserTests {
     }
 
     @MainActor
+    @Test func privateOverlayNavigationUsesEphemeralAdapterAndSkipsLocalTraces() async {
+        let model = makeIsolatedBrowserViewModel()
+
+        model.navigate("example.onion/private")
+
+        let resolved = await waitForActiveLoadURL(in: model, containing: "/private-overlay/tor/native")
+        guard resolved, let tab = model.activeTab, let loadURLString = tab.loadURLString else {
+            Issue.record("Expected private overlay tab to resolve to a local adapter URL")
+            return
+        }
+
+        #expect(tab.isPrivateOverlay)
+        #expect(tab.privateOverlayNetworkID == "tor")
+        #expect(tab.urlString == "http://example.onion/private")
+        #expect(loadURLString.contains("127.0.0.1:4893"))
+        #expect(model.addressText == "http://example.onion/private")
+        #expect(model.history.isEmpty)
+
+        model.addActivePageBookmark()
+        #expect(!model.bookmarks.contains { $0.urlString == "http://example.onion/private" })
+
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: tab.id,
+                urlString: loadURLString,
+                title: "Onion",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false
+            )
+        )
+        #expect(model.history.isEmpty)
+        #expect(model.activeTab?.urlString == "http://example.onion/private")
+
+        let snapshot = PageSnapshot(
+            urlString: loadURLString,
+            title: "Onion",
+            visibleText: "private page text",
+            headings: [],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 0
+        )
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: tab.id,
+                status: .success,
+                message: "Snapshot complete",
+                pageSnapshot: snapshot
+            )
+        )
+
+        #expect(model.latestPageSnapshot == nil)
+        #expect(model.automationResults.first?.pageSnapshot == nil)
+        #expect(model.requestPageSnapshot() == nil)
+
+        let runID = model.sendLLMMessage("Summarize privately")
+        #expect(model.llmConversation.messages.last?.pageURLString == nil)
+        #expect(model.llmConversation.messages.last?.snapshotAttachment == nil)
+        #expect(model.copilotRuns.first?.targetURLString == nil)
+        if let runID {
+            model.cancelCopilotRun(runID)
+        }
+    }
+
+    @MainActor
     @Test func openingCurrentRecentReloadsActivePage() {
         let model = makeIsolatedBrowserViewModel()
         model.navigate("https://example.com")
@@ -8331,6 +8462,17 @@ struct dBrowserTests {
     private func waitForActiveURL(in model: BrowserViewModel, _ urlString: String) async -> Bool {
         for _ in 0..<20 {
             if model.activeTab?.urlString == urlString {
+                return true
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return false
+    }
+
+    @MainActor
+    private func waitForActiveLoadURL(in model: BrowserViewModel, containing text: String) async -> Bool {
+        for _ in 0..<20 {
+            if model.activeTab?.loadURLString?.contains(text) == true {
                 return true
             }
             try? await Task.sleep(nanoseconds: 10_000_000)

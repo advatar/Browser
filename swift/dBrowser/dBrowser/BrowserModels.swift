@@ -1100,33 +1100,43 @@ struct BrowserTab: Identifiable, Equatable {
     let id: UUID
     var title: String
     var urlString: String
+    var loadURLString: String?
     var isLoading: Bool
     var canGoBack: Bool
     var canGoForward: Bool
     var mobileNotice: String?
+    var isPrivateOverlay: Bool
+    var privateOverlayNetworkID: String?
 
     init(
         id: UUID = UUID(),
         title: String = "Home",
         urlString: String = "about:home",
+        loadURLString: String? = nil,
         isLoading: Bool = false,
         canGoBack: Bool = false,
         canGoForward: Bool = false,
-        mobileNotice: String? = nil
+        mobileNotice: String? = nil,
+        isPrivateOverlay: Bool = false,
+        privateOverlayNetworkID: String? = nil
     ) {
         self.id = id
         self.title = title
         self.urlString = urlString
+        self.loadURLString = loadURLString
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
         self.mobileNotice = mobileNotice
+        self.isPrivateOverlay = isPrivateOverlay
+        self.privateOverlayNetworkID = privateOverlayNetworkID
     }
 
     var loadableURL: URL? {
         guard mobileNotice == nil else { return nil }
-        guard urlString != BrowserURLResolver.homeURLString else { return nil }
-        return URL(string: urlString)
+        let targetURLString = loadURLString ?? urlString
+        guard targetURLString != BrowserURLResolver.homeURLString else { return nil }
+        return URL(string: targetURLString)
     }
 
     var displayURL: String {
@@ -2143,6 +2153,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
     case webBrowsing
     case tabs
     case decentralizedProtocols
+    case privateOverlayProtocols
     case architectureOverview
     case chainTrust
     case mcpServers
@@ -2161,6 +2172,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Web browsing"
         case .tabs: "Tabs and history"
         case .decentralizedProtocols: "DWeb URI resolution"
+        case .privateOverlayProtocols: "Private overlays"
         case .architectureOverview: "Architecture"
         case .chainTrust: "Chain trust"
         case .mcpServers: "MCP servers"
@@ -2179,6 +2191,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "Native WKWebView"
         case .tabs: "Native Swift state"
         case .decentralizedProtocols: "Native/local adapters"
+        case .privateOverlayProtocols: "Local privacy adapters"
         case .architectureOverview: "Light clients + AF Market + ZeroK"
         case .chainTrust: "Gateway/RPC fallback"
         case .mcpServers: "HTTP, WebSocket, STDIO"
@@ -2197,6 +2210,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
         case .webBrowsing: "safari"
         case .tabs: "rectangle.on.rectangle"
         case .decentralizedProtocols: "link"
+        case .privateOverlayProtocols: "eye.slash"
         case .architectureOverview: "square.stack.3d.up"
         case .chainTrust: "checkmark.shield"
         case .mcpServers: "network"
@@ -2250,6 +2264,17 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Embedded light clients verify block headers and essential proofs locally for chain-backed resolution, wallet state, transaction broadcast, and AFM settlement checks.",
                     "External RPC endpoints should remain development or fallback transports; they should not become the trust root for decentralized browsing.",
                     "Resolution results preserve a clear source, making it possible to show whether content came from native, light-client, gateway, or remote runtime resolution."
+                ]
+            )
+        case .privateOverlayProtocols:
+            RuntimeFeatureExplanation(
+                overview: "Recognizes Tor onion services, I2P eepsites, Hyphanet/Freenet keys, ZeroNet, and Lokinet before generic URL handling.",
+                bridgeBehavior: "Private-overlay routes go only to configured local adapter endpoints; they never fall through to search, DNS, implicit HTTPS, public DWeb gateways, or remote storage resolvers.",
+                detailPoints: [
+                    "Tabs carrying private-overlay content are marked ephemeral so dBrowser skips browser history and smart-history persistence.",
+                    "The WebView loads app-local adapter URLs while the address bar keeps the original private-overlay locator visible to the user.",
+                    "If the matching local adapter is disabled, navigation fails closed with a runtime notice instead of trying clearnet fallback.",
+                    "Copilot page snapshots and OpenMind page context are omitted by default for private-overlay tabs."
                 ]
             )
         case .architectureOverview:
@@ -2379,6 +2404,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
 enum BrowserAddressResolution: Equatable {
     case home
     case web(URL)
+    case privateOverlay(raw: String, network: PrivateOverlayNetwork, message: String)
     case unsupported(raw: String, message: String)
 }
 
@@ -2397,6 +2423,14 @@ enum BrowserURLResolver {
         }
 
         if let url = URL(string: input), let scheme = url.scheme?.lowercased() {
+            if let network = PrivateOverlayNetwork.profile(forInput: input) {
+                return .privateOverlay(
+                    raw: network.canonicalURI(for: input),
+                    network: network,
+                    message: "dBrowser will route this \(network.title) through a local private-overlay adapter without search or clearnet fallback."
+                )
+            }
+
             switch scheme {
             case "http", "https":
                 return .web(url)
@@ -2418,6 +2452,14 @@ enum BrowserURLResolver {
                     message: "The iOS runtime bridge is preserving this \(scheme): URI until a native handler is registered."
                 )
             }
+        }
+
+        if let network = PrivateOverlayNetwork.profile(forInput: input) {
+            return .privateOverlay(
+                raw: network.canonicalURI(for: input),
+                network: network,
+                message: "dBrowser will route this \(network.title) through a local private-overlay adapter without search or clearnet fallback."
+            )
         }
 
         if looksLikeDecentralizedName(input) {

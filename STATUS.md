@@ -21,6 +21,18 @@
 
 ## Active Task
 
+## Private Overlay Dark-Web Protocol Support (#154)
+
+Add first-class support for Tor onion services and adjacent private-overlay protocols while minimizing local traces and avoiding unsafe clearnet fallback.
+
+- [x] Create the GitHub issue with scope, privacy constraints, and verification plan.
+- [x] Add an explicit private-overlay protocol registry covering Tor/.onion, I2P/.i2p, Hyphanet/Freenet keys, ZeroNet, and Lokinet.
+- [x] Route private-overlay addresses through local/private adapter endpoints only, never through search or implicit HTTPS.
+- [x] Suppress browser history, smart-history indexing, and snapshot summary persistence for private-overlay tabs.
+- [x] Surface clear runtime notices when a required local overlay adapter is not available.
+- [x] Add focused Swift tests for routing, fail-closed behavior, and trace-minimized navigation.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally, then commit and push scoped changes.
+
 ## macOS 27 Siri And System Integration (#153)
 
 Add a macOS 27-gated App Intents layer for deeper Siri, Shortcuts, Spotlight, and Apple Intelligence integration while preserving dBrowser privacy boundaries.
