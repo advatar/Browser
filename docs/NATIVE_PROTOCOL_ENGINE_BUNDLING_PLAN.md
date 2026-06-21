@@ -104,6 +104,8 @@ The scripts must document every installed tool and must fail when versions drift
 | OrbitDB/IPFS | Bundle Helia/IPFS/libp2p plus OrbitDB JS helper on macOS. | Not full-native initially; investigate bundled JSCore but assume remote/helper fallback. | Low short-term. | Database write keys/identity. |
 | Radicle | Bundle `radicle-node` and `radicle-httpd` helper. | Read-only remote/seed access first; Rust FFI later. | Medium for Rust wrapper, low for pure Swift. | Node identity and repo seeding policy. |
 
+BitTorrent/WebTorrent bundling must preserve the same privacy boundary as the Swift runtime: dBrowser minimizes browser-side traces and routes transfer work through a local/private adapter, but the helper is responsible for honoring ephemeral metadata, web-seed policy, VPN/tunnel selection, DNS behavior, and peer-network exposure. Do not document or implement the torrent engine as an anonymity feature unless the OS entitlement, tunnel configuration, and adapter implementation have been verified for that claim.
+
 ## Implementation Phases
 
 ### Phase 0: Manifest and Contract

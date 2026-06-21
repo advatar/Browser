@@ -53,3 +53,5 @@ pnpm --filter @browser/storage-adapters dev
 ```
 
 The service implements one handler contract for each registered storage protocol: Filecoin, Walrus, Iroh, Hypercore/Hyperdrive, Sia, Storj, Tahoe-LAFS, Autonomi, BitTorrent/WebTorrent, Ceramic, OrbitDB, and Radicle. Each handler validates the Swift adapter metadata, preserves locator and verification metadata, proxies only configured local protocol backends, and otherwise renders a precise local-backend-required page.
+
+BitTorrent/WebTorrent and the built-in VPN client are privacy-boundary features, not anonymity guarantees. The Swift app minimizes dBrowser-side traces for torrent transfer tabs and enforces local/private routing through loopback adapters and NetworkExtension-backed VPN profiles, but effective VPN/torrent privacy still depends on OS entitlements, the actual tunnel configuration, and the local adapter or torrent engine implementation.

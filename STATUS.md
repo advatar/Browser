@@ -21,6 +21,15 @@
 
 ## Active Task
 
+## Torrent And VPN Developer Docs Privacy Boundary Clarification (#156)
+
+Make the developer documentation explicit that torrent/VPN privacy work minimizes dBrowser-side traces and enforces local/private routing boundaries, but does not independently guarantee anonymity because OS entitlements, tunnel configuration, and local adapter behavior still matter.
+
+- [x] Record the documentation clarification task in `STATUS.md`.
+- [x] Create the GitHub issue with scope and verification plan.
+- [x] Update developer documentation for the BitTorrent/WebTorrent and built-in VPN privacy boundary.
+- [x] Verify the docs-only change against the local macOS build, then commit and push scoped changes.
+
 ## BitTorrent And Built-In VPN Client Support (#155)
 
 Add first-class BitTorrent/WebTorrent handling and a built-in VPN client contract so peer-network activity is explicit, privacy-scoped, and surfaced through the runtime without unsafe fallback.

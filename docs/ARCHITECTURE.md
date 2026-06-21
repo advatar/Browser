@@ -354,6 +354,10 @@ Implementation plan:
 
 The handler service is not a hidden centralized resolver. It validates the Swift adapter metadata, keeps the original URI and locator metadata inside the local boundary, redacts secret capabilities in rendered responses, and proxies only configured local protocol backends. When a backend is missing, the handler returns a protocol-specific backend-required response rather than pretending bytes were resolved.
 
+BitTorrent/WebTorrent is a privacy-scoped transfer path rather than a normal content gateway. Torrent transfer tabs suppress dBrowser history, smart-history indexing, bookmarks, page snapshots, and Copilot/OpenMind page context; the app keeps the original locator visible while routing load work through the local `127.0.0.1` torrent adapter with ephemeral privacy metadata. This minimizes dBrowser-side traces and enforces the local/private routing boundary, but it does not erase OS, network, peer-swarm, VPN-provider, or helper-process traces. Effective torrent privacy depends on the local adapter/torrent engine implementation, the selected VPN or tunnel path, and the user's tunnel configuration.
+
+The built-in VPN client contract covers WireGuard, IKEv2/IPSec, OpenVPN, and custom packet tunnels through NetworkExtension-backed profiles. Runtime availability means the app has an enabled profile set and the necessary OS entitlement; it does not mean traffic is anonymous by default. Developers must keep UI and logs honest: VPN privacy depends on the granted NetworkExtension entitlement, the actual tunnel/server configuration, key and credential handling, DNS/leak behavior, and any local adapter or helper implementation that sends traffic through the tunnel.
+
 Development command:
 
 ```sh
