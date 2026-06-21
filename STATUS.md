@@ -21,6 +21,16 @@
 
 ## Active Task
 
+## Landing Page Torrent And VPN Promotion (#157, trustless-web-explorer#14)
+
+Advertise the new BitTorrent/WebTorrent privacy-scoped transfer path and built-in VPN client on the public landing page without overstating anonymity guarantees.
+
+- [x] Record the landing-page update task in `STATUS.md`.
+- [x] Create the GitHub issue with scope and verification plan.
+- [x] Update the landing page hero/feature surfaces to mention torrent transfer routing and built-in VPN support.
+- [x] Add or update web tests for the public-facing claim.
+- [x] Verify the web test/build locally, then commit and push scoped changes.
+
 ## Torrent And VPN Developer Docs Privacy Boundary Clarification (#156)
 
 Make the developer documentation explicit that torrent/VPN privacy work minimizes dBrowser-side traces and enforces local/private routing boundaries, but does not independently guarantee anonymity because OS entitlements, tunnel configuration, and local adapter behavior still matter.
