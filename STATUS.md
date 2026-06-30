@@ -21,6 +21,20 @@
 
 ## Active Task
 
+## Aside-Style Developer Browser Automation (#158)
+
+Assess and scope the developer workflow automation described in Aside's 2026-06-22 developer article for dBrowser's native Swift product boundary.
+
+- [x] Inspect the Aside developer article and enumerate the developer workflow categories.
+- [x] Compare the workflows against current Swift dBrowser automation, Copilot, MCP, workflow, history, research ledger, and approval-gate surfaces.
+- [x] Create the GitHub issue with scope, feasibility notes, and implementation plan.
+- [ ] Add a Developer Browser Evidence model covering screenshots, DOM/page snapshots, log links, downloaded artifacts, source URLs, timestamps, redaction state, and privacy boundary labels.
+- [ ] Add local run ledger support for CI triage, PR evidence packets, staging QA, feature-flag audits, monitoring watches, browser-console investigations, animation reference capture, and recurring routines.
+- [ ] Expose developer workflows through Copilot first, then MCP and a scriptable/REPL-style automation surface once BrowserAutomationKit is packaged cleanly.
+- [ ] Keep posting comments, changing flags, editing admin consoles, paging incidents, deploy/rollback, billing/database changes, downloads, credentials, and wallet/payment actions behind explicit approval gates.
+- [ ] Add focused Swift tests for evidence models, approval policy, routine triggers, and Advantage scorecard coverage before expanding UI.
+- [ ] Verify focused tests, full `dBrowserTests`, and macOS build locally before committing implementation changes.
+
 ## Landing Page Torrent And VPN Promotion (#157, trustless-web-explorer#14)
 
 Advertise the new BitTorrent/WebTorrent privacy-scoped transfer path and built-in VPN client on the public landing page without overstating anonymity guarantees.
