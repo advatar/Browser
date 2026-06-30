@@ -17,6 +17,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var copilotRuns: [CopilotRun] = []
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
     @Published var researchLedgers: [BrowserResearchLedger] = []
+    @Published var developerWorkflowRuns: [BrowserDeveloperWorkflowRun] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
     @Published var chainTrustSnapshot: ChainTrustRegistry
     @Published var afmServiceSnapshot: AFMServiceSnapshot
@@ -55,6 +56,7 @@ final class BrowserViewModel: ObservableObject {
     let runtimeBridge: MobileRuntimeBridge
     private let workflowStore: CopilotWorkflowStore
     private let researchLedgerStore: ResearchLedgerStore
+    private let developerWorkflowStore: DeveloperWorkflowStore
     private let historyService: BrowserHistoryService
     private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
@@ -70,6 +72,7 @@ final class BrowserViewModel: ObservableObject {
         runtimeBridge: MobileRuntimeBridge,
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
         researchLedgerStore: ResearchLedgerStore = ResearchLedgerStore(),
+        developerWorkflowStore: DeveloperWorkflowStore = DeveloperWorkflowStore(),
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
         llmConversationStore: LLMConversationStore = LLMConversationStore(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
@@ -89,6 +92,7 @@ final class BrowserViewModel: ObservableObject {
         self.runtimeBridge = runtimeBridge
         self.workflowStore = copilotWorkflowStore
         self.researchLedgerStore = researchLedgerStore
+        self.developerWorkflowStore = developerWorkflowStore
         self.historyService = historyService
         self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
@@ -116,6 +120,7 @@ final class BrowserViewModel: ObservableObject {
         self.history = historyService.initialHistory
         self.copilotWorkflows = copilotWorkflowStore.load()
         self.researchLedgers = researchLedgerStore.load()
+        self.developerWorkflowRuns = developerWorkflowStore.load()
         if restoredLLMState.shouldPersist {
             persistLLMConversation()
         }
@@ -844,6 +849,7 @@ final class BrowserViewModel: ObservableObject {
         if let snapshot = storedResult.pageSnapshot {
             latestPageSnapshot = snapshot
             updateSmartHistorySummary(from: snapshot)
+            appendDeveloperWorkflowSnapshotEvidence(snapshot, tabID: result.tabID)
         }
 
         if let approval = storedResult.approval {
@@ -933,6 +939,54 @@ final class BrowserViewModel: ObservableObject {
         latestOpenMindWriteback = nil
         latestOpenMindCorrection = nil
         persistLLMConversation()
+    }
+
+    var developerWorkflowTemplates: [BrowserDeveloperWorkflowTemplate] {
+        BrowserDeveloperWorkflowTemplate.localFirstDefaults
+    }
+
+    var developerAutomationSurfaces: [BrowserDeveloperAutomationSurface] {
+        BrowserDeveloperAutomationSurface.localFirstSurfaces()
+    }
+
+    @discardableResult
+    func startDeveloperWorkflow(
+        _ template: BrowserDeveloperWorkflowTemplate,
+        entryPoint: BrowserDeveloperWorkflowEntryPoint = .copilot
+    ) -> UUID? {
+        guard template.entryPoints.contains(entryPoint) else { return nil }
+        guard let tab = activeTab else { return nil }
+        let activeURLString = tab.isTraceMinimized ? nil : tab.urlString
+        let snapshot = !tab.isTraceMinimized && latestPageSnapshot?.urlString == tab.urlString ? latestPageSnapshot : nil
+        var run = BrowserDeveloperWorkflowRun.draft(
+            from: template,
+            activeURLString: activeURLString,
+            snapshot: snapshot,
+            entryPoint: entryPoint
+        )
+        run.status = .running
+
+        if entryPoint == .copilot {
+            let copilotRunID = startCopilotRun(
+                prompt: run.prompt,
+                conversationID: nil,
+                model: activeLLMModel,
+                renderedContext: nil,
+                recordsAssistantMessage: false
+            )
+            guard let copilotRunID else { return nil }
+            run.copilotRunID = copilotRunID
+        }
+
+        developerWorkflowRuns.insert(run, at: 0)
+        persistDeveloperWorkflowRuns()
+        return run.id
+    }
+
+    func appendDeveloperWorkflowEvidence(_ item: BrowserDeveloperEvidenceItem, to runID: UUID) {
+        guard let index = developerWorkflowRuns.firstIndex(where: { $0.id == runID }) else { return }
+        developerWorkflowRuns[index].appendEvidence(item)
+        persistDeveloperWorkflowRuns()
     }
 
     @discardableResult
@@ -1468,6 +1522,10 @@ final class BrowserViewModel: ObservableObject {
         researchLedgerStore.save(researchLedgers)
     }
 
+    func persistDeveloperWorkflowRuns() {
+        developerWorkflowStore.save(developerWorkflowRuns)
+    }
+
     private func persistLLMConversation() {
         llmConversationStore.save(
             LLMConversationStorePayload(
@@ -1519,6 +1577,81 @@ final class BrowserViewModel: ObservableObject {
         return latestDOMQueryResult.elements.first { element in
             element.searchableText.contains(selector)
         }
+    }
+
+    private func appendDeveloperWorkflowSnapshotEvidence(_ snapshot: PageSnapshot, tabID: UUID) {
+        guard let index = developerWorkflowRuns.firstIndex(where: { run in
+            guard run.status == .running || run.status == .draft else { return false }
+            if let copilotRunID = run.copilotRunID,
+               copilotRuns.first(where: { $0.id == copilotRunID })?.activeTabID != tabID {
+                return false
+            }
+            if let sourceURLString = run.sourceURLString {
+                return sourceURLString == snapshot.urlString
+            }
+            return true
+        }) else {
+            return
+        }
+
+        let alreadyCaptured = developerWorkflowRuns[index].evidenceItems.contains {
+            $0.kind == .pageSnapshot && $0.sourceURLString == snapshot.urlString
+        }
+        guard !alreadyCaptured else { return }
+
+        developerWorkflowRuns[index].appendEvidence(
+            BrowserDeveloperEvidenceItem(
+                kind: .pageSnapshot,
+                title: "Bounded page snapshot",
+                summary: "\(snapshot.title): \(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, \(snapshot.formControls.count) form controls.",
+                sourceURLString: snapshot.urlString,
+                redactionState: snapshot.redactionCount > 0 ? .redacted : .none,
+                privacyBoundary: .redactedModelContext,
+                metadata: [
+                    "title": snapshot.title,
+                    "textCharacters": "\(snapshot.visibleText.count)",
+                    "redactions": "\(snapshot.redactionCount)"
+                ]
+            )
+        )
+        persistDeveloperWorkflowRuns()
+    }
+
+    private func syncDeveloperWorkflowRun(
+        copilotRunID: UUID,
+        status: CopilotRunStatus,
+        result: CopilotRunResult?,
+        message: String
+    ) {
+        guard let index = developerWorkflowRuns.firstIndex(where: { $0.copilotRunID == copilotRunID }) else { return }
+        let now = Date()
+        switch status {
+        case .completed:
+            developerWorkflowRuns[index].status = developerWorkflowRuns[index].requiresApprovalBeforeMutation ? .waitingForApproval : .completed
+        case .cancelled, .failed:
+            developerWorkflowRuns[index].status = .blocked
+        case .queued, .running:
+            developerWorkflowRuns[index].status = .running
+        }
+        developerWorkflowRuns[index].updatedAt = now
+        developerWorkflowRuns[index].localOutput = result?.summary ?? message
+        if let result,
+           !developerWorkflowRuns[index].evidenceItems.contains(where: { $0.kind == .timestampedNote && $0.title == "Copilot output" }) {
+            developerWorkflowRuns[index].appendEvidence(
+                BrowserDeveloperEvidenceItem(
+                    kind: .timestampedNote,
+                    title: "Copilot output",
+                    capturedAt: now,
+                    summary: result.summary,
+                    sourceURLString: developerWorkflowRuns[index].sourceURLString,
+                    redactionState: .sensitiveOmitted,
+                    privacyBoundary: .localOnly,
+                    metadata: ["mode": result.mode.rawValue]
+                ),
+                now: now
+            )
+        }
+        persistDeveloperWorkflowRuns()
     }
 
     private func appendApproval(_ approval: BrowserAutomationApproval, tabID: UUID) {
@@ -1791,6 +1924,7 @@ final class BrowserViewModel: ObservableObject {
         }()
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
         copilotTasks[id] = nil
+        syncDeveloperWorkflowRun(copilotRunID: id, status: status, result: result, message: message)
     }
 
     private func cancelCopilotRuns(boundTo tabID: UUID, reason: String) {

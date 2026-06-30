@@ -54,3 +54,49 @@ final class ResearchLedgerStore {
             .appendingPathComponent("research-ledgers.json")
     }
 }
+
+final class DeveloperWorkflowStore {
+    private let fileURL: URL?
+    private var memoryRuns: [BrowserDeveloperWorkflowRun]
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    nonisolated init(fileURL: URL? = DeveloperWorkflowStore.defaultFileURL(), seed: [BrowserDeveloperWorkflowRun] = []) {
+        self.fileURL = fileURL
+        self.memoryRuns = seed
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    }
+
+    nonisolated static func ephemeral(seed: [BrowserDeveloperWorkflowRun] = []) -> DeveloperWorkflowStore {
+        DeveloperWorkflowStore(fileURL: nil, seed: seed)
+    }
+
+    func load() -> [BrowserDeveloperWorkflowRun] {
+        guard let fileURL else { return memoryRuns }
+        guard let data = try? Data(contentsOf: fileURL) else { return [] }
+        return (try? decoder.decode([BrowserDeveloperWorkflowRun].self, from: data)) ?? []
+    }
+
+    func save(_ runs: [BrowserDeveloperWorkflowRun]) {
+        guard let fileURL else {
+            memoryRuns = runs
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let data = try encoder.encode(runs)
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            assertionFailure("Failed to save developer workflow runs: \(error.localizedDescription)")
+        }
+    }
+
+    nonisolated static func defaultFileURL() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("dBrowser", isDirectory: true)
+            .appendingPathComponent("developer-workflow-runs.json")
+    }
+}

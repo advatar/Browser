@@ -7497,6 +7497,124 @@ struct dBrowserTests {
         #expect(dueByInterval.approvalMode == .allowLowRisk)
     }
 
+    @Test func developerWorkflowTemplatesCoverAsideDeveloperWorkflowsAndLocalSurfaces() {
+        let templates = BrowserDeveloperWorkflowTemplate.localFirstDefaults
+        for kind in BrowserDeveloperWorkflowKind.allCases {
+            #expect(templates.contains { $0.kind == kind })
+        }
+
+        let ciTemplate = templates.first { $0.kind == .failedCITriage }
+        #expect(ciTemplate?.defaultEvidenceKinds.contains(.logLink) == true)
+        #expect(ciTemplate?.protectedActions.contains(.postPRComment) == true)
+        #expect(ciTemplate?.renderedPrompt(activeURLString: "https://github.com/advatar/Browser/actions", snapshot: nil).contains("Do not post") == true)
+
+        let surfaces = BrowserDeveloperAutomationSurface.localFirstSurfaces()
+        #expect(surfaces.first { $0.id == .copilot }?.status == .ready)
+        #expect(surfaces.first { $0.id == .routine }?.status == .ready)
+        #expect(surfaces.first { $0.id == .mcp }?.status == .staged)
+        #expect(surfaces.first { $0.id == .localREPL }?.privacyBoundary == .localOnly)
+    }
+
+    @Test func developerWorkflowApprovalPolicyGatesExternalMutations() {
+        let decisions = BrowserDeveloperApprovalPolicy.decisions(
+            for: BrowserDeveloperProtectedAction.allCases + [.postPRComment]
+        )
+
+        #expect(decisions.count == BrowserDeveloperProtectedAction.allCases.count)
+        #expect(decisions.allSatisfy { $0.disposition == .requiresApproval })
+        #expect(decisions.first { $0.action == .changeFeatureFlag }?.reason.contains("saving flag changes") == true)
+        #expect(decisions.first { $0.action == .walletPayment }?.reason.contains("wallet/payment policy") == true)
+    }
+
+    @Test func developerWorkflowRunLedgerStoresLocalEvidenceAndApprovalDecisions() {
+        let now = Date(timeIntervalSince1970: 1_782_806_400)
+        let template = BrowserDeveloperWorkflowTemplate.localFirstDefaults.first { $0.kind == .prEvidencePacket }!
+        var run = BrowserDeveloperWorkflowRun.draft(
+            from: template,
+            activeURLString: "https://github.com/advatar/Browser/pull/158",
+            snapshot: nil,
+            now: now
+        )
+        run.appendEvidence(
+            BrowserDeveloperEvidenceItem(
+                kind: .screenshot,
+                title: "Preview desktop",
+                capturedAt: now,
+                summary: "Local preview screenshot for reviewer evidence.",
+                sourceURLString: "https://preview.example",
+                localFilePath: "/tmp/dBrowser-preview.png",
+                redactionState: .sensitiveOmitted,
+                privacyBoundary: .localOnly
+            ),
+            now: now
+        )
+
+        let store = DeveloperWorkflowStore.ephemeral()
+        store.save([run])
+        let restored = store.load()
+
+        #expect(restored.first?.evidenceItems.count == 2)
+        #expect(restored.first?.evidenceItems.last?.localFilePath == "/tmp/dBrowser-preview.png")
+        #expect(restored.first?.requiresApprovalBeforeMutation == true)
+        #expect(restored.first?.approvalDecisions.contains { $0.action == .postPRComment } == true)
+        #expect(restored.first?.reviewSummary.contains("protected action") == true)
+    }
+
+    @MainActor
+    @Test func developerWorkflowStartsCopilotRunAndCapturesSnapshotEvidence() {
+        let store = DeveloperWorkflowStore.ephemeral()
+        let model = makeIsolatedBrowserViewModel(developerWorkflowStore: store)
+        model.navigate("https://github.com/advatar/Browser/actions/runs/42")
+        let template = BrowserDeveloperWorkflowTemplate.localFirstDefaults.first { $0.kind == .failedCITriage }!
+
+        let developerRunID = model.startDeveloperWorkflow(template)
+
+        #expect(developerRunID != nil)
+        #expect(model.developerWorkflowRuns.first?.kind == .failedCITriage)
+        #expect(model.developerWorkflowRuns.first?.status == .running)
+        #expect(model.developerWorkflowRuns.first?.copilotRunID != nil)
+        #expect(model.copilotRuns.first?.prompt.contains("Local-first constraints") == true)
+
+        let snapshot = PageSnapshot(
+            urlString: "https://github.com/advatar/Browser/actions/runs/42",
+            title: "CI run",
+            visibleText: "checkout-web failed in Playwright mobile",
+            headings: ["CI"],
+            links: [],
+            buttons: [],
+            formControls: [],
+            metadata: [:],
+            truncated: false,
+            redactionCount: 1
+        )
+        model.applyAutomationResult(
+            BrowserAutomationResult(
+                requestID: UUID(),
+                tabID: model.activeTabID,
+                status: .success,
+                message: "snapshot",
+                pageSnapshot: snapshot
+            )
+        )
+
+        #expect(model.developerWorkflowRuns.first?.evidenceItems.contains { $0.kind == .pageSnapshot && $0.redactionState == .redacted } == true)
+        #expect(store.load().first?.id == developerRunID)
+        if let copilotRunID = model.developerWorkflowRuns.first?.copilotRunID {
+            model.cancelCopilotRun(copilotRunID)
+        }
+    }
+
+    @Test func advantageScorecardTracksLocalDeveloperEvidenceCapability() {
+        let capability = BrowserAdvantageScorecard.current.capabilities.first {
+            $0.id == "developer-browser-evidence"
+        }
+
+        #expect(capability?.status == .exceeds)
+        #expect(capability?.category == .developerAutomation)
+        #expect(capability?.evidence.contains("BrowserDeveloperWorkflowRun") == true)
+        #expect(capability?.action?.targetPanel == .copilot)
+    }
+
     @Test func strawberryBenchmarkSuiteSupportsTwelveTaskAndCredentialConstrainedRuns() {
         let allTasks = StrawberryBenchmarkSuite.tasks(includeCredentialRequired: true)
         let publicTasks = StrawberryBenchmarkSuite.tasks(includeCredentialRequired: false)
@@ -8685,6 +8803,7 @@ struct dBrowserTests {
         runtimeBridge: MobileRuntimeBridge? = nil,
         workflowStore: CopilotWorkflowStore = .ephemeral(),
         researchLedgerStore: ResearchLedgerStore = .ephemeral(),
+        developerWorkflowStore: DeveloperWorkflowStore = .ephemeral(),
         smartHistoryStore: SmartHistoryStore = .ephemeral(),
         llmConversationStore: LLMConversationStore = .ephemeral(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
@@ -8695,6 +8814,7 @@ struct dBrowserTests {
             runtimeBridge: runtimeBridge ?? MobileRuntimeBridge(),
             copilotWorkflowStore: workflowStore,
             researchLedgerStore: researchLedgerStore,
+            developerWorkflowStore: developerWorkflowStore,
             smartHistoryStore: smartHistoryStore,
             llmConversationStore: llmConversationStore,
             openMindMemoryClient: openMindMemoryClient,

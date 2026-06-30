@@ -982,6 +982,61 @@ private struct CopilotPanelView: View {
                         .pickerStyle(.menu)
                         .accessibilityIdentifier("copilot-afm-pack-picker")
                     }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Developer Workflows", systemImage: "hammer")
+                                .font(.headline)
+                            Spacer()
+                            Label("Local evidence", systemImage: "lock")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        ForEach(browser.developerWorkflowTemplates) { template in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(template.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(template.defaultEvidenceKinds.prefix(3).map(\.title).joined(separator: " / "))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Button {
+                                    _ = browser.startDeveloperWorkflow(template)
+                                } label: {
+                                    Label("Start", systemImage: "play.fill")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(activeRun != nil)
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        if let latestDeveloperRun = browser.developerWorkflowRuns.first {
+                            Divider()
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: latestDeveloperRun.requiresApprovalBeforeMutation ? "checkmark.shield" : "doc.badge.magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(latestDeveloperRun.title)
+                                        .font(.caption.weight(.semibold))
+                                    Text("\(latestDeveloperRun.status.rawValue) - \(latestDeveloperRun.reviewSummary)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-developer-workflows")
                 }
 
                 if let snapshot = browser.latestPageSnapshot {
