@@ -7511,7 +7511,10 @@ struct dBrowserTests {
         let surfaces = BrowserDeveloperAutomationSurface.localFirstSurfaces()
         #expect(surfaces.first { $0.id == .copilot }?.status == .ready)
         #expect(surfaces.first { $0.id == .routine }?.status == .ready)
-        #expect(surfaces.first { $0.id == .mcp }?.status == .staged)
+        #expect(surfaces.first { $0.id == .mcp }?.status == .ready)
+        #expect(surfaces.first { $0.id == .mcp }?.invocation.contains("serve-mcp --stdio") == true)
+        #expect(surfaces.first { $0.id == .localREPL }?.status == .ready)
+        #expect(surfaces.first { $0.id == .localREPL }?.invocation.contains("browser-automation-kit") == true)
         #expect(surfaces.first { $0.id == .localREPL }?.privacyBoundary == .localOnly)
     }
 

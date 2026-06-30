@@ -1012,6 +1012,7 @@ private struct CopilotPanelView: View {
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                                 .disabled(activeRun != nil)
+                                .accessibilityIdentifier("developer-workflow-start-\(template.id)")
                             }
                             .padding(.vertical, 4)
                         }

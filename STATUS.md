@@ -21,6 +21,27 @@
 
 ## Active Task
 
+## BrowserAutomationKit Developer Workflow Surface And Landing Page (#159)
+
+Package the local-first developer workflow automation from #158 behind a local SwiftPM library/CLI/MCP boundary and advertise the new developer workflow evidence surface on the public web landing pages.
+
+- [x] Create the GitHub issue with local-first requirements, implementation plan, and verification lane.
+- [x] Add a `BrowserAutomationKit` SwiftPM package with shared workflow templates, local ledger persistence, read-safe command API, CLI, and local-only MCP-style JSON-RPC server mode.
+- [x] Keep all external mutations behind explicit approval decisions in the package API and expose mutation attempts as blocked local artifacts.
+- [x] Add SwiftPM tests for template coverage, ledger persistence, command behavior, local-only server binding, and approval-gated mutation handling.
+- [x] Update native Swift tests so packaged MCP and local REPL developer automation surfaces report ready without weakening approval gates.
+- [x] Update `./web` landing/capabilities copy to advertise local developer workflow automation and evidence packets.
+- [x] Extend web content tests and verify SwiftPM tests, focused/full Swift tests, macOS build, and web test/build locally before committing.
+
+Validation notes:
+
+- `swift test` passed in `swift/Packages/BrowserAutomationKit`.
+- Focused developer workflow Swift test passed for packaged MCP/local REPL readiness.
+- Full `dBrowserTests` passed.
+- Focused UI smoke test was added, but the local macOS UI runner failed to initialize before executing tests because LocalAuthentication reported `System authentication is running`.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
+- `npm test` and `npm run build` passed in `./web`; Vite reported existing Browserslist age and chunk-size warnings.
+
 ## Aside-Style Developer Browser Automation (#158)
 
 Build the developer workflow automation described in Aside's 2026-06-22 developer article inside dBrowser's native Swift product boundary while preserving the local-first policy: evidence stays local by default, browser context is bounded/redacted, and external mutations remain approval-gated.

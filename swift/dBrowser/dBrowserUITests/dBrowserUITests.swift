@@ -74,6 +74,28 @@ final class dBrowserUITests: XCTestCase {
     }
 
     @MainActor
+    func testDeveloperWorkflowPanelStartsLocalEvidenceRun() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let copilotButton = app.buttons["panel-copilot"]
+        XCTAssertTrue(copilotButton.waitForExistence(timeout: 5))
+        copilotButton.tap()
+
+        let workflowSection = app.descendants(matching: .any)["copilot-developer-workflows"]
+        XCTAssertTrue(workflowSection.waitForExistence(timeout: 5))
+
+        let startButton = app.buttons["developer-workflow-start-failed-ci-triage"]
+        makeVisible(startButton, in: app)
+        XCTAssertTrue(startButton.isHittable)
+        startButton.tap()
+
+        let runningSummary = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "running -")).firstMatch
+        XCTAssertTrue(runningSummary.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Failed CI triage"].exists)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

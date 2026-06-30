@@ -1296,7 +1296,7 @@ struct BrowserDeveloperAutomationSurface: Codable, Equatable, Identifiable {
     var invocation: String
     var privacyBoundary: BrowserDeveloperEvidencePrivacyBoundary
 
-    static func localFirstSurfaces(browserAutomationKitPackaged: Bool = false) -> [BrowserDeveloperAutomationSurface] {
+    static func localFirstSurfaces(browserAutomationKitPackaged: Bool = true) -> [BrowserDeveloperAutomationSurface] {
         [
             BrowserDeveloperAutomationSurface(
                 id: .copilot,
@@ -1307,13 +1307,13 @@ struct BrowserDeveloperAutomationSurface: Codable, Equatable, Identifiable {
             BrowserDeveloperAutomationSurface(
                 id: .mcp,
                 status: browserAutomationKitPackaged ? .ready : .staged,
-                invocation: "Expose the same workflow templates as local MCP tools once BrowserAutomationKit is packaged.",
+                invocation: "Run `browser-automation-kit serve-mcp --stdio` for local MCP clients.",
                 privacyBoundary: .privateBrowserContext
             ),
             BrowserDeveloperAutomationSurface(
                 id: .localREPL,
                 status: browserAutomationKitPackaged ? .ready : .staged,
-                invocation: "Drive the same typed commands from a local REPL without uploading browser state.",
+                invocation: "Use `browser-automation-kit` commands to inspect and update the local ledger.",
                 privacyBoundary: .localOnly
             ),
             BrowserDeveloperAutomationSurface(
