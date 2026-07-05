@@ -1313,7 +1313,7 @@ struct BrowserDeveloperAutomationSurface: Codable, Equatable, Identifiable {
             BrowserDeveloperAutomationSurface(
                 id: .localREPL,
                 status: browserAutomationKitPackaged ? .ready : .staged,
-                invocation: "Use `browser-automation-kit` commands to inspect and update the local ledger.",
+                invocation: "Run `browser-automation-kit list-surfaces`, then inspect templates and runs in the local ledger.",
                 privacyBoundary: .localOnly
             ),
             BrowserDeveloperAutomationSurface(

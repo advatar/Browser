@@ -14,6 +14,9 @@ final class BrowserAutomationKitTests: XCTestCase {
         XCTAssertEqual(surfaces.first { $0.id == .mcp }?.status, .ready)
         XCTAssertEqual(surfaces.first { $0.id == .localREPL }?.status, .ready)
         XCTAssertEqual(surfaces.first { $0.id == .mcp }?.privacyBoundary, .privateBrowserContext)
+        XCTAssertEqual(surfaces.first { $0.id == .localREPL }?.privacyBoundary.title, "Local only")
+        XCTAssertTrue(surfaces.first { $0.id == .localREPL }?.invocation.contains("list-surfaces") == true)
+        XCTAssertEqual(BrowserAutomationService(store: .ephemeral()).listAutomationSurfaces(), surfaces)
     }
 
     func testLedgerPersistsRunsAtExplicitLocalPath() throws {

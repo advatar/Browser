@@ -7514,7 +7514,7 @@ struct dBrowserTests {
         #expect(surfaces.first { $0.id == .mcp }?.status == .ready)
         #expect(surfaces.first { $0.id == .mcp }?.invocation.contains("serve-mcp --stdio") == true)
         #expect(surfaces.first { $0.id == .localREPL }?.status == .ready)
-        #expect(surfaces.first { $0.id == .localREPL }?.invocation.contains("browser-automation-kit") == true)
+        #expect(surfaces.first { $0.id == .localREPL }?.invocation.contains("list-surfaces") == true)
         #expect(surfaces.first { $0.id == .localREPL }?.privacyBoundary == .localOnly)
     }
 

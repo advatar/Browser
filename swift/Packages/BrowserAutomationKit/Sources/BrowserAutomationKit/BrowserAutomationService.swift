@@ -36,6 +36,10 @@ public final class BrowserAutomationService {
         templates
     }
 
+    public func listAutomationSurfaces() -> [BrowserDeveloperAutomationSurface] {
+        automationSurfaces
+    }
+
     public func listRuns() throws -> [BrowserDeveloperWorkflowRun] {
         try store.load()
     }

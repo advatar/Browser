@@ -23,6 +23,15 @@ struct BrowserAutomationKitCLI {
         let service = BrowserAutomationService(store: DeveloperWorkflowLedgerStore(fileURL: ledgerURL(in: args)))
 
         switch command {
+        case "list-surfaces":
+            let surfaces = service.listAutomationSurfaces()
+            if hasFlag("--json", in: args) {
+                try printJSON(["surfaces": surfaces])
+            } else {
+                surfaces.forEach { surface in
+                    print("\(surface.id.rawValue)\t\(surface.status.title)\tboundary=\(surface.privacyBoundary.title)\t\(surface.invocation)")
+                }
+            }
         case "list-templates":
             let templates = service.listTemplates()
             if hasFlag("--json", in: args) {
@@ -178,6 +187,7 @@ struct BrowserAutomationKitCLI {
             browser-automation-kit
 
             Commands:
+              list-surfaces [--json] [--ledger path]
               list-templates [--json] [--ledger path]
               list-runs [--json] [--ledger path]
               start-run <templateID> [--entry-point mcp|localREPL|routine|copilot] [--source-url url] [--snapshot text] [--json] [--ledger path]
@@ -188,6 +198,7 @@ struct BrowserAutomationKitCLI {
 
             Local-first guarantees:
               Evidence is stored in the local dBrowser developer workflow ledger.
+              list-surfaces shows ready Copilot, MCP, local CLI, and routine entry points before a run starts.
               MCP mode reads JSON-RPC lines over stdio and rejects non-local host bindings.
               Protected external mutations are converted into approval-required local evidence.
             """

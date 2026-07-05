@@ -125,6 +125,16 @@ public enum BrowserDeveloperEvidencePrivacyBoundary: String, Codable, Equatable 
     case redactedModelContext
     case externalReferenceOnly
     case userApprovedExport
+
+    public var title: String {
+        switch self {
+        case .localOnly: "Local only"
+        case .privateBrowserContext: "Private browser context"
+        case .redactedModelContext: "Redacted model context"
+        case .externalReferenceOnly: "External reference only"
+        case .userApprovedExport: "User-approved export"
+        }
+    }
 }
 
 public struct BrowserDeveloperEvidenceItem: Codable, Equatable, Identifiable {
@@ -255,11 +265,27 @@ public enum BrowserDeveloperWorkflowEntryPoint: String, Codable, Equatable, Case
     case mcp
     case localREPL
     case routine
+
+    public var title: String {
+        switch self {
+        case .copilot: "Copilot"
+        case .mcp: "MCP"
+        case .localREPL: "Local REPL"
+        case .routine: "Routine"
+        }
+    }
 }
 
 public enum BrowserDeveloperAutomationSurfaceStatus: String, Codable, Equatable {
     case ready
     case staged
+
+    public var title: String {
+        switch self {
+        case .ready: "Ready"
+        case .staged: "Staged"
+        }
+    }
 }
 
 public struct BrowserDeveloperAutomationSurface: Codable, Equatable, Identifiable {
@@ -297,7 +323,7 @@ public struct BrowserDeveloperAutomationSurface: Codable, Equatable, Identifiabl
             BrowserDeveloperAutomationSurface(
                 id: .localREPL,
                 status: browserAutomationKitPackaged ? .ready : .staged,
-                invocation: "Use `browser-automation-kit` commands to inspect and update the local ledger.",
+                invocation: "Run `browser-automation-kit list-surfaces`, then inspect templates and runs in the local ledger.",
                 privacyBoundary: .localOnly
             ),
             BrowserDeveloperAutomationSurface(

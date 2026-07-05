@@ -21,6 +21,28 @@
 
 ## Active Task
 
+## Design Review Polish For Local Developer Workflows (#160)
+
+Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.
+
+- [x] Create the GitHub issue with scope, UX review targets, and verification plan.
+- [x] Review the native Copilot developer workflow surface for hierarchy, clarity, responsive density, accessibility, and local-first trust affordances.
+- [x] Review BrowserAutomationKit CLI/MCP ergonomics for discoverability, approval-gate clarity, and local ledger presentation.
+- [x] Review the `./web` landing page developer workflow promotion for responsive layout, visual quality, command readability, and test coverage.
+- [x] Implement scoped UX, copy, and API polish fixes across the native app, package, and landing page.
+- [x] Add or update focused tests for any changed functionality or public claims.
+- [x] Verify SwiftPM tests, focused/full native Swift tests, macOS build, and web test/build lanes locally before committing.
+- [x] Commit and push the scoped app/package/web changes.
+
+Validation notes:
+
+- `swift test` passed in `swift/Packages/BrowserAutomationKit`.
+- `swift run browser-automation-kit list-surfaces --ledger /tmp/dbrowser-design-review-workflows.json` printed the four ready local automation surfaces with privacy boundaries.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-design-review-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-design-review-build` passed with the existing `BrowserWebView` `WKNavigationDelegate` signature warning.
+- `npm test`, `npm run lint`, and `npm run build` passed in `./web`; lint still reports existing Fast Refresh warnings in shared `ui/*` component exports, and Vite still reports the existing Browserslist age and chunk-size warnings.
+- In-app browser visual inspection was unavailable in this session because `agent.browsers.list()` returned no browser backends.
+
 ## BrowserAutomationKit Developer Workflow Surface And Landing Page (#159)
 
 Package the local-first developer workflow automation from #158 behind a local SwiftPM library/CLI/MCP boundary and advertise the new developer workflow evidence surface on the public web landing pages.

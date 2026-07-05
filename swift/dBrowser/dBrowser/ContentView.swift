@@ -983,61 +983,7 @@ private struct CopilotPanelView: View {
                         .accessibilityIdentifier("copilot-afm-pack-picker")
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Label("Developer Workflows", systemImage: "hammer")
-                                .font(.headline)
-                            Spacer()
-                            Label("Local evidence", systemImage: "lock")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        ForEach(browser.developerWorkflowTemplates) { template in
-                            HStack(spacing: 10) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(template.title)
-                                        .font(.subheadline.weight(.semibold))
-                                    Text(template.defaultEvidenceKinds.prefix(3).map(\.title).joined(separator: " / "))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                Button {
-                                    _ = browser.startDeveloperWorkflow(template)
-                                } label: {
-                                    Label("Start", systemImage: "play.fill")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .disabled(activeRun != nil)
-                                .accessibilityIdentifier("developer-workflow-start-\(template.id)")
-                            }
-                            .padding(.vertical, 4)
-                        }
-
-                        if let latestDeveloperRun = browser.developerWorkflowRuns.first {
-                            Divider()
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: latestDeveloperRun.requiresApprovalBeforeMutation ? "checkmark.shield" : "doc.badge.magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(latestDeveloperRun.title)
-                                        .font(.caption.weight(.semibold))
-                                    Text("\(latestDeveloperRun.status.rawValue) - \(latestDeveloperRun.reviewSummary)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .accessibilityIdentifier("copilot-developer-workflows")
+                    DeveloperWorkflowDeckView(browser: browser, activeRun: activeRun)
                 }
 
                 if let snapshot = browser.latestPageSnapshot {
@@ -1332,6 +1278,233 @@ private struct CopilotPanelView: View {
         case .unavailable:
             return "Unavailable: \(recall.decision.reason)"
         }
+    }
+}
+
+private struct DeveloperWorkflowDeckView: View {
+    @ObservedObject var browser: BrowserViewModel
+    let activeRun: CopilotRun?
+
+    private let surfaceColumns = [GridItem(.adaptive(minimum: 150), spacing: 8)]
+
+    private var templates: [BrowserDeveloperWorkflowTemplate] {
+        browser.developerWorkflowTemplates
+    }
+
+    private var surfaces: [BrowserDeveloperAutomationSurface] {
+        browser.developerAutomationSurfaces
+    }
+
+    private var readySurfaceCount: Int {
+        surfaces.filter { $0.status == .ready }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Developer Workflows", systemImage: "hammer")
+                        .font(.headline)
+                    Text("Local evidence runs for CI, PR review, QA, flags, monitoring, console work, and routines.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Label("\(readySurfaceCount)/\(surfaces.count) ready", systemImage: "checkmark.seal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.green.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("developer-workflow-ready-count")
+            }
+
+            LazyVGrid(columns: surfaceColumns, alignment: .leading, spacing: 8) {
+                ForEach(surfaces) { surface in
+                    DeveloperWorkflowSurfaceChip(surface: surface)
+                }
+            }
+
+            Divider()
+
+            ViewThatFits {
+                HStack(spacing: 8) {
+                    workflowFactLabels
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    workflowFactLabels
+                }
+            }
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(templates) { template in
+                    DeveloperWorkflowTemplateLaunchRow(
+                        template: template,
+                        activeRun: activeRun,
+                        start: { _ = browser.startDeveloperWorkflow(template) }
+                    )
+                }
+            }
+
+            if let latestDeveloperRun = browser.developerWorkflowRuns.first {
+                Divider()
+                DeveloperWorkflowLatestRunView(run: latestDeveloperRun)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityIdentifier("copilot-developer-workflows")
+    }
+
+    @ViewBuilder
+    private var workflowFactLabels: some View {
+        Label("\(templates.count) templates", systemImage: "square.stack.3d.up")
+        Label("Local ledger", systemImage: "lock.doc")
+        Label("Approval gates", systemImage: "checkmark.shield")
+    }
+}
+
+private struct DeveloperWorkflowSurfaceChip: View {
+    let surface: BrowserDeveloperAutomationSurface
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(statusColor)
+                Text(surface.id.title)
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 4)
+                Text(surface.status.rawValue.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(statusColor)
+            }
+
+            Text(surface.privacyBoundary.title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(surface.invocation)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        .background(Color.primary.opacity(0.04))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("developer-workflow-surface-\(surface.id.rawValue)")
+    }
+
+    private var systemImage: String {
+        switch surface.id {
+        case .copilot:
+            return "sparkles"
+        case .mcp:
+            return "point.3.connected.trianglepath.dotted"
+        case .localREPL:
+            return "terminal"
+        case .routine:
+            return "calendar.badge.clock"
+        }
+    }
+
+    private var statusColor: Color {
+        switch surface.status {
+        case .ready:
+            return .green
+        case .staged:
+            return .orange
+        }
+    }
+}
+
+private struct DeveloperWorkflowTemplateLaunchRow: View {
+    let template: BrowserDeveloperWorkflowTemplate
+    let activeRun: CopilotRun?
+    let start: () -> Void
+
+    private var evidenceSummary: String {
+        template.defaultEvidenceKinds.prefix(4).map(\.title).joined(separator: " / ")
+    }
+
+    private var approvalSummary: String {
+        template.protectedActions.isEmpty
+            ? "No protected mutations"
+            : "\(template.protectedActions.count) approval gate\(template.protectedActions.count == 1 ? "" : "s")"
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(template.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(evidenceSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Label(approvalSummary, systemImage: template.protectedActions.isEmpty ? "doc.badge.magnifyingglass" : "checkmark.shield")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                start()
+            } label: {
+                Label("Start", systemImage: "play.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(activeRun != nil)
+            .help(activeRun == nil ? "Start local evidence workflow" : "Wait for the active Copilot run to finish")
+            .accessibilityIdentifier("developer-workflow-start-\(template.id)")
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct DeveloperWorkflowLatestRunView: View {
+    let run: BrowserDeveloperWorkflowRun
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: run.requiresApprovalBeforeMutation ? "checkmark.shield" : "doc.badge.magnifyingglass")
+                .foregroundStyle(run.requiresApprovalBeforeMutation ? .orange : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(run.title)
+                    .font(.caption.weight(.semibold))
+                Text("\(run.status.rawValue) - \(run.reviewSummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    Label("\(run.evidenceItems.count) evidence", systemImage: "tray.full")
+                    Label(run.requiresApprovalBeforeMutation ? "approval required" : "local evidence only", systemImage: "lock")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("developer-workflow-latest-run")
     }
 }
 
