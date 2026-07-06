@@ -301,6 +301,7 @@ struct DownloadBridgeItem: Equatable, Identifiable {
 @MainActor
 protocol RuntimeBridge: AnyObject {
     var featureStates: [RuntimeFeatureState] { get }
+    var privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot { get }
     var walletInfo: WalletBridgeInfo { get }
     var walletPortfolio: WalletPortfolioSnapshot { get }
     var downloadItems: [DownloadBridgeItem] { get }
@@ -344,6 +345,7 @@ protocol RuntimeBridge: AnyObject {
 @MainActor
 final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var featureStates: [RuntimeFeatureState]
+    @Published private(set) var privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot
     @Published private(set) var walletInfo: WalletBridgeInfo
     @Published private(set) var walletPortfolio: WalletPortfolioSnapshot = .disconnected
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
@@ -367,6 +369,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let xrplLightClientServiceClient: XRPLLightClientServiceClient
     private let suiMoveLightClientServiceClient: MoveLightClientServiceClient
     private let aptosMoveLightClientServiceClient: MoveLightClientServiceClient
+    private let privateOverlayHealthChecker: any PrivateOverlayRuntimeHealthChecking
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     @Published private(set) var llmGatewayServiceSnapshot: LLMGatewayServiceSnapshot = .unknown
@@ -438,7 +441,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         tronLightClientServiceClient: TronLightClientServiceClient? = nil,
         xrplLightClientServiceClient: XRPLLightClientServiceClient? = nil,
         suiMoveLightClientServiceClient: MoveLightClientServiceClient? = nil,
-        aptosMoveLightClientServiceClient: MoveLightClientServiceClient? = nil
+        aptosMoveLightClientServiceClient: MoveLightClientServiceClient? = nil,
+        privateOverlayHealthChecker: (any PrivateOverlayRuntimeHealthChecking)? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
@@ -454,9 +458,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.xrplLightClientServiceClient = xrplLightClientServiceClient ?? XRPLLightClientServiceClient(configuration: configuration.xrplLightClient)
         self.suiMoveLightClientServiceClient = suiMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.suiMoveLightClient)
         self.aptosMoveLightClientServiceClient = aptosMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.aptosMoveLightClient)
+        self.privateOverlayHealthChecker = privateOverlayHealthChecker ?? URLSessionPrivateOverlayRuntimeHealthChecker()
         let initialMCPServers = configuration.mcpServers.map(\.sanitizedForSave)
+        let initialPrivateOverlaySnapshot = PrivateOverlayRuntimeSnapshot.unchecked(configuration: configuration.privateOverlayAdapters)
         self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.mcpServers = initialMCPServers
+        self.privateOverlayRuntimeSnapshot = initialPrivateOverlaySnapshot
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
             lastError: "Bitcoin light-client service not checked yet."
@@ -499,6 +506,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         )
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
+            privateOverlayRuntimeSnapshot: initialPrivateOverlaySnapshot,
             afmSnapshot: .unknown,
             llmRouterSnapshot: .unknown,
             llmGatewaySnapshot: .unknown,
@@ -523,6 +531,10 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let xrplSnapshot = xrplLightClientServiceClient.snapshot()
         async let suiMoveSnapshot = suiMoveLightClientServiceClient.snapshot()
         async let aptosMoveSnapshot = aptosMoveLightClientServiceClient.snapshot()
+        async let privateOverlaySnapshot = PrivateOverlayRuntimeSnapshot.checking(
+            configuration: configuration.privateOverlayAdapters,
+            healthChecker: privateOverlayHealthChecker
+        )
         let gatewaySnapshot = await llmGatewayServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
@@ -537,6 +549,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         xrplLightClientSnapshot = await xrplSnapshot
         suiMoveLightClientSnapshot = await suiMoveSnapshot
         aptosMoveLightClientSnapshot = await aptosMoveSnapshot
+        privateOverlayRuntimeSnapshot = await privateOverlaySnapshot
         _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
         _ = chainTrustSnapshot.recordEVMLightClientSnapshot(evmLightClientSnapshot)
         _ = chainTrustSnapshot.recordSolanaLightClientSnapshot(solanaLightClientSnapshot)
@@ -550,6 +563,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         walletPortfolio = walletPortfolio.withChainTrust(chainTrustSnapshot)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
+            privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -566,6 +580,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         llmGatewayServiceSnapshot = snapshot
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
+            privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: snapshot,
@@ -588,6 +603,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         llmGatewayServiceSnapshot = await llmGatewayServiceClient.snapshot()
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
+            privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -690,6 +706,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 llmRouterServiceSnapshot = routerSnapshot
                 featureStates = Self.makeFeatureStates(
                     configuration: configuration,
+                    privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: routerSnapshot,
                     llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -745,6 +762,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 llmGatewayServiceSnapshot = gatewaySnapshot
                 featureStates = Self.makeFeatureStates(
                     configuration: configuration,
+                    privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: llmRouterServiceSnapshot,
                     llmGatewaySnapshot: gatewaySnapshot,
@@ -795,6 +813,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             afmServiceSnapshot = snapshot
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
+                privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
                 afmSnapshot: snapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -911,6 +930,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         } catch {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
+                privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -969,6 +989,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             afmServiceSnapshot = await afmServicesClient.snapshot()
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
+                privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -1375,6 +1396,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
     private static func makeFeatureStates(
         configuration: RuntimeBridgeConfiguration,
+        privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot,
         afmSnapshot: AFMServiceSnapshot,
         llmRouterSnapshot: LLMRouterServiceSnapshot,
         llmGatewaySnapshot: LLMGatewayServiceSnapshot,
@@ -1412,6 +1434,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             && chainTrustSnapshot.strongestState != .failed
         let mcpInventory = MCPServerInventory(servers: mcpServers)
         let mcpMode: RuntimeBridgeMode = mcpInventory.connectedCount > 0 ? .service : .local
+        let privateOverlayMode: RuntimeBridgeMode = privateOverlayRuntimeSnapshot.hasOperationalRuntime ? .local : .unavailable
 
         return [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
@@ -1428,11 +1451,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             ),
             RuntimeFeatureState(
                 feature: .privateOverlayProtocols,
-                mode: configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty ? .unavailable : .local,
-                isAvailable: !configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty,
-                status: configuration.privateOverlayAdapters.enabledNetworkIDs.isEmpty
-                    ? "Private-overlay adapters disabled"
-                    : "Local adapters for Tor, I2P, Hyphanet, ZeroNet, and Lokinet"
+                mode: privateOverlayMode,
+                isAvailable: privateOverlayRuntimeSnapshot.hasOperationalRuntime,
+                status: privateOverlayRuntimeSnapshot.summary
             ),
             RuntimeFeatureState(
                 feature: .vpnClient,
@@ -1497,6 +1518,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let update = chainTrustSnapshot.recordAFMarketVerification(report)
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
+            privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -1540,6 +1562,16 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 resolvedURLString: nil,
                 source: .privateOverlayAdapterRequired,
                 message: "\(network.title) requires the local \(network.id) private-overlay adapter. dBrowser will not search, resolve DNS, or use clearnet fallback for this address.",
+                isContentLoadable: false
+            )
+        }
+        if let runtimeStatus = privateOverlayRuntimeSnapshot.status(for: network),
+           runtimeStatus.blocksNavigation {
+            return RuntimeBridgeResolution(
+                originalInput: canonicalInput,
+                resolvedURLString: nil,
+                source: .privateOverlayAdapterRequired,
+                message: "\(network.title) local runtime is \(runtimeStatus.readiness.statusText): \(runtimeStatus.message) dBrowser will not search, resolve DNS, or use clearnet fallback for this address.",
                 isContentLoadable: false
             )
         }

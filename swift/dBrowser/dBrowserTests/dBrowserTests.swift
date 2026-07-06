@@ -13,6 +13,17 @@ import UniversalInteractionKit
 @preconcurrency import WebKit
 @testable import dBrowser
 
+private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking {
+    var results: [String: PrivateOverlayRuntimeProbeResult]
+
+    func check(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        results[network.id] ?? .notInstalled("\(endpoint.displayName) is not running in the test harness.")
+    }
+}
+
 @MainActor
 struct dBrowserTests {
 
@@ -83,6 +94,88 @@ struct dBrowserTests {
         }
         #expect(freenetRaw.hasPrefix("hyphanet:USK@"))
         #expect(hyphanet == .hyphanet)
+    }
+
+    @Test func privateOverlayRuntimeReadinessSnapshotsExposeConfiguredAndDisabledStates() {
+        let unchecked = PrivateOverlayRuntimeSnapshot.unchecked(configuration: .localDefaults)
+        let tor = unchecked.status(for: .tor)
+
+        #expect(tor?.readiness == .installed)
+        #expect(tor?.blocksNavigation == false)
+        #expect(unchecked.summary.contains("health not verified"))
+
+        let disabled = PrivateOverlayRuntimeSnapshot.unchecked(configuration: .disabled)
+        #expect(disabled.status(for: .tor)?.readiness == .notInstalled)
+        #expect(disabled.status(for: .tor)?.blocksNavigation == true)
+        #expect(disabled.summary.contains("required"))
+    }
+
+    @Test func privateOverlayRuntimeHealthChecksMapPerNetworkReadiness() async {
+        let checker = StubPrivateOverlayRuntimeHealthChecker(
+            results: [
+                "tor": .verified("Tor smoke fixture fetched through onion routing."),
+                "i2p": .reachable("I2P router health endpoint is reachable."),
+                "hyphanet": .running("Hyphanet local proxy is running without health contract."),
+                "zeronet": .misconfigured("ZeroNet adapter reports wrong network."),
+                "lokinet": .blocked("Lokinet adapter reports clearnet fallback.")
+            ]
+        )
+
+        let snapshot = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: checker
+        )
+
+        #expect(snapshot.status(for: .tor)?.readiness == .verified)
+        #expect(snapshot.status(for: .i2p)?.readiness == .reachable)
+        #expect(snapshot.status(for: .hyphanet)?.readiness == .running)
+        #expect(snapshot.status(for: .zeronet)?.blocksNavigation == true)
+        #expect(snapshot.status(for: .lokinet)?.blocksNavigation == true)
+        #expect(snapshot.hasOperationalRuntime)
+        #expect(snapshot.summary.contains("verified") || snapshot.summary.contains("operational"))
+    }
+
+    @Test func privateOverlayRuntimeHealthSummaryReportsConfiguredAdaptersThatDoNotRespond() async {
+        let snapshot = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: StubPrivateOverlayRuntimeHealthChecker(results: [:])
+        )
+
+        #expect(snapshot.hasOperationalRuntime == false)
+        #expect(snapshot.status(for: .tor)?.readiness == .notInstalled)
+        #expect(snapshot.status(for: .tor)?.blocksNavigation == true)
+        #expect(snapshot.summary.contains("not responding"))
+    }
+
+    @Test func runtimeBridgeSurfacesPrivateOverlayReadinessAndFailsClosedForKnownBadRuntime() async {
+        let checker = StubPrivateOverlayRuntimeHealthChecker(
+            results: [
+                "tor": .blocked("Tor adapter reports clearnet fallback."),
+                "i2p": .verified("I2P deterministic fixture fetched through eepproxy.")
+            ]
+        )
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(),
+            privateOverlayHealthChecker: checker
+        )
+
+        _ = await bridge.refreshStatus()
+        let privateOverlayFeature = bridge.featureStates.first { $0.feature == .privateOverlayProtocols }
+
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .tor)?.readiness == .blocked)
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .i2p)?.readiness == .verified)
+        #expect(privateOverlayFeature?.mode == .local)
+        #expect(privateOverlayFeature?.isAvailable == true)
+        #expect(privateOverlayFeature?.status.contains("verified") == true)
+
+        let blockedOnion = await bridge.resolve("example.onion/private")
+        #expect(blockedOnion.source == .privateOverlayAdapterRequired)
+        #expect(blockedOnion.resolvedURLString == nil)
+        #expect(blockedOnion.message?.contains("clearnet fallback") == true)
+
+        let verifiedI2P = await bridge.resolve("forum.i2p")
+        #expect(verifiedI2P.source == .privateOverlayLocalAdapter)
+        #expect(verifiedI2P.resolvedURLString?.contains("127.0.0.1:4894") == true)
     }
 
     @Test func runtimeBridgeRoutesPrivateOverlaysToLocalAdaptersAndFailsClosed() async {

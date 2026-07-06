@@ -2930,7 +2930,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                 detailPoints: [
                     "Tabs carrying private-overlay content are marked ephemeral so dBrowser skips browser history and smart-history persistence.",
                     "The WebView loads app-local adapter URLs while the address bar keeps the original private-overlay locator visible to the user.",
-                    "If the matching local adapter is disabled, navigation fails closed with a runtime notice instead of trying clearnet fallback.",
+                    "Runtime status distinguishes configured, running, reachable, blocked, misconfigured, and verified adapters; known bad adapter states fail closed with a runtime notice.",
                     "Copilot page snapshots and OpenMind page context are omitted by default for private-overlay tabs."
                 ]
             )

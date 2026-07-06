@@ -1,6 +1,6 @@
 import Foundation
 
-enum PrivateOverlayNetwork: String, CaseIterable, Identifiable, Equatable {
+enum PrivateOverlayNetwork: String, CaseIterable, Identifiable, Equatable, Sendable {
     case tor
     case i2p
     case hyphanet
@@ -190,14 +190,14 @@ enum PrivateOverlayNetwork: String, CaseIterable, Identifiable, Equatable {
     }
 }
 
-struct PrivateOverlayAdapterEndpoint: Equatable {
+struct PrivateOverlayAdapterEndpoint: Equatable, Sendable {
     let baseURL: URL
     let routePath: String
     let displayName: String
     let trustBoundary: String
 }
 
-struct PrivateOverlayAdapterConfiguration: Equatable {
+struct PrivateOverlayAdapterConfiguration: Equatable, Sendable {
     var endpoints: [String: PrivateOverlayAdapterEndpoint]
 
     nonisolated static let disabled = PrivateOverlayAdapterConfiguration(endpoints: [:])
@@ -251,5 +251,339 @@ struct PrivateOverlayAdapterConfiguration: Equatable {
             copy.endpoints.removeValue(forKey: networkID)
         }
         return copy
+    }
+}
+
+enum PrivateOverlayRuntimeReadiness: String, CaseIterable, Codable, Equatable, Sendable {
+    case notInstalled
+    case installed
+    case running
+    case reachable
+    case misconfigured
+    case blocked
+    case verified
+
+    nonisolated var allowsLocalNavigation: Bool {
+        switch self {
+        case .installed, .running, .reachable, .verified:
+            return true
+        case .notInstalled, .misconfigured, .blocked:
+            return false
+        }
+    }
+
+    nonisolated var isOperational: Bool {
+        switch self {
+        case .running, .reachable, .verified:
+            return true
+        case .notInstalled, .installed, .misconfigured, .blocked:
+            return false
+        }
+    }
+
+    nonisolated var statusText: String {
+        switch self {
+        case .notInstalled: "adapter required"
+        case .installed: "health unchecked"
+        case .running: "adapter running"
+        case .reachable: "adapter reachable"
+        case .misconfigured: "adapter misconfigured"
+        case .blocked: "adapter blocked"
+        case .verified: "network verified"
+        }
+    }
+}
+
+struct PrivateOverlayRuntimeProbeResult: Equatable, Sendable {
+    var readiness: PrivateOverlayRuntimeReadiness
+    var message: String
+
+    nonisolated static func notInstalled(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .notInstalled, message: message)
+    }
+
+    nonisolated static func installed(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .installed, message: message)
+    }
+
+    nonisolated static func running(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .running, message: message)
+    }
+
+    nonisolated static func reachable(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .reachable, message: message)
+    }
+
+    nonisolated static func misconfigured(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .misconfigured, message: message)
+    }
+
+    nonisolated static func blocked(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .blocked, message: message)
+    }
+
+    nonisolated static func verified(_ message: String) -> PrivateOverlayRuntimeProbeResult {
+        PrivateOverlayRuntimeProbeResult(readiness: .verified, message: message)
+    }
+}
+
+struct PrivateOverlayRuntimeStatus: Equatable, Identifiable, Sendable {
+    var network: PrivateOverlayNetwork
+    var endpoint: PrivateOverlayAdapterEndpoint?
+    var readiness: PrivateOverlayRuntimeReadiness
+    var message: String
+
+    nonisolated var id: String { network.id }
+
+    nonisolated var displayName: String {
+        endpoint?.displayName ?? network.title
+    }
+
+    nonisolated var statusText: String {
+        "\(network.id): \(readiness.statusText)"
+    }
+
+    nonisolated var blocksNavigation: Bool {
+        !readiness.allowsLocalNavigation
+    }
+}
+
+struct PrivateOverlayRuntimeSnapshot: Equatable, Sendable {
+    var statuses: [PrivateOverlayRuntimeStatus]
+
+    nonisolated static func unchecked(configuration: PrivateOverlayAdapterConfiguration) -> PrivateOverlayRuntimeSnapshot {
+        PrivateOverlayRuntimeSnapshot(
+            statuses: PrivateOverlayNetwork.allCases.map { network in
+                if let endpoint = configuration.endpoint(for: network.id) {
+                    return PrivateOverlayRuntimeStatus(
+                        network: network,
+                        endpoint: endpoint,
+                        readiness: .installed,
+                        message: "\(endpoint.displayName) is configured; runtime health has not been checked yet."
+                    )
+                }
+                return PrivateOverlayRuntimeStatus(
+                    network: network,
+                    endpoint: nil,
+                    readiness: .notInstalled,
+                    message: "\(network.title) has no configured local adapter endpoint."
+                )
+            }
+        )
+    }
+
+    static func checking(
+        configuration: PrivateOverlayAdapterConfiguration,
+        healthChecker: any PrivateOverlayRuntimeHealthChecking
+    ) async -> PrivateOverlayRuntimeSnapshot {
+        var checkedStatuses: [PrivateOverlayRuntimeStatus] = []
+        for network in PrivateOverlayNetwork.allCases {
+            guard let endpoint = configuration.endpoint(for: network.id) else {
+                checkedStatuses.append(
+                    PrivateOverlayRuntimeStatus(
+                        network: network,
+                        endpoint: nil,
+                        readiness: .notInstalled,
+                        message: "\(network.title) has no configured local adapter endpoint."
+                    )
+                )
+                continue
+            }
+
+            let result = await healthChecker.check(network: network, endpoint: endpoint)
+            checkedStatuses.append(
+                PrivateOverlayRuntimeStatus(
+                    network: network,
+                    endpoint: endpoint,
+                    readiness: result.readiness,
+                    message: result.message
+                )
+            )
+        }
+        return PrivateOverlayRuntimeSnapshot(statuses: checkedStatuses)
+    }
+
+    nonisolated func status(for network: PrivateOverlayNetwork) -> PrivateOverlayRuntimeStatus? {
+        statuses.first { $0.network == network }
+    }
+
+    nonisolated var operationalStatuses: [PrivateOverlayRuntimeStatus] {
+        statuses.filter { $0.readiness.isOperational }
+    }
+
+    nonisolated var verifiedStatuses: [PrivateOverlayRuntimeStatus] {
+        statuses.filter { $0.readiness == .verified }
+    }
+
+    nonisolated var hasOperationalRuntime: Bool {
+        !operationalStatuses.isEmpty
+    }
+
+    nonisolated var summary: String {
+        if statuses.isEmpty {
+            return "Private-overlay adapters unavailable"
+        }
+        let verifiedCount = verifiedStatuses.count
+        let operationalCount = operationalStatuses.count
+        if verifiedCount == statuses.count {
+            return "All private-overlay runtimes verified"
+        }
+        if verifiedCount > 0 {
+            return "\(verifiedCount) verified, \(operationalCount) operational private-overlay runtime\(operationalCount == 1 ? "" : "s")"
+        }
+        if operationalCount > 0 {
+            return "\(operationalCount) operational private-overlay runtime\(operationalCount == 1 ? "" : "s"); smoke tests pending"
+        }
+        let configuredStatuses = statuses.filter { $0.endpoint != nil }
+        let configuredCount = configuredStatuses.count
+        if configuredCount > 0 {
+            let blockedCount = configuredStatuses.filter { $0.readiness == .blocked }.count
+            let misconfiguredCount = configuredStatuses.filter { $0.readiness == .misconfigured }.count
+            let notRespondingCount = configuredStatuses.filter { $0.readiness == .notInstalled }.count
+            if blockedCount > 0 || misconfiguredCount > 0 || notRespondingCount > 0 {
+                var fragments: [String] = []
+                if notRespondingCount > 0 {
+                    fragments.append("\(notRespondingCount) not responding")
+                }
+                if blockedCount > 0 {
+                    fragments.append("\(blockedCount) blocked")
+                }
+                if misconfiguredCount > 0 {
+                    fragments.append("\(misconfiguredCount) misconfigured")
+                }
+                return "\(fragments.joined(separator: ", ")) private-overlay runtime\(configuredCount == 1 ? "" : "s")"
+            }
+            return "\(configuredCount) private-overlay adapter\(configuredCount == 1 ? "" : "s") configured; health not verified"
+        }
+        return "Private-overlay runtime adapters required"
+    }
+}
+
+protocol PrivateOverlayRuntimeHealthChecking: Sendable {
+    func check(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult
+}
+
+private struct PrivateOverlayRuntimeHealthPayload: Decodable, Sendable {
+    var network: String?
+    var status: String?
+    var message: String?
+    var verified: Bool?
+    var clearnetFallback: Bool?
+}
+
+struct URLSessionPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking, Sendable {
+    var timeout: TimeInterval = 0.35
+
+    func check(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        guard let url = healthURL(for: network, endpoint: endpoint) else {
+            return .misconfigured("\(endpoint.displayName) has an invalid health-check URL.")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .misconfigured("\(endpoint.displayName) returned a non-HTTP health response.")
+            }
+            return probeResult(
+                network: network,
+                endpoint: endpoint,
+                statusCode: httpResponse.statusCode,
+                data: data
+            )
+        } catch {
+            return .notInstalled("\(endpoint.displayName) did not respond on \(endpoint.baseURL.absoluteString); runtime may be missing or stopped.")
+        }
+    }
+
+    private func healthURL(
+        for network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) -> URL? {
+        guard var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = "/private-overlay/\(network.id)/health"
+        components.queryItems = [
+            URLQueryItem(name: "network", value: network.id),
+            URLQueryItem(name: "adapter", value: network.adapterID)
+        ]
+        return components.url
+    }
+
+    private func probeResult(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint,
+        statusCode: Int,
+        data: Data
+    ) -> PrivateOverlayRuntimeProbeResult {
+        switch statusCode {
+        case 200:
+            guard !data.isEmpty,
+                  let payload = try? JSONDecoder().decode(PrivateOverlayRuntimeHealthPayload.self, from: data) else {
+                return .reachable("\(endpoint.displayName) health endpoint is reachable; network smoke verification is still pending.")
+            }
+            return probeResult(network: network, endpoint: endpoint, payload: payload)
+        case 204:
+            return .reachable("\(endpoint.displayName) health endpoint is reachable; network smoke verification is still pending.")
+        case 401, 403:
+            return .blocked("\(endpoint.displayName) rejected health checks; user permission or platform policy is required.")
+        case 404, 405, 501:
+            return .running("\(endpoint.displayName) responded locally but does not expose the dBrowser health contract yet.")
+        case 400, 409, 422, 500...599:
+            return .misconfigured("\(endpoint.displayName) reported HTTP \(statusCode); adapter configuration needs attention.")
+        default:
+            return .misconfigured("\(endpoint.displayName) returned unexpected HTTP \(statusCode).")
+        }
+    }
+
+    private func probeResult(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint,
+        payload: PrivateOverlayRuntimeHealthPayload
+    ) -> PrivateOverlayRuntimeProbeResult {
+        if let payloadNetwork = payload.network,
+           payloadNetwork.caseInsensitiveCompare(network.id) != .orderedSame {
+            return .misconfigured("\(endpoint.displayName) health response identified \(payloadNetwork), expected \(network.id).")
+        }
+        if payload.clearnetFallback == true {
+            return .blocked("\(endpoint.displayName) reports clearnet fallback; dBrowser will not use it for private-overlay navigation.")
+        }
+
+        let message = payload.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackMessage = "\(endpoint.displayName) health endpoint is reachable; network smoke verification is still pending."
+        let resolvedMessage = message?.isEmpty == false ? message! : fallbackMessage
+        if payload.verified == true {
+            return .verified(resolvedMessage)
+        }
+
+        switch payload.status?.lowercased() {
+        case "verified":
+            return .verified(resolvedMessage)
+        case "reachable", "ready", "ok", "healthy":
+            return .reachable(resolvedMessage)
+        case "running":
+            return .running(resolvedMessage)
+        case "installed":
+            return .installed(resolvedMessage)
+        case "blocked", "permission-required":
+            return .blocked(resolvedMessage)
+        case "misconfigured", "error", "failed":
+            return .misconfigured(resolvedMessage)
+        case "not-installed", "missing", "stopped":
+            return .notInstalled(resolvedMessage)
+        default:
+            return .reachable(resolvedMessage)
+        }
     }
 }

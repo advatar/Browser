@@ -45,11 +45,26 @@ Validation notes:
 Review result: dBrowser has first-class private-overlay routing for Tor/.onion, I2P/.i2p, Hyphanet/Freenet keys, ZeroNet, and Lokinet through #154, including fail-closed local adapter routing and trace-minimized tabs. It does not yet have proven full dark-web protocol support because the repo does not bundle/manage every overlay runtime or run end-to-end network smoke tests for each protocol.
 
 - [x] Create the GitHub issue with scope, gap analysis, implementation plan, and verification lane.
-- [ ] Define runtime-readiness states for Tor/Arti, I2P, Hyphanet/Freenet, ZeroNet, and Lokinet.
-- [ ] Add adapter health checks for installed, running, reachable, misconfigured, and blocked states.
+- [x] Define runtime-readiness states for Tor/Arti, I2P, Hyphanet/Freenet, ZeroNet, and Lokinet.
+- [x] Add adapter health checks for installed, running, reachable, misconfigured, and blocked states.
 - [ ] Bundle or manage launch/install paths where licensing and platform constraints allow.
 - [ ] Add integration smoke tests that fetch deterministic fixtures through each private-overlay adapter without DNS, search, HTTPS, or clearnet fallback.
 - [ ] Update UI/docs/landing claims so private-overlay routing and complete network runtime support are not conflated.
+
+First implementation slice:
+
+- [x] Add a typed private-overlay runtime readiness contract and per-network status snapshot.
+- [x] Add deterministic adapter health-check result mapping for configured loopback endpoints.
+- [x] Feed readiness into `RuntimeBridge` feature states and private-overlay navigation messages.
+- [x] Add focused Swift tests for readiness mapping, disabled/misconfigured states, and feature-state summaries.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- Focused private-overlay runtime readiness tests passed, including unchecked, blocked, misconfigured, verified, and not-responding states.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-build` passed.
 
 ## Design Review Polish For Local Developer Workflows (#160)
 
