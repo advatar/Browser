@@ -21,6 +21,36 @@
 
 ## Active Task
 
+## Native Ad And Tracker Blocking (#161)
+
+Add a first-class native ad/tracker blocker to the current Swift dBrowser product so normal WKWebView browsing blocks common ad and tracking requests by default while preserving local/decentralized adapter routes.
+
+- [x] Create the GitHub issue with scope, implementation plan, and verification lane.
+- [x] Add a deterministic bundled ad/tracker blocking rule model that can compile into WebKit content blocker JSON.
+- [x] Install the compiled content rule list into every native WKWebView before navigation.
+- [x] Surface blocker state in the browser UI with default-on behavior and a clear pause/resume control.
+- [x] Preserve localhost, private-overlay, and decentralized adapter routes so privacy infrastructure is not blocked as advertising.
+- [x] Add focused Swift tests for default state, rule coverage, and local route exclusions.
+- [x] Verify focused/full native Swift tests and macOS build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- Focused ad blocker Swift tests passed, including WebKit content rule compilation.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-adblock-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-adblock-build` passed.
+
+## Private Overlay Runtime Completeness (#162)
+
+Review result: dBrowser has first-class private-overlay routing for Tor/.onion, I2P/.i2p, Hyphanet/Freenet keys, ZeroNet, and Lokinet through #154, including fail-closed local adapter routing and trace-minimized tabs. It does not yet have proven full dark-web protocol support because the repo does not bundle/manage every overlay runtime or run end-to-end network smoke tests for each protocol.
+
+- [x] Create the GitHub issue with scope, gap analysis, implementation plan, and verification lane.
+- [ ] Define runtime-readiness states for Tor/Arti, I2P, Hyphanet/Freenet, ZeroNet, and Lokinet.
+- [ ] Add adapter health checks for installed, running, reachable, misconfigured, and blocked states.
+- [ ] Bundle or manage launch/install paths where licensing and platform constraints allow.
+- [ ] Add integration smoke tests that fetch deterministic fixtures through each private-overlay adapter without DNS, search, HTTPS, or clearnet fallback.
+- [ ] Update UI/docs/landing claims so private-overlay routing and complete network runtime support are not conflated.
+
 ## Design Review Polish For Local Developer Workflows (#160)
 
 Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.

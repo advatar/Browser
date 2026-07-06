@@ -30,6 +30,7 @@ struct ContentView: View {
             browserWorkspace
         }
         .task {
+            BrowserAdBlocker.prewarm()
             await browser.refreshRuntimeBridgeStatus()
         }
     }
@@ -73,6 +74,14 @@ struct ContentView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Reload")
+
+            Button {
+                browser.toggleAdBlocking()
+            } label: {
+                Image(systemName: browser.adBlockingMode.systemImage)
+            }
+            .help(browser.adBlockingMode.toolbarHelp)
+            .accessibilityIdentifier("ad-blocker-toggle")
 
             BrowserAddressAutocompleteField(
                 browser: browser,
@@ -156,6 +165,7 @@ struct ContentView: View {
                 BrowserWebView(
                     tab: $browser.tabs[index],
                     command: browser.webCommand,
+                    adBlockingMode: browser.adBlockingMode,
                     automationRequest: browser.automationRequest,
                     onNavigationUpdate: browser.applyNavigationUpdate,
                     onAutomationResult: browser.applyAutomationResult
@@ -176,6 +186,7 @@ struct ContentView: View {
             if browser.activeCopilotRunCount > 0 {
                 Text("\(browser.activeCopilotRunCount) Copilot active")
             }
+            Label(browser.adBlockingMode.statusText, systemImage: browser.adBlockingMode.systemImage)
             Text("\(browser.tabs.count) tab\(browser.tabs.count == 1 ? "" : "s")")
             Text(runtimeBridgeStatusText)
         }

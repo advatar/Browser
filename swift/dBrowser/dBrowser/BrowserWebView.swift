@@ -15,6 +15,7 @@ typealias BrowserViewRepresentable = UIViewRepresentable
 struct BrowserWebView: BrowserViewRepresentable {
     @Binding var tab: BrowserTab
     let command: BrowserWebCommandRequest?
+    let adBlockingMode: BrowserAdBlockingMode
     let automationRequest: BrowserAutomationRequest?
     let onNavigationUpdate: (BrowserNavigationUpdate) -> Void
     let onAutomationResult: (BrowserAutomationResult) -> Void
@@ -58,44 +59,17 @@ struct BrowserWebView: BrowserViewRepresentable {
 
     private func update(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        applyCommandIfNeeded(webView, context: context)
-        context.coordinator.applyAutomationIfNeeded(automationRequest, webView: webView)
-        loadTabIfNeeded(webView, context: context)
-    }
-
-    private func applyCommandIfNeeded(_ webView: WKWebView, context: Context) {
-        guard let command else { return }
-        guard command.tabID == tab.id else { return }
-        guard context.coordinator.lastHandledCommandID != command.id else { return }
-        context.coordinator.lastHandledCommandID = command.id
-
-        switch command.command {
-        case .back:
-            if webView.canGoBack {
-                webView.goBack()
-            }
-        case .forward:
-            if webView.canGoForward {
-                webView.goForward()
-            }
-        case .reload:
-            webView.reload()
-        case .stop:
-            webView.stopLoading()
-        }
-    }
-
-    private func loadTabIfNeeded(_ webView: WKWebView, context: Context) {
-        guard let url = tab.loadableURL else { return }
-        guard context.coordinator.lastRequestedURL != url else { return }
-        context.coordinator.lastRequestedURL = url
-        webView.load(URLRequest(url: url))
+        context.coordinator.applyAdBlockingIfNeeded(adBlockingMode, webView: webView)
+        guard context.coordinator.isAdBlockingReady else { return }
+        context.coordinator.processPendingWork(webView: webView)
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var parent: BrowserWebView
         var lastRequestedURL: URL?
         var lastHandledCommandID: UUID?
+        var lastAppliedAdBlockingMode: BrowserAdBlockingMode?
+        var isAdBlockingReady = false
         var lastHandledAutomationID: UUID?
         var pendingAutomationIDs = Set<UUID>()
         var pendingTimeouts: [UUID: DispatchWorkItem] = [:]
@@ -104,6 +78,59 @@ struct BrowserWebView: BrowserViewRepresentable {
 
         init(_ parent: BrowserWebView) {
             self.parent = parent
+        }
+
+        func applyAdBlockingIfNeeded(_ mode: BrowserAdBlockingMode, webView: WKWebView) {
+            guard lastAppliedAdBlockingMode != mode else { return }
+            lastAppliedAdBlockingMode = mode
+            isAdBlockingReady = false
+            BrowserAdBlocker.apply(
+                to: webView.configuration.userContentController,
+                mode: mode,
+                isCurrent: { [weak self] in
+                    self?.lastAppliedAdBlockingMode == mode
+                }
+            ) { [weak self, weak webView] in
+                guard let self, let webView else { return }
+                guard self.lastAppliedAdBlockingMode == mode else { return }
+                self.isAdBlockingReady = true
+                self.processPendingWork(webView: webView)
+            }
+        }
+
+        func processPendingWork(webView: WKWebView) {
+            applyCommandIfNeeded(parent.command, webView: webView)
+            applyAutomationIfNeeded(parent.automationRequest, webView: webView)
+            loadTabIfNeeded(webView)
+        }
+
+        private func applyCommandIfNeeded(_ command: BrowserWebCommandRequest?, webView: WKWebView) {
+            guard let command else { return }
+            guard command.tabID == parent.tab.id else { return }
+            guard lastHandledCommandID != command.id else { return }
+            lastHandledCommandID = command.id
+
+            switch command.command {
+            case .back:
+                if webView.canGoBack {
+                    webView.goBack()
+                }
+            case .forward:
+                if webView.canGoForward {
+                    webView.goForward()
+                }
+            case .reload:
+                webView.reload()
+            case .stop:
+                webView.stopLoading()
+            }
+        }
+
+        private func loadTabIfNeeded(_ webView: WKWebView) {
+            guard let url = parent.tab.loadableURL else { return }
+            guard lastRequestedURL != url else { return }
+            lastRequestedURL = url
+            webView.load(URLRequest(url: url))
         }
 
         func applyAutomationIfNeeded(_ request: BrowserAutomationRequest?, webView: WKWebView) {
@@ -247,7 +274,7 @@ struct BrowserWebView: BrowserViewRepresentable {
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.cancel)

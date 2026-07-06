@@ -12,6 +12,7 @@ Current product:
 - SwiftUI shell: `ContentView.swift`.
 - Browser state and navigation: `BrowserViewModel.swift` and `BrowserModels.swift`.
 - Web rendering: `BrowserWebView.swift` wrapping `WKWebView`.
+- Ad and tracker blocking: `BrowserAdBlocker.swift` compiles local WebKit content-blocker rules.
 - Runtime integration boundary: `RuntimeBridge.swift`.
 - AFMarket service client: `AFMServicesClient.swift`.
 - Local MLX model selection: `BundledLLM.swift`.
@@ -35,6 +36,7 @@ The strategic north star is to make dBrowser the Web3 and AI browser to beat: a 
 The app should:
 
 - Load normal web pages in `WKWebView`.
+- Block common advertising and tracker requests locally by default while preserving localhost and decentralized adapter routes.
 - Resolve IPFS, IPNS, ENS, and other decentralized addresses through verified light-client paths where possible, with clearly labeled gateway fallback.
 - Provide a desktop-class LLM conversation UI similar in scope to Claude Desktop or ChatGPT Desktop.
 - Let the user switch the active LLM at any point while preserving conversation context.
@@ -169,6 +171,7 @@ The current Swift app already has a usable shell:
 | --- | --- | --- |
 | Browser chrome | `ContentView.swift` renders toolbar, address bar, tab strip, status bar, home, panels | Current |
 | Web rendering | `BrowserWebView.swift` owns a `WKWebView`, navigation delegate, back/forward/reload/stop commands | Current |
+| Ad and tracker blocking | `BrowserAdBlocker.swift` installs a default-on `WKContentRuleList` with block, cookie-strip, cosmetic-hide, and local-route exemption rules | Current |
 | Tabs/history/bookmarks | `BrowserViewModel.swift` manages in-memory tabs, history, bookmarks, autocomplete | Current |
 | URL resolution | `BrowserURLResolver` accepts HTTP/HTTPS, blocks unsupported schemes, delegates IPFS/IPNS/ENS to runtime bridge | Current |
 | Runtime status | `MobileRuntimeBridge` exposes feature states for browsing, decentralized protocols, AFM, Copilot, wallet, downloads | Current |
@@ -355,6 +358,8 @@ Implementation plan:
 The handler service is not a hidden centralized resolver. It validates the Swift adapter metadata, keeps the original URI and locator metadata inside the local boundary, redacts secret capabilities in rendered responses, and proxies only configured local protocol backends. When a backend is missing, the handler returns a protocol-specific backend-required response rather than pretending bytes were resolved.
 
 BitTorrent/WebTorrent is a privacy-scoped transfer path rather than a normal content gateway. Torrent transfer tabs suppress dBrowser history, smart-history indexing, bookmarks, page snapshots, and Copilot/OpenMind page context; the app keeps the original locator visible while routing load work through the local `127.0.0.1` torrent adapter with ephemeral privacy metadata. This minimizes dBrowser-side traces and enforces the local/private routing boundary, but it does not erase OS, network, peer-swarm, VPN-provider, or helper-process traces. Effective torrent privacy depends on the local adapter/torrent engine implementation, the selected VPN or tunnel path, and the user's tunnel configuration.
+
+Private-overlay browsing has the same honesty requirement. The Swift resolver recognizes Tor onion services, I2P, Hyphanet/Freenet, ZeroNet, and Lokinet before generic URL handling and routes them only to local/private adapter endpoints with fail-closed behavior. That is browser-side support, not proof that every overlay network runtime is bundled, healthy, or fetching content end to end. Full support requires managed runtimes, per-network health checks, and smoke tests that prove traffic stays off DNS, search, implicit HTTPS, public gateways, and clearnet fallback.
 
 The built-in VPN client contract covers WireGuard, IKEv2/IPSec, OpenVPN, and custom packet tunnels through NetworkExtension-backed profiles. Runtime availability means the app has an enabled profile set and the necessary OS entitlement; it does not mean traffic is anonymous by default. Developers must keep UI and logs honest: VPN privacy depends on the granted NetworkExtension entitlement, the actual tunnel/server configuration, key and credential handling, DNS/leak behavior, and any local adapter or helper implementation that sends traffic through the tunnel.
 

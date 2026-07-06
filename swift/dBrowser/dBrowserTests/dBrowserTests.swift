@@ -10,6 +10,7 @@ import Foundation
 import CryptoKit
 import MLXLMCommon
 import UniversalInteractionKit
+@preconcurrency import WebKit
 @testable import dBrowser
 
 @MainActor
@@ -5941,6 +5942,90 @@ struct dBrowserTests {
         #expect(urls.contains("https://zerok.cloud"))
     }
 
+    @Test func adBlockerRulesCoverAdsTrackersCosmeticHidingAndLocalExclusions() throws {
+        let rules = BrowserAdBlockingRules.defaultRules
+        let json = try BrowserAdBlockingRules.contentRuleListJSON()
+
+        #expect(rules.contains { $0.action.type == "block" })
+        #expect(rules.contains { $0.action.type == "block-cookies" })
+        #expect(rules.contains { $0.action.type == "css-display-none" })
+        #expect(rules.last?.action.type == "ignore-previous-rules")
+        #expect(rules.suffix(BrowserAdBlockingRules.localRouteFilters.count).allSatisfy { $0.action.type == "ignore-previous-rules" })
+        #expect(rules.contains { $0.trigger.urlFilter.contains("127") && $0.action.type == "ignore-previous-rules" })
+        #expect(json.contains("doubleclick"))
+        #expect(json.contains("google-analytics"))
+        #expect(json.contains("localhost"))
+    }
+
+    @Test func adBlockerContentRuleListCompilesInWebKit() async throws {
+        guard let store = WKContentRuleListStore.default() else {
+            Issue.record("Expected WebKit content rule list store")
+            return
+        }
+
+        let identifier = "dev.advatar.dBrowser.tests.adBlocker.\(UUID().uuidString)"
+        let encodedRules = try BrowserAdBlockingRules.contentRuleListJSON()
+
+        let compiled = try await withCheckedThrowingContinuation { continuation in
+            store.compileContentRuleList(
+                forIdentifier: identifier,
+                encodedContentRuleList: encodedRules
+            ) { ruleList, error in
+                if let ruleList {
+                    continuation.resume(returning: ruleList)
+                } else {
+                    continuation.resume(throwing: error ?? BrowserAdBlockerError.contentRuleListStoreUnavailable)
+                }
+            }
+        }
+
+        #expect(compiled.identifier == identifier)
+
+        await withCheckedContinuation { continuation in
+            store.removeContentRuleList(forIdentifier: identifier) { _ in
+                continuation.resume()
+            }
+        }
+    }
+
+    @Test func adBlockerDefaultsOnAndPersistsPauseState() {
+        let suiteName = "dBrowserTests.adBlocking.settings.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Expected isolated ad blocker defaults")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(BrowserAdBlockingSettings.load(defaults: defaults) == .enabled)
+
+        BrowserAdBlockingSettings.save(.paused, defaults: defaults)
+        #expect(BrowserAdBlockingSettings.load(defaults: defaults) == .paused)
+    }
+
+    @MainActor
+    @Test func togglingAdBlockerPersistsStateAndReloadsActiveTab() {
+        let suiteName = "dBrowserTests.adBlocking.toggle.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Expected isolated ad blocker defaults")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let model = makeIsolatedBrowserViewModel(
+            initialURL: "https://example.com",
+            adBlockingDefaults: defaults
+        )
+
+        #expect(model.adBlockingMode == .enabled)
+
+        model.toggleAdBlocking()
+
+        #expect(model.adBlockingMode == .paused)
+        #expect(BrowserAdBlockingSettings.load(defaults: defaults) == .paused)
+        #expect(model.webCommand?.tabID == model.activeTabID)
+        #expect(model.webCommand?.command == .reload)
+    }
+
     @MainActor
     @Test func addressAutocompleteUsesPreviouslyVisitedURLs() {
         let model = makeIsolatedBrowserViewModel()
@@ -8810,9 +8895,14 @@ struct dBrowserTests {
         smartHistoryStore: SmartHistoryStore = .ephemeral(),
         llmConversationStore: LLMConversationStore = .ephemeral(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
-        localLLMManager: LocalLLMManaging? = nil
+        localLLMManager: LocalLLMManaging? = nil,
+        adBlockingDefaults: UserDefaults? = nil,
+        adBlockingMode: BrowserAdBlockingMode? = nil
     ) -> BrowserViewModel {
-        BrowserViewModel(
+        let resolvedAdBlockingDefaults = adBlockingDefaults
+            ?? UserDefaults(suiteName: "dBrowserTests.adBlocking.\(UUID().uuidString)")
+            ?? .standard
+        return BrowserViewModel(
             initialURL: initialURL,
             runtimeBridge: runtimeBridge ?? MobileRuntimeBridge(),
             copilotWorkflowStore: workflowStore,
@@ -8821,7 +8911,9 @@ struct dBrowserTests {
             smartHistoryStore: smartHistoryStore,
             llmConversationStore: llmConversationStore,
             openMindMemoryClient: openMindMemoryClient,
-            localLLMManager: localLLMManager
+            localLLMManager: localLLMManager,
+            adBlockingDefaults: resolvedAdBlockingDefaults,
+            adBlockingMode: adBlockingMode
         )
     }
 

@@ -11,6 +11,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var bookmarks: [BrowserBookmark] = BrowserBookmark.defaults
     @Published var webCommand: BrowserWebCommandRequest?
     @Published var automationRequest: BrowserAutomationRequest?
+    @Published var adBlockingMode: BrowserAdBlockingMode
     @Published var automationResults: [BrowserAutomationResult] = []
     @Published var latestDOMQueryResult: DOMQueryResult?
     @Published var latestPageSnapshot: PageSnapshot?
@@ -61,6 +62,7 @@ final class BrowserViewModel: ObservableObject {
     private let llmConversationStore: LLMConversationStore
     private let openMindMemoryClient: OpenMindMemoryClient
     private let localLLMManager: LocalLLMManaging
+    private let adBlockingDefaults: UserDefaults
     private var copilotTasks: [UUID: Task<Void, Never>] = [:]
 
     convenience init(initialURL: String = "about:home") {
@@ -76,7 +78,9 @@ final class BrowserViewModel: ObservableObject {
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
         llmConversationStore: LLMConversationStore = LLMConversationStore(),
         openMindMemoryClient: OpenMindMemoryClient? = nil,
-        localLLMManager: LocalLLMManaging? = nil
+        localLLMManager: LocalLLMManaging? = nil,
+        adBlockingDefaults: UserDefaults = .standard,
+        adBlockingMode: BrowserAdBlockingMode? = nil
     ) {
         let tab = BrowserTab(urlString: initialURL)
         let historyService = BrowserHistoryService(store: smartHistoryStore)
@@ -97,6 +101,8 @@ final class BrowserViewModel: ObservableObject {
         self.llmConversationStore = llmConversationStore
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.localLLMManager = localLLMManager ?? LocalLLMManager()
+        self.adBlockingDefaults = adBlockingDefaults
+        self.adBlockingMode = adBlockingMode ?? BrowserAdBlockingSettings.load(defaults: adBlockingDefaults)
         self.runtimeFeatureStates = runtimeBridge.featureStates
         self.chainTrustSnapshot = runtimeBridge.chainTrustSnapshot
         self.afmServiceSnapshot = runtimeBridge.afmServiceSnapshot
@@ -783,6 +789,12 @@ final class BrowserViewModel: ObservableObject {
 
     func reload() {
         issueCommand(.reload)
+    }
+
+    func toggleAdBlocking() {
+        adBlockingMode = adBlockingMode.toggled
+        BrowserAdBlockingSettings.save(adBlockingMode, defaults: adBlockingDefaults)
+        reload()
     }
 
     func stop() {
