@@ -66,6 +66,22 @@ Validation notes:
 - `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-full-tests -only-testing:dBrowserTests` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-build` passed.
 
+Tor/Arti managed runtime slice:
+
+- [x] Create the GitHub issue with scope, lifecycle plan, and validation lane: #163.
+- [x] Add a managed runtime contract for discovering, launching, stopping, and reporting private-overlay runtime processes.
+- [x] Add a Tor/Arti profile with deterministic local ports, SOCKS/HTTP health metadata, and no-clearnet-fallback launch policy.
+- [x] Feed Tor/Arti managed runtime status into private-overlay readiness without weakening existing fail-closed routing.
+- [x] Add focused Swift tests for launch-plan generation, lifecycle status mapping, and bridge readiness summaries.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- Focused Tor/Arti managed-runtime Swift tests passed, including launch-plan safety, lifecycle mapping, bridge summaries, unsupported-network reporting, and fail-closed onion navigation.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-tor-arti-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-tor-arti-build` passed.
+
 ## Design Review Polish For Local Developer Workflows (#160)
 
 Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.

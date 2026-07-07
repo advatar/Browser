@@ -302,6 +302,7 @@ struct DownloadBridgeItem: Equatable, Identifiable {
 protocol RuntimeBridge: AnyObject {
     var featureStates: [RuntimeFeatureState] { get }
     var privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot { get }
+    var privateOverlayManagedRuntimeSnapshot: PrivateOverlayManagedRuntimeSnapshot { get }
     var walletInfo: WalletBridgeInfo { get }
     var walletPortfolio: WalletPortfolioSnapshot { get }
     var downloadItems: [DownloadBridgeItem] { get }
@@ -311,6 +312,8 @@ protocol RuntimeBridge: AnyObject {
 
     func refreshStatus() async -> [RuntimeFeatureState]
     func resolve(_ rawInput: String) async -> RuntimeBridgeResolution
+    func launchPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus
+    func stopPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
     func refreshLLMGatewayTokenPackages() async -> LLMGatewayServiceSnapshot
     func purchaseLLMGatewayTokens(
@@ -346,6 +349,7 @@ protocol RuntimeBridge: AnyObject {
 final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     @Published private(set) var featureStates: [RuntimeFeatureState]
     @Published private(set) var privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot
+    @Published private(set) var privateOverlayManagedRuntimeSnapshot: PrivateOverlayManagedRuntimeSnapshot
     @Published private(set) var walletInfo: WalletBridgeInfo
     @Published private(set) var walletPortfolio: WalletPortfolioSnapshot = .disconnected
     @Published private(set) var downloadItems: [DownloadBridgeItem] = []
@@ -370,6 +374,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private let suiMoveLightClientServiceClient: MoveLightClientServiceClient
     private let aptosMoveLightClientServiceClient: MoveLightClientServiceClient
     private let privateOverlayHealthChecker: any PrivateOverlayRuntimeHealthChecking
+    private let privateOverlayRuntimeManager: any PrivateOverlayRuntimeManaging
     @Published private(set) var afmServiceSnapshot: AFMServiceSnapshot = .unknown
     @Published private(set) var llmRouterServiceSnapshot: LLMRouterServiceSnapshot = .unknown
     @Published private(set) var llmGatewayServiceSnapshot: LLMGatewayServiceSnapshot = .unknown
@@ -442,7 +447,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         xrplLightClientServiceClient: XRPLLightClientServiceClient? = nil,
         suiMoveLightClientServiceClient: MoveLightClientServiceClient? = nil,
         aptosMoveLightClientServiceClient: MoveLightClientServiceClient? = nil,
-        privateOverlayHealthChecker: (any PrivateOverlayRuntimeHealthChecking)? = nil
+        privateOverlayHealthChecker: (any PrivateOverlayRuntimeHealthChecking)? = nil,
+        privateOverlayRuntimeManager: (any PrivateOverlayRuntimeManaging)? = nil
     ) {
         self.configuration = configuration
         self.afmServicesClient = afmServicesClient ?? AFMServicesClient(configuration: configuration.afmServices)
@@ -459,11 +465,14 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.suiMoveLightClientServiceClient = suiMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.suiMoveLightClient)
         self.aptosMoveLightClientServiceClient = aptosMoveLightClientServiceClient ?? MoveLightClientServiceClient(configuration: configuration.aptosMoveLightClient)
         self.privateOverlayHealthChecker = privateOverlayHealthChecker ?? URLSessionPrivateOverlayRuntimeHealthChecker()
+        self.privateOverlayRuntimeManager = privateOverlayRuntimeManager ?? LocalPrivateOverlayRuntimeManager()
         let initialMCPServers = configuration.mcpServers.map(\.sanitizedForSave)
         let initialPrivateOverlaySnapshot = PrivateOverlayRuntimeSnapshot.unchecked(configuration: configuration.privateOverlayAdapters)
+        let initialManagedPrivateOverlaySnapshot = PrivateOverlayManagedRuntimeSnapshot.empty
         self.chainTrustSnapshot = configuration.chainTrustRegistry
         self.mcpServers = initialMCPServers
         self.privateOverlayRuntimeSnapshot = initialPrivateOverlaySnapshot
+        self.privateOverlayManagedRuntimeSnapshot = initialManagedPrivateOverlaySnapshot
         self.bitcoinLightClientSnapshot = .fallback(
             network: configuration.bitcoinLightClient.network,
             lastError: "Bitcoin light-client service not checked yet."
@@ -507,6 +516,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         self.featureStates = Self.makeFeatureStates(
             configuration: configuration,
             privateOverlayRuntimeSnapshot: initialPrivateOverlaySnapshot,
+            privateOverlayManagedRuntimeSnapshot: initialManagedPrivateOverlaySnapshot,
             afmSnapshot: .unknown,
             llmRouterSnapshot: .unknown,
             llmGatewaySnapshot: .unknown,
@@ -531,10 +541,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         async let xrplSnapshot = xrplLightClientServiceClient.snapshot()
         async let suiMoveSnapshot = suiMoveLightClientServiceClient.snapshot()
         async let aptosMoveSnapshot = aptosMoveLightClientServiceClient.snapshot()
-        async let privateOverlaySnapshot = PrivateOverlayRuntimeSnapshot.checking(
-            configuration: configuration.privateOverlayAdapters,
-            healthChecker: privateOverlayHealthChecker
-        )
+        async let managedPrivateOverlaySnapshot = privateOverlayRuntimeManager.snapshot(configuration: configuration.privateOverlayAdapters)
         let gatewaySnapshot = await llmGatewayServiceClient.snapshot()
         afmServiceSnapshot = await afmSnapshot
         llmRouterServiceSnapshot = await llmRouterSnapshot
@@ -549,7 +556,12 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         xrplLightClientSnapshot = await xrplSnapshot
         suiMoveLightClientSnapshot = await suiMoveSnapshot
         aptosMoveLightClientSnapshot = await aptosMoveSnapshot
-        privateOverlayRuntimeSnapshot = await privateOverlaySnapshot
+        privateOverlayManagedRuntimeSnapshot = await managedPrivateOverlaySnapshot
+        privateOverlayRuntimeSnapshot = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: configuration.privateOverlayAdapters,
+            healthChecker: privateOverlayHealthChecker,
+            managedRuntimes: privateOverlayManagedRuntimeSnapshot
+        )
         _ = chainTrustSnapshot.recordBitcoinLightClientSnapshot(bitcoinLightClientSnapshot)
         _ = chainTrustSnapshot.recordEVMLightClientSnapshot(evmLightClientSnapshot)
         _ = chainTrustSnapshot.recordSolanaLightClientSnapshot(solanaLightClientSnapshot)
@@ -564,6 +576,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+            privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -575,12 +588,53 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         return featureStates
     }
 
+    func launchPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus {
+        let status = await privateOverlayRuntimeManager.start(
+            network: network,
+            configuration: configuration.privateOverlayAdapters
+        )
+        await refreshPrivateOverlayRuntimeState()
+        return status
+    }
+
+    func stopPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus {
+        let status = await privateOverlayRuntimeManager.stop(
+            network: network,
+            configuration: configuration.privateOverlayAdapters
+        )
+        await refreshPrivateOverlayRuntimeState()
+        return status
+    }
+
+    private func refreshPrivateOverlayRuntimeState() async {
+        privateOverlayManagedRuntimeSnapshot = await privateOverlayRuntimeManager.snapshot(
+            configuration: configuration.privateOverlayAdapters
+        )
+        privateOverlayRuntimeSnapshot = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: configuration.privateOverlayAdapters,
+            healthChecker: privateOverlayHealthChecker,
+            managedRuntimes: privateOverlayManagedRuntimeSnapshot
+        )
+        featureStates = Self.makeFeatureStates(
+            configuration: configuration,
+            privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+            privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
+            afmSnapshot: afmServiceSnapshot,
+            llmRouterSnapshot: llmRouterServiceSnapshot,
+            llmGatewaySnapshot: llmGatewayServiceSnapshot,
+            chainTrustSnapshot: chainTrustSnapshot,
+            mcpServers: mcpServers
+        )
+        refreshWalletFeatureState()
+    }
+
     func refreshLLMGatewayTokenPackages() async -> LLMGatewayServiceSnapshot {
         let snapshot = await llmGatewayServiceClient.snapshot()
         llmGatewayServiceSnapshot = snapshot
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+            privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: snapshot,
@@ -604,6 +658,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+            privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -707,6 +762,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 featureStates = Self.makeFeatureStates(
                     configuration: configuration,
                     privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+                    privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: routerSnapshot,
                     llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -763,6 +819,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 featureStates = Self.makeFeatureStates(
                     configuration: configuration,
                     privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+                    privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
                     afmSnapshot: afmServiceSnapshot,
                     llmRouterSnapshot: llmRouterServiceSnapshot,
                     llmGatewaySnapshot: gatewaySnapshot,
@@ -814,6 +871,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
                 privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+                privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
                 afmSnapshot: snapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -931,6 +989,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
                 privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+                privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -990,6 +1049,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             featureStates = Self.makeFeatureStates(
                 configuration: configuration,
                 privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+                privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
                 afmSnapshot: afmServiceSnapshot,
                 llmRouterSnapshot: llmRouterServiceSnapshot,
                 llmGatewaySnapshot: llmGatewayServiceSnapshot,
@@ -1397,6 +1457,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     private static func makeFeatureStates(
         configuration: RuntimeBridgeConfiguration,
         privateOverlayRuntimeSnapshot: PrivateOverlayRuntimeSnapshot,
+        privateOverlayManagedRuntimeSnapshot: PrivateOverlayManagedRuntimeSnapshot,
         afmSnapshot: AFMServiceSnapshot,
         llmRouterSnapshot: LLMRouterServiceSnapshot,
         llmGatewaySnapshot: LLMGatewayServiceSnapshot,
@@ -1435,6 +1496,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let mcpInventory = MCPServerInventory(servers: mcpServers)
         let mcpMode: RuntimeBridgeMode = mcpInventory.connectedCount > 0 ? .service : .local
         let privateOverlayMode: RuntimeBridgeMode = privateOverlayRuntimeSnapshot.hasOperationalRuntime ? .local : .unavailable
+        let privateOverlayStatus = privateOverlayManagedRuntimeSnapshot.statuses.isEmpty
+            ? privateOverlayRuntimeSnapshot.summary
+            : "\(privateOverlayRuntimeSnapshot.summary); \(privateOverlayManagedRuntimeSnapshot.summary)"
 
         return [
             RuntimeFeatureState(feature: .webBrowsing, mode: .native, isAvailable: true, status: "WKWebView"),
@@ -1453,7 +1517,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 feature: .privateOverlayProtocols,
                 mode: privateOverlayMode,
                 isAvailable: privateOverlayRuntimeSnapshot.hasOperationalRuntime,
-                status: privateOverlayRuntimeSnapshot.summary
+                status: privateOverlayStatus
             ),
             RuntimeFeatureState(
                 feature: .vpnClient,
@@ -1519,6 +1583,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         featureStates = Self.makeFeatureStates(
             configuration: configuration,
             privateOverlayRuntimeSnapshot: privateOverlayRuntimeSnapshot,
+            privateOverlayManagedRuntimeSnapshot: privateOverlayManagedRuntimeSnapshot,
             afmSnapshot: afmServiceSnapshot,
             llmRouterSnapshot: llmRouterServiceSnapshot,
             llmGatewaySnapshot: llmGatewayServiceSnapshot,

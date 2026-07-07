@@ -374,7 +374,8 @@ struct PrivateOverlayRuntimeSnapshot: Equatable, Sendable {
 
     static func checking(
         configuration: PrivateOverlayAdapterConfiguration,
-        healthChecker: any PrivateOverlayRuntimeHealthChecking
+        healthChecker: any PrivateOverlayRuntimeHealthChecking,
+        managedRuntimes: PrivateOverlayManagedRuntimeSnapshot = .empty
     ) async -> PrivateOverlayRuntimeSnapshot {
         var checkedStatuses: [PrivateOverlayRuntimeStatus] = []
         for network in PrivateOverlayNetwork.allCases {
@@ -390,7 +391,26 @@ struct PrivateOverlayRuntimeSnapshot: Equatable, Sendable {
                 continue
             }
 
-            let result = await healthChecker.check(network: network, endpoint: endpoint)
+            let managedStatus = managedRuntimes.status(for: network)
+            if let managedStatus,
+               managedStatus.readiness == .blocked || managedStatus.readiness == .misconfigured {
+                checkedStatuses.append(
+                    PrivateOverlayRuntimeStatus(
+                        network: network,
+                        endpoint: endpoint,
+                        readiness: managedStatus.readiness,
+                        message: managedStatus.message
+                    )
+                )
+                continue
+            }
+
+            let healthResult = await healthChecker.check(network: network, endpoint: endpoint)
+            let result = combinedProbeResult(
+                healthResult: healthResult,
+                managedStatus: managedStatus,
+                endpoint: endpoint
+            )
             checkedStatuses.append(
                 PrivateOverlayRuntimeStatus(
                     network: network,
@@ -401,6 +421,43 @@ struct PrivateOverlayRuntimeSnapshot: Equatable, Sendable {
             )
         }
         return PrivateOverlayRuntimeSnapshot(statuses: checkedStatuses)
+    }
+
+    nonisolated private static func combinedProbeResult(
+        healthResult: PrivateOverlayRuntimeProbeResult,
+        managedStatus: PrivateOverlayManagedRuntimeStatus?,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) -> PrivateOverlayRuntimeProbeResult {
+        guard let managedStatus else {
+            return healthResult
+        }
+
+        switch healthResult.readiness {
+        case .verified, .reachable, .running:
+            return PrivateOverlayRuntimeProbeResult(
+                readiness: healthResult.readiness,
+                message: "\(managedStatus.summary). \(healthResult.message)"
+            )
+        case .notInstalled:
+            switch managedStatus.lifecycle {
+            case .launchReady:
+                return .notInstalled("\(managedStatus.message) \(endpoint.displayName) is not responding yet; start the managed runtime before navigation.")
+            case .running, .starting, .stopping:
+                return .misconfigured("\(managedStatus.message) \(endpoint.displayName) did not answer health checks.")
+            case .notInstalled, .disabled, .stopped:
+                return .notInstalled("\(managedStatus.message) \(healthResult.message)")
+            case .misconfigured, .failed:
+                return .misconfigured("\(managedStatus.message) \(healthResult.message)")
+            case .blocked:
+                return .blocked(managedStatus.message)
+            }
+        case .installed:
+            return .installed("\(managedStatus.summary). \(healthResult.message)")
+        case .misconfigured:
+            return .misconfigured("\(managedStatus.summary). \(healthResult.message)")
+        case .blocked:
+            return .blocked("\(managedStatus.summary). \(healthResult.message)")
+        }
     }
 
     nonisolated func status(for network: PrivateOverlayNetwork) -> PrivateOverlayRuntimeStatus? {

@@ -24,8 +24,80 @@ private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHeal
     }
 }
 
+private struct StaticPrivateOverlayRuntimeExecutableResolver: PrivateOverlayRuntimeExecutableResolving {
+    var executableURLs: [String: URL]
+
+    nonisolated func executableURL(for profile: PrivateOverlayManagedRuntimeProfile) -> URL? {
+        executableURLs["tor-arti"]
+    }
+}
+
+private struct StubPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessControlling {
+    func launch(_ plan: PrivateOverlayRuntimeLaunchPlan) async throws -> PrivateOverlayRuntimeProcessHandle {
+        return PrivateOverlayRuntimeProcessHandle(
+            profileID: "tor-arti",
+            processIdentifier: 42,
+            startedAt: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+    }
+
+    func stop(_ handle: PrivateOverlayRuntimeProcessHandle) async {}
+}
+
+private struct StubPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
+    var snapshotResult: PrivateOverlayManagedRuntimeSnapshot
+    var startResult: PrivateOverlayManagedRuntimeStatus
+    var stopResult: PrivateOverlayManagedRuntimeStatus
+
+    func snapshot(configuration: PrivateOverlayAdapterConfiguration) async -> PrivateOverlayManagedRuntimeSnapshot {
+        snapshotResult
+    }
+
+    func launchPlan(
+        for network: PrivateOverlayNetwork,
+        configuration: PrivateOverlayAdapterConfiguration
+    ) async -> PrivateOverlayRuntimeLaunchPlan? {
+        snapshotResult.status(for: network)?.launchPlan
+    }
+
+    func start(
+        network: PrivateOverlayNetwork,
+        configuration: PrivateOverlayAdapterConfiguration
+    ) async -> PrivateOverlayManagedRuntimeStatus {
+        startResult
+    }
+
+    func stop(
+        network: PrivateOverlayNetwork,
+        configuration: PrivateOverlayAdapterConfiguration
+    ) async -> PrivateOverlayManagedRuntimeStatus {
+        stopResult
+    }
+}
+
 @MainActor
 struct dBrowserTests {
+
+    private func torArtiManagedStatus(
+        lifecycle: PrivateOverlayManagedRuntimeLifecycle,
+        message: String,
+        processIdentifier: Int32? = nil
+    ) -> PrivateOverlayManagedRuntimeStatus {
+        let profile = PrivateOverlayManagedRuntimeProfile.torArti
+        let executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/arti")
+        let plan = profile.launchPlan(
+            executableURL: executableURL,
+            rootDirectory: URL(fileURLWithPath: "/tmp/dbrowser-managed-runtime-status-test", isDirectory: true)
+        )
+        return PrivateOverlayManagedRuntimeStatus(
+            profile: profile,
+            lifecycle: lifecycle,
+            executableURL: executableURL,
+            processIdentifier: processIdentifier,
+            launchPlan: plan,
+            message: message
+        )
+    }
 
     @Test func bareDomainResolvesToHTTPS() {
         let resolved = BrowserURLResolver.resolve("example.com")
@@ -145,6 +217,133 @@ struct dBrowserTests {
         #expect(snapshot.status(for: .tor)?.readiness == .notInstalled)
         #expect(snapshot.status(for: .tor)?.blocksNavigation == true)
         #expect(snapshot.summary.contains("not responding"))
+    }
+
+    @Test func torArtiManagedRuntimeProfileBuildsSafeLaunchPlan() {
+        let rootDirectory = URL(fileURLWithPath: "/tmp/dbrowser-tor-arti-runtime-test", isDirectory: true)
+        let executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/arti")
+        let plan = PrivateOverlayManagedRuntimeProfile.torArti.launchPlan(
+            executableURL: executableURL,
+            rootDirectory: rootDirectory
+        )
+
+        #expect(plan.network == .tor)
+        #expect(plan.kind == .torArti)
+        #expect(plan.arguments == ["--config", plan.configurationFileURL.path, "proxy"])
+        #expect(plan.environment["DBROWSER_NO_CLEARNET_FALLBACK"] == "1")
+        #expect(plan.ports.adapterEndpoint == "127.0.0.1:4893")
+        #expect(plan.ports.socksEndpoint == "127.0.0.1:4898")
+        #expect(plan.isSafeForPrivateOverlay)
+        #expect(plan.configurationText.contains("socks_listen = \"127.0.0.1:4898\""))
+        #expect(plan.configurationText.contains("allow_onion_addrs = true"))
+        #expect(plan.configurationText.contains("allow_local_addrs = false"))
+        #expect(plan.configurationText.contains("dns_listen = 0"))
+    }
+
+    @Test func torArtiManagedRuntimeManagerDiscoversLaunchReadyAndDisabledStates() async {
+        let manager = LocalPrivateOverlayRuntimeManager(
+            resolver: StaticPrivateOverlayRuntimeExecutableResolver(
+                executableURLs: ["tor-arti": URL(fileURLWithPath: "/opt/homebrew/bin/arti")]
+            ),
+            processController: StubPrivateOverlayRuntimeProcessController(),
+            rootDirectory: URL(fileURLWithPath: "/tmp/dbrowser-tor-arti-manager-test", isDirectory: true)
+        )
+
+        let snapshot = await manager.snapshot(configuration: .localDefaults)
+        let tor = snapshot.status(for: .tor)
+
+        #expect(tor?.lifecycle == .launchReady)
+        #expect(tor?.readiness == .installed)
+        #expect(tor?.launchPlan?.isSafeForPrivateOverlay == true)
+        #expect(snapshot.summary.contains("launch ready"))
+
+        let disabledSnapshot = await manager.snapshot(configuration: .disabled)
+        #expect(disabledSnapshot.status(for: .tor)?.lifecycle == .disabled)
+
+        let unsupportedManagedRuntime = await manager.start(network: .i2p, configuration: .localDefaults)
+        #expect(unsupportedManagedRuntime.network == .i2p)
+        #expect(unsupportedManagedRuntime.lifecycle == .disabled)
+        #expect(unsupportedManagedRuntime.message.contains("No managed runtime profile") == true)
+    }
+
+    @Test func privateOverlayRuntimeReadinessCombinesTorArtiManagerAndAdapterHealth() async {
+        let launchReadyStatus = torArtiManagedStatus(
+            lifecycle: .launchReady,
+            message: "Tor/Arti is installed and ready to launch."
+        )
+        let launchReadySnapshot = PrivateOverlayManagedRuntimeSnapshot(statuses: [launchReadyStatus])
+        let notResponding = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: StubPrivateOverlayRuntimeHealthChecker(results: [:]),
+            managedRuntimes: launchReadySnapshot
+        )
+
+        #expect(notResponding.status(for: .tor)?.readiness == .notInstalled)
+        #expect(notResponding.status(for: .tor)?.blocksNavigation == true)
+        #expect(notResponding.status(for: .tor)?.message.contains("Tor/Arti") == true)
+        #expect(notResponding.status(for: .tor)?.message.contains("start the managed runtime") == true)
+
+        let runningStatus = torArtiManagedStatus(
+            lifecycle: .running,
+            message: "Tor/Arti is running with managed local-only policy."
+        )
+        let reachable = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: StubPrivateOverlayRuntimeHealthChecker(results: [
+                "tor": .reachable("Tor adapter health endpoint is reachable.")
+            ]),
+            managedRuntimes: PrivateOverlayManagedRuntimeSnapshot(statuses: [runningStatus])
+        )
+
+        #expect(reachable.status(for: .tor)?.readiness == .reachable)
+        #expect(reachable.status(for: .tor)?.message.contains("Tor/Arti running") == true)
+    }
+
+    @Test func runtimeBridgeSurfacesManagedTorArtiReadinessAndKeepsNavigationFailClosed() async {
+        let launchReadyStatus = torArtiManagedStatus(
+            lifecycle: .launchReady,
+            message: "Tor/Arti is installed and ready to launch."
+        )
+        let runningStatus = torArtiManagedStatus(
+            lifecycle: .running,
+            message: "Tor/Arti started on 127.0.0.1:4898 with local-only private-overlay policy.",
+            processIdentifier: 42
+        )
+        let stoppedStatus = torArtiManagedStatus(
+            lifecycle: .stopped,
+            message: "Tor/Arti stopped."
+        )
+        let manager = StubPrivateOverlayRuntimeManager(
+            snapshotResult: PrivateOverlayManagedRuntimeSnapshot(statuses: [launchReadyStatus]),
+            startResult: runningStatus,
+            stopResult: stoppedStatus
+        )
+        let checker = StubPrivateOverlayRuntimeHealthChecker(results: [
+            "tor": .notInstalled("Local Tor onion adapter did not respond."),
+            "i2p": .verified("I2P deterministic fixture fetched through eepproxy.")
+        ])
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(),
+            privateOverlayHealthChecker: checker,
+            privateOverlayRuntimeManager: manager
+        )
+
+        _ = await bridge.refreshStatus()
+        let privateOverlayFeature = bridge.featureStates.first { $0.feature == .privateOverlayProtocols }
+
+        #expect(bridge.privateOverlayManagedRuntimeSnapshot.status(for: .tor)?.lifecycle == .launchReady)
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .tor)?.readiness == .notInstalled)
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .tor)?.message.contains("Tor/Arti") == true)
+        #expect(privateOverlayFeature?.status.contains("managed private-overlay runtime") == true)
+
+        let blockedOnion = await bridge.resolve("example.onion/private")
+        #expect(blockedOnion.source == .privateOverlayAdapterRequired)
+        #expect(blockedOnion.resolvedURLString == nil)
+        #expect(blockedOnion.message?.contains("Tor/Arti") == true)
+
+        let launchStatus = await bridge.launchPrivateOverlayRuntime(.tor)
+        #expect(launchStatus.lifecycle == .running)
+        #expect(launchStatus.processIdentifier == 42)
     }
 
     @Test func runtimeBridgeSurfacesPrivateOverlayReadinessAndFailsClosedForKnownBadRuntime() async {
