@@ -2931,7 +2931,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
                     "Tabs carrying private-overlay content are marked ephemeral so dBrowser skips browser history and smart-history persistence.",
                     "The WebView loads app-local adapter URLs while the address bar keeps the original private-overlay locator visible to the user.",
                     "Runtime status distinguishes configured, running, reachable, blocked, misconfigured, and verified adapters; known bad adapter states fail closed with a runtime notice.",
-                    "Tor/Arti is the first managed runtime lifecycle: dBrowser can discover and launch a local-only Arti proxy, then still requires adapter health before onion navigation proceeds.",
+                    "Tor/Arti and I2P are the first managed runtime lifecycles: dBrowser can discover and launch local-only overlay proxies, then still requires adapter health before overlay navigation proceeds.",
                     "Copilot page snapshots and OpenMind page context are omitted by default for private-overlay tabs."
                 ]
             )

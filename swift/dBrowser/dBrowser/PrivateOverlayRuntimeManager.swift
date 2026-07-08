@@ -2,11 +2,13 @@ import Foundation
 
 enum PrivateOverlayManagedRuntimeKind: String, CaseIterable, Codable, Equatable, Sendable {
     case unmanaged
+    case i2pRouter
     case torArti
 
     nonisolated var title: String {
         switch self {
         case .unmanaged: "Managed runtime"
+        case .i2pRouter: "I2P router"
         case .torArti: "Tor/Arti"
         }
     }
@@ -87,6 +89,11 @@ struct PrivateOverlayRuntimeLaunchPolicy: Equatable, Sendable {
     }
 }
 
+enum PrivateOverlayRuntimeStopStrategy: Equatable, Sendable {
+    case terminateProcess
+    case command(arguments: [String])
+}
+
 struct PrivateOverlayManagedRuntimeProfile: Equatable, Identifiable, Sendable {
     var id: String
     var network: PrivateOverlayNetwork
@@ -116,6 +123,26 @@ struct PrivateOverlayManagedRuntimeProfile: Equatable, Identifiable, Sendable {
         launchPolicy: .noClearnetFallback
     )
 
+    nonisolated static let i2pRouter = PrivateOverlayManagedRuntimeProfile(
+        id: "i2p-router",
+        network: .i2p,
+        kind: .i2pRouter,
+        executableName: "i2prouter",
+        bundledExecutableRelativePath: "PrivateOverlayRuntimes/i2p/i2prouter",
+        defaultExecutablePaths: [
+            "/Applications/i2p/i2prouter",
+            "/Applications/I2P/i2prouter",
+            "/opt/homebrew/bin/i2prouter",
+            "/opt/homebrew/opt/i2p/bin/i2prouter",
+            "/usr/local/bin/i2prouter",
+            "/usr/bin/i2prouter"
+        ],
+        ports: PrivateOverlayRuntimePortSet(adapterPort: 4894, socksPort: 4444, controlPort: 7657),
+        dataDirectoryName: "I2PRouter",
+        configurationFileName: "dbrowser-i2p-runtime.md",
+        launchPolicy: .noClearnetFallback
+    )
+
     nonisolated static func unmanaged(network: PrivateOverlayNetwork) -> PrivateOverlayManagedRuntimeProfile {
         PrivateOverlayManagedRuntimeProfile(
             id: "\(network.id)-unmanaged",
@@ -142,18 +169,63 @@ struct PrivateOverlayManagedRuntimeProfile: Equatable, Identifiable, Sendable {
             network: network,
             kind: kind,
             executableURL: executableURL,
-            arguments: ["--config", configurationFileURL.path, "proxy"],
+            arguments: launchArguments(configurationFileURL: configurationFileURL),
             environment: [
                 "DBROWSER_PRIVATE_OVERLAY": network.id,
                 "DBROWSER_PRIVATE_OVERLAY_RUNTIME": kind.rawValue,
                 "DBROWSER_NO_CLEARNET_FALLBACK": "1"
-            ],
+            ].merging(launchEnvironment(runtimeDirectory: runtimeDirectory)) { _, managed in managed },
             workingDirectory: runtimeDirectory,
             configurationFileURL: configurationFileURL,
-            configurationText: artiConfigurationText(runtimeDirectory: runtimeDirectory),
+            configurationText: configurationText(runtimeDirectory: runtimeDirectory),
             ports: ports,
-            launchPolicy: launchPolicy
+            launchPolicy: launchPolicy,
+            stopStrategy: stopStrategy()
         )
+    }
+
+    nonisolated private func launchArguments(configurationFileURL: URL) -> [String] {
+        switch kind {
+        case .torArti:
+            ["--config", configurationFileURL.path, "proxy"]
+        case .i2pRouter:
+            ["start"]
+        case .unmanaged:
+            []
+        }
+    }
+
+    nonisolated private func launchEnvironment(runtimeDirectory: URL) -> [String: String] {
+        switch kind {
+        case .i2pRouter:
+            [
+                "I2P_CONFIG_DIR": runtimeDirectory.path,
+                "DBROWSER_I2P_HTTP_PROXY": ports.socksEndpoint,
+                "DBROWSER_I2P_ROUTER_CONSOLE": ports.controlEndpoint
+            ]
+        case .torArti, .unmanaged:
+            [:]
+        }
+    }
+
+    nonisolated private func configurationText(runtimeDirectory: URL) -> String {
+        switch kind {
+        case .torArti:
+            artiConfigurationText(runtimeDirectory: runtimeDirectory)
+        case .i2pRouter:
+            i2pRuntimeBoundaryText(runtimeDirectory: runtimeDirectory)
+        case .unmanaged:
+            ""
+        }
+    }
+
+    nonisolated private func stopStrategy() -> PrivateOverlayRuntimeStopStrategy {
+        switch kind {
+        case .i2pRouter:
+            .command(arguments: ["stop"])
+        case .torArti, .unmanaged:
+            .terminateProcess
+        }
     }
 
     nonisolated private func artiConfigurationText(runtimeDirectory: URL) -> String {
@@ -177,6 +249,23 @@ struct PrivateOverlayManagedRuntimeProfile: Equatable, Identifiable, Sendable {
         log_sensitive_information = false
         """
     }
+
+    nonisolated private func i2pRuntimeBoundaryText(runtimeDirectory: URL) -> String {
+        let stateDirectory = runtimeDirectory.appendingPathComponent("state", isDirectory: true).path
+        return """
+        # dBrowser managed I2P runtime boundary
+
+        network = i2p
+        adapter_endpoint = \(ports.adapterEndpoint)
+        http_proxy = \(ports.socksEndpoint)
+        router_console = \(ports.controlEndpoint)
+        state_directory = \(stateDirectory)
+
+        allow_system_dns_for_i2p = false
+        allow_clearnet_fallback = false
+        adapter_health_required_before_navigation = true
+        """
+    }
 }
 
 struct PrivateOverlayRuntimeLaunchPlan: Equatable, Sendable {
@@ -191,6 +280,7 @@ struct PrivateOverlayRuntimeLaunchPlan: Equatable, Sendable {
     var configurationText: String
     var ports: PrivateOverlayRuntimePortSet
     var launchPolicy: PrivateOverlayRuntimeLaunchPolicy
+    var stopStrategy: PrivateOverlayRuntimeStopStrategy
 
     nonisolated var isSafeForPrivateOverlay: Bool {
         executableURL.isFileURL
@@ -207,6 +297,10 @@ struct PrivateOverlayRuntimeProcessHandle: Equatable, Sendable {
     var profileID: String
     var processIdentifier: Int32
     var startedAt: Date
+    var executableURL: URL
+    var environment: [String: String]
+    var workingDirectory: URL
+    var stopStrategy: PrivateOverlayRuntimeStopStrategy
 }
 
 struct PrivateOverlayManagedRuntimeStatus: Equatable, Identifiable, Sendable {
@@ -315,21 +409,42 @@ actor LocalPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessC
         let process = Process()
         process.executableURL = plan.executableURL
         process.arguments = plan.arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(plan.environment) { _, managed in managed }
+        let environment = ProcessInfo.processInfo.environment.merging(plan.environment) { _, managed in managed }
+        process.environment = environment
         process.currentDirectoryURL = plan.workingDirectory
         try process.run()
         processes[plan.profileID] = process
         return PrivateOverlayRuntimeProcessHandle(
             profileID: plan.profileID,
             processIdentifier: process.processIdentifier,
-            startedAt: Date()
+            startedAt: Date(),
+            executableURL: plan.executableURL,
+            environment: environment,
+            workingDirectory: plan.workingDirectory,
+            stopStrategy: plan.stopStrategy
         )
     }
 
     func stop(_ handle: PrivateOverlayRuntimeProcessHandle) async {
-        guard let process = processes[handle.profileID] else { return }
-        if process.isRunning {
-            process.terminate()
+        let process = processes[handle.profileID]
+        switch handle.stopStrategy {
+        case .terminateProcess:
+            if process?.isRunning == true {
+                process?.terminate()
+            }
+        case .command(let arguments):
+            let stopProcess = Process()
+            stopProcess.executableURL = handle.executableURL
+            stopProcess.arguments = arguments
+            stopProcess.environment = handle.environment
+            stopProcess.currentDirectoryURL = handle.workingDirectory
+            do {
+                try stopProcess.run()
+                stopProcess.waitUntilExit()
+            } catch {}
+        }
+        if process?.isRunning == true {
+            process?.terminate()
         }
         processes.removeValue(forKey: handle.profileID)
     }
@@ -359,7 +474,7 @@ actor LocalPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
     private var runningHandles: [String: PrivateOverlayRuntimeProcessHandle] = [:]
 
     init(
-        profiles: [PrivateOverlayManagedRuntimeProfile] = [.torArti],
+        profiles: [PrivateOverlayManagedRuntimeProfile] = [.torArti, .i2pRouter],
         resolver: any PrivateOverlayRuntimeExecutableResolving = DefaultPrivateOverlayRuntimeExecutableResolver(),
         processController: any PrivateOverlayRuntimeProcessControlling = LocalPrivateOverlayRuntimeProcessController(),
         rootDirectory: URL? = nil

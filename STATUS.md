@@ -82,6 +82,24 @@ Validation notes:
 - `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-tor-arti-full-tests -only-testing:dBrowserTests` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-tor-arti-build` passed.
 
+I2P managed runtime and landing-page slice:
+
+- [x] Create the GitHub issue with scope, lifecycle plan, web update, and validation lane: #164.
+- [x] Add an I2P managed runtime profile for discovering, launching, stopping, and reporting a local I2P router process.
+- [x] Add I2P launch-plan metadata with deterministic local adapter/proxy/control ports and no-clearnet-fallback policy at the dBrowser adapter boundary.
+- [x] Feed I2P managed runtime status into private-overlay readiness without weakening existing fail-closed routing.
+- [x] Update README, architecture docs, runtime explanations, and `./web` landing/protocol copy to advertise the latest managed runtime functionality honestly.
+- [x] Add focused Swift and web content tests for I2P runtime lifecycle and landing-page claims.
+- [x] Verify focused tests, full `dBrowserTests`, macOS build, and web test/build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- Focused I2P/Tor managed-runtime Swift tests passed, including I2P launch-plan safety, router stop-command strategy, lifecycle mapping, bridge readiness summaries, unsupported-network reporting, and fail-closed .i2p navigation.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-i2p-runtime-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-i2p-runtime-build` passed with existing dependency/app-icon warnings.
+- `npm test` and `npm run build` passed in `./web`; Vite still reports the existing Browserslist age and chunk-size warnings.
+
 ## Design Review Polish For Local Developer Workflows (#160)
 
 Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.

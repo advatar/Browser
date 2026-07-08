@@ -25,19 +25,23 @@ private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHeal
 }
 
 private struct StaticPrivateOverlayRuntimeExecutableResolver: PrivateOverlayRuntimeExecutableResolving {
-    var executableURLs: [String: URL]
+    var executableURL: URL?
 
     nonisolated func executableURL(for profile: PrivateOverlayManagedRuntimeProfile) -> URL? {
-        executableURLs["tor-arti"]
+        executableURL
     }
 }
 
 private struct StubPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessControlling {
     func launch(_ plan: PrivateOverlayRuntimeLaunchPlan) async throws -> PrivateOverlayRuntimeProcessHandle {
         return PrivateOverlayRuntimeProcessHandle(
-            profileID: "tor-arti",
+            profileID: plan.profileID,
             processIdentifier: 42,
-            startedAt: Date(timeIntervalSince1970: 1_800_000_000)
+            startedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            executableURL: plan.executableURL,
+            environment: plan.environment,
+            workingDirectory: plan.workingDirectory,
+            stopStrategy: plan.stopStrategy
         )
     }
 
@@ -83,8 +87,35 @@ struct dBrowserTests {
         message: String,
         processIdentifier: Int32? = nil
     ) -> PrivateOverlayManagedRuntimeStatus {
-        let profile = PrivateOverlayManagedRuntimeProfile.torArti
-        let executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/arti")
+        managedStatus(
+            profile: .torArti,
+            lifecycle: lifecycle,
+            message: message,
+            processIdentifier: processIdentifier
+        )
+    }
+
+    private func i2pManagedStatus(
+        lifecycle: PrivateOverlayManagedRuntimeLifecycle,
+        message: String,
+        processIdentifier: Int32? = nil
+    ) -> PrivateOverlayManagedRuntimeStatus {
+        managedStatus(
+            profile: .i2pRouter,
+            lifecycle: lifecycle,
+            message: message,
+            processIdentifier: processIdentifier
+        )
+    }
+
+    private func managedStatus(
+        profile: PrivateOverlayManagedRuntimeProfile,
+        lifecycle: PrivateOverlayManagedRuntimeLifecycle,
+        message: String,
+        processIdentifier: Int32? = nil
+    ) -> PrivateOverlayManagedRuntimeStatus {
+        let executablePath = profile.id == "i2p-router" ? "/opt/homebrew/bin/i2prouter" : "/opt/homebrew/bin/arti"
+        let executableURL = URL(fileURLWithPath: executablePath)
         let plan = profile.launchPlan(
             executableURL: executableURL,
             rootDirectory: URL(fileURLWithPath: "/tmp/dbrowser-managed-runtime-status-test", isDirectory: true)
@@ -234,16 +265,42 @@ struct dBrowserTests {
         #expect(plan.ports.adapterEndpoint == "127.0.0.1:4893")
         #expect(plan.ports.socksEndpoint == "127.0.0.1:4898")
         #expect(plan.isSafeForPrivateOverlay)
+        #expect(plan.stopStrategy == .terminateProcess)
         #expect(plan.configurationText.contains("socks_listen = \"127.0.0.1:4898\""))
         #expect(plan.configurationText.contains("allow_onion_addrs = true"))
         #expect(plan.configurationText.contains("allow_local_addrs = false"))
         #expect(plan.configurationText.contains("dns_listen = 0"))
     }
 
-    @Test func torArtiManagedRuntimeManagerDiscoversLaunchReadyAndDisabledStates() async {
+    @Test func i2pManagedRuntimeProfileBuildsSafeLaunchPlan() {
+        let rootDirectory = URL(fileURLWithPath: "/tmp/dbrowser-i2p-runtime-test", isDirectory: true)
+        let executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/i2prouter")
+        let plan = PrivateOverlayManagedRuntimeProfile.i2pRouter.launchPlan(
+            executableURL: executableURL,
+            rootDirectory: rootDirectory
+        )
+
+        #expect(plan.network == .i2p)
+        #expect(plan.kind == .i2pRouter)
+        #expect(plan.arguments == ["start"])
+        #expect(plan.environment["DBROWSER_NO_CLEARNET_FALLBACK"] == "1")
+        #expect(plan.environment["I2P_CONFIG_DIR"] == plan.workingDirectory.path)
+        #expect(plan.ports.adapterEndpoint == "127.0.0.1:4894")
+        #expect(plan.ports.socksEndpoint == "127.0.0.1:4444")
+        #expect(plan.ports.controlEndpoint == "127.0.0.1:7657")
+        #expect(plan.isSafeForPrivateOverlay)
+        #expect(plan.stopStrategy == .command(arguments: ["stop"]))
+        #expect(plan.configurationText.contains("http_proxy = 127.0.0.1:4444"))
+        #expect(plan.configurationText.contains("router_console = 127.0.0.1:7657"))
+        #expect(plan.configurationText.contains("allow_system_dns_for_i2p = false"))
+        #expect(plan.configurationText.contains("allow_clearnet_fallback = false"))
+        #expect(plan.configurationText.contains("adapter_health_required_before_navigation = true"))
+    }
+
+    @Test func managedRuntimeManagerDiscoversLaunchReadyAndDisabledStates() async {
         let manager = LocalPrivateOverlayRuntimeManager(
             resolver: StaticPrivateOverlayRuntimeExecutableResolver(
-                executableURLs: ["tor-arti": URL(fileURLWithPath: "/opt/homebrew/bin/arti")]
+                executableURL: URL(fileURLWithPath: "/opt/homebrew/bin/private-overlay-runtime")
             ),
             processController: StubPrivateOverlayRuntimeProcessController(),
             rootDirectory: URL(fileURLWithPath: "/tmp/dbrowser-tor-arti-manager-test", isDirectory: true)
@@ -255,13 +312,16 @@ struct dBrowserTests {
         #expect(tor?.lifecycle == .launchReady)
         #expect(tor?.readiness == .installed)
         #expect(tor?.launchPlan?.isSafeForPrivateOverlay == true)
+        #expect(snapshot.status(for: .i2p)?.lifecycle == .launchReady)
+        #expect(snapshot.status(for: .i2p)?.launchPlan?.isSafeForPrivateOverlay == true)
         #expect(snapshot.summary.contains("launch ready"))
 
         let disabledSnapshot = await manager.snapshot(configuration: .disabled)
         #expect(disabledSnapshot.status(for: .tor)?.lifecycle == .disabled)
+        #expect(disabledSnapshot.status(for: .i2p)?.lifecycle == .disabled)
 
-        let unsupportedManagedRuntime = await manager.start(network: .i2p, configuration: .localDefaults)
-        #expect(unsupportedManagedRuntime.network == .i2p)
+        let unsupportedManagedRuntime = await manager.start(network: .hyphanet, configuration: .localDefaults)
+        #expect(unsupportedManagedRuntime.network == .hyphanet)
         #expect(unsupportedManagedRuntime.lifecycle == .disabled)
         #expect(unsupportedManagedRuntime.message.contains("No managed runtime profile") == true)
     }
@@ -297,6 +357,39 @@ struct dBrowserTests {
 
         #expect(reachable.status(for: .tor)?.readiness == .reachable)
         #expect(reachable.status(for: .tor)?.message.contains("Tor/Arti running") == true)
+    }
+
+    @Test func privateOverlayRuntimeReadinessCombinesI2PManagerAndAdapterHealth() async {
+        let launchReadyStatus = i2pManagedStatus(
+            lifecycle: .launchReady,
+            message: "I2P router is installed and ready to launch."
+        )
+        let launchReadySnapshot = PrivateOverlayManagedRuntimeSnapshot(statuses: [launchReadyStatus])
+        let notResponding = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: StubPrivateOverlayRuntimeHealthChecker(results: [:]),
+            managedRuntimes: launchReadySnapshot
+        )
+
+        #expect(notResponding.status(for: .i2p)?.readiness == .notInstalled)
+        #expect(notResponding.status(for: .i2p)?.blocksNavigation == true)
+        #expect(notResponding.status(for: .i2p)?.message.contains("I2P router") == true)
+        #expect(notResponding.status(for: .i2p)?.message.contains("start the managed runtime") == true)
+
+        let runningStatus = i2pManagedStatus(
+            lifecycle: .running,
+            message: "I2P router is running with managed local-only policy."
+        )
+        let reachable = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: .localDefaults,
+            healthChecker: StubPrivateOverlayRuntimeHealthChecker(results: [
+                "i2p": .reachable("I2P adapter health endpoint is reachable.")
+            ]),
+            managedRuntimes: PrivateOverlayManagedRuntimeSnapshot(statuses: [runningStatus])
+        )
+
+        #expect(reachable.status(for: .i2p)?.readiness == .reachable)
+        #expect(reachable.status(for: .i2p)?.message.contains("I2P router running") == true)
     }
 
     @Test func runtimeBridgeSurfacesManagedTorArtiReadinessAndKeepsNavigationFailClosed() async {
@@ -342,6 +435,53 @@ struct dBrowserTests {
         #expect(blockedOnion.message?.contains("Tor/Arti") == true)
 
         let launchStatus = await bridge.launchPrivateOverlayRuntime(.tor)
+        #expect(launchStatus.lifecycle == .running)
+        #expect(launchStatus.processIdentifier == 42)
+    }
+
+    @Test func runtimeBridgeSurfacesManagedI2PReadinessAndKeepsNavigationFailClosed() async {
+        let launchReadyStatus = i2pManagedStatus(
+            lifecycle: .launchReady,
+            message: "I2P router is installed and ready to launch."
+        )
+        let runningStatus = i2pManagedStatus(
+            lifecycle: .running,
+            message: "I2P router started on 127.0.0.1:4444 with local-only private-overlay policy.",
+            processIdentifier: 42
+        )
+        let stoppedStatus = i2pManagedStatus(
+            lifecycle: .stopped,
+            message: "I2P router stopped."
+        )
+        let manager = StubPrivateOverlayRuntimeManager(
+            snapshotResult: PrivateOverlayManagedRuntimeSnapshot(statuses: [launchReadyStatus]),
+            startResult: runningStatus,
+            stopResult: stoppedStatus
+        )
+        let checker = StubPrivateOverlayRuntimeHealthChecker(results: [
+            "tor": .verified("Tor deterministic fixture fetched through onion routing."),
+            "i2p": .notInstalled("Local I2P eepsite adapter did not respond.")
+        ])
+        let bridge = MobileRuntimeBridge(
+            configuration: RuntimeBridgeConfiguration(),
+            privateOverlayHealthChecker: checker,
+            privateOverlayRuntimeManager: manager
+        )
+
+        _ = await bridge.refreshStatus()
+        let privateOverlayFeature = bridge.featureStates.first { $0.feature == .privateOverlayProtocols }
+
+        #expect(bridge.privateOverlayManagedRuntimeSnapshot.status(for: .i2p)?.lifecycle == .launchReady)
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .i2p)?.readiness == .notInstalled)
+        #expect(bridge.privateOverlayRuntimeSnapshot.status(for: .i2p)?.message.contains("I2P router") == true)
+        #expect(privateOverlayFeature?.status.contains("managed private-overlay runtime") == true)
+
+        let blockedEepsite = await bridge.resolve("forum.i2p")
+        #expect(blockedEepsite.source == .privateOverlayAdapterRequired)
+        #expect(blockedEepsite.resolvedURLString == nil)
+        #expect(blockedEepsite.message?.contains("I2P router") == true)
+
+        let launchStatus = await bridge.launchPrivateOverlayRuntime(.i2p)
         #expect(launchStatus.lifecycle == .running)
         #expect(launchStatus.processIdentifier == 42)
     }
