@@ -254,6 +254,59 @@ struct PrivateOverlayAdapterConfiguration: Equatable, Sendable {
     }
 }
 
+struct PrivateOverlaySmokeFixture: Equatable, Identifiable, Sendable {
+    var id: String
+    var network: PrivateOverlayNetwork
+    var uri: String
+    var expectedPayloadSHA256: String
+
+    nonisolated static func fixture(for network: PrivateOverlayNetwork) -> PrivateOverlaySmokeFixture {
+        switch network {
+        case .tor:
+            PrivateOverlaySmokeFixture(
+                id: "dbrowser-smoke-tor-v1",
+                network: network,
+                uri: "http://dbrowser-smoke-test.onion/.well-known/dbrowser-private-overlay-smoke.json",
+                expectedPayloadSHA256: "498fc305f7d4e17578ed598dd6db4682878ff7df911c1e6a80dbd51baa98e035"
+            )
+        case .i2p:
+            PrivateOverlaySmokeFixture(
+                id: "dbrowser-smoke-i2p-v1",
+                network: network,
+                uri: "http://dbrowser-smoke-test.i2p/.well-known/dbrowser-private-overlay-smoke.json",
+                expectedPayloadSHA256: "cded6aed04854042cbb1a1a0aa1a119f524f5b2c1052f861872584f8e7b80d4b"
+            )
+        case .hyphanet:
+            PrivateOverlaySmokeFixture(
+                id: "dbrowser-smoke-hyphanet-v1",
+                network: network,
+                uri: "hyphanet:KSK@dbrowser-private-overlay-smoke",
+                expectedPayloadSHA256: "a6cee122a43023ffd0955e5e8e0d0bbc53d707664662cdd1450140bb54ecad81"
+            )
+        case .zeronet:
+            PrivateOverlaySmokeFixture(
+                id: "dbrowser-smoke-zeronet-v1",
+                network: network,
+                uri: "zeronet://1DBrowserSmokeFixture111111111111111111111",
+                expectedPayloadSHA256: "394d2c9be456492a8d2113403fa9e3f943746b4397db03f9bfc27785ab15f4a9"
+            )
+        case .lokinet:
+            PrivateOverlaySmokeFixture(
+                id: "dbrowser-smoke-lokinet-v1",
+                network: network,
+                uri: "http://dbrowser-smoke-test.loki/.well-known/dbrowser-private-overlay-smoke.json",
+                expectedPayloadSHA256: "20b27913c01c783080263408cf3e559ee83ac50fbb03e5041e2ffacdee26036b"
+            )
+        }
+    }
+}
+
+extension PrivateOverlayNetwork {
+    nonisolated var smokeFixture: PrivateOverlaySmokeFixture {
+        PrivateOverlaySmokeFixture.fixture(for: self)
+    }
+}
+
 enum PrivateOverlayRuntimeReadiness: String, CaseIterable, Codable, Equatable, Sendable {
     case notInstalled
     case installed
@@ -531,8 +584,204 @@ private struct PrivateOverlayRuntimeHealthPayload: Decodable, Sendable {
     var clearnetFallback: Bool?
 }
 
+protocol PrivateOverlayRuntimeSmokeVerifying: Sendable {
+    func verify(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult
+}
+
+private struct PrivateOverlayRuntimeSmokePayload: Decodable, Sendable {
+    var network: String?
+    var fixtureID: String?
+    var status: String?
+    var message: String?
+    var verified: Bool?
+    var payloadSHA256: String?
+    var clearnetFallback: Bool?
+    var dnsResolution: Bool?
+    var searchFallback: Bool?
+    var publicGateway: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case network
+        case fixtureID
+        case fixtureId
+        case fixture_id
+        case status
+        case message
+        case verified
+        case payloadSHA256
+        case payloadSha256
+        case payload_sha256
+        case clearnetFallback
+        case clearnet_fallback
+        case dnsResolution
+        case dns_resolution
+        case searchFallback
+        case search_fallback
+        case publicGateway
+        case public_gateway
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        network = try container.decodeIfPresent(String.self, forKey: .network)
+        fixtureID = try container.decodeIfPresent(String.self, forKey: .fixtureID)
+            ?? container.decodeIfPresent(String.self, forKey: .fixtureId)
+            ?? container.decodeIfPresent(String.self, forKey: .fixture_id)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        verified = try container.decodeIfPresent(Bool.self, forKey: .verified)
+        payloadSHA256 = try container.decodeIfPresent(String.self, forKey: .payloadSHA256)
+            ?? container.decodeIfPresent(String.self, forKey: .payloadSha256)
+            ?? container.decodeIfPresent(String.self, forKey: .payload_sha256)
+        clearnetFallback = try container.decodeIfPresent(Bool.self, forKey: .clearnetFallback)
+            ?? container.decodeIfPresent(Bool.self, forKey: .clearnet_fallback)
+        dnsResolution = try container.decodeIfPresent(Bool.self, forKey: .dnsResolution)
+            ?? container.decodeIfPresent(Bool.self, forKey: .dns_resolution)
+        searchFallback = try container.decodeIfPresent(Bool.self, forKey: .searchFallback)
+            ?? container.decodeIfPresent(Bool.self, forKey: .search_fallback)
+        publicGateway = try container.decodeIfPresent(Bool.self, forKey: .publicGateway)
+            ?? container.decodeIfPresent(Bool.self, forKey: .public_gateway)
+    }
+}
+
+struct URLSessionPrivateOverlayRuntimeSmokeVerifier: PrivateOverlayRuntimeSmokeVerifying, Sendable {
+    var timeout: TimeInterval = 0.75
+
+    func verify(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        let fixture = network.smokeFixture
+        guard endpoint.baseURL.isPrivateOverlayLoopbackHTTPURL else {
+            return .blocked("\(endpoint.displayName) smoke verification must use a loopback HTTP adapter endpoint.")
+        }
+        guard let url = smokeURL(for: network, endpoint: endpoint, fixture: fixture) else {
+            return .misconfigured("\(endpoint.displayName) could not build a smoke fixture URL.")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .misconfigured("\(endpoint.displayName) returned a non-HTTP smoke response.")
+            }
+            return probeResult(
+                network: network,
+                endpoint: endpoint,
+                fixture: fixture,
+                statusCode: httpResponse.statusCode,
+                data: data
+            )
+        } catch {
+            return .reachable("\(endpoint.displayName) health endpoint is reachable; smoke fixture \(fixture.id) has not verified yet.")
+        }
+    }
+
+    func smokeURL(
+        for network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint,
+        fixture: PrivateOverlaySmokeFixture
+    ) -> URL? {
+        guard fixture.network == network,
+              var components = URLComponents(url: endpoint.baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        components.path = "/private-overlay/\(network.id)/smoke"
+        components.queryItems = [
+            URLQueryItem(name: "network", value: network.id),
+            URLQueryItem(name: "adapter", value: network.adapterID),
+            URLQueryItem(name: "fixture_id", value: fixture.id),
+            URLQueryItem(name: "uri", value: fixture.uri),
+            URLQueryItem(name: "expected_sha256", value: fixture.expectedPayloadSHA256),
+            URLQueryItem(name: "no_dns", value: "1"),
+            URLQueryItem(name: "no_search", value: "1"),
+            URLQueryItem(name: "no_public_gateway", value: "1"),
+            URLQueryItem(name: "no_clearnet", value: "1")
+        ]
+        return components.url
+    }
+
+    func probeResult(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint,
+        fixture: PrivateOverlaySmokeFixture,
+        statusCode: Int,
+        data: Data
+    ) -> PrivateOverlayRuntimeProbeResult {
+        switch statusCode {
+        case 200:
+            guard !data.isEmpty,
+                  let payload = try? JSONDecoder().decode(PrivateOverlayRuntimeSmokePayload.self, from: data) else {
+                return .reachable("\(endpoint.displayName) smoke endpoint is reachable but did not return fixture proof.")
+            }
+            return probeResult(network: network, endpoint: endpoint, fixture: fixture, payload: payload)
+        case 204:
+            return .reachable("\(endpoint.displayName) smoke endpoint is reachable but did not return fixture proof.")
+        case 401, 403:
+            return .blocked("\(endpoint.displayName) rejected smoke checks; user permission or platform policy is required.")
+        case 404, 405, 501:
+            return .reachable("\(endpoint.displayName) does not expose the dBrowser smoke contract yet; network smoke verification is still pending.")
+        case 400, 409, 422, 500...599:
+            return .misconfigured("\(endpoint.displayName) reported HTTP \(statusCode) for smoke verification.")
+        default:
+            return .misconfigured("\(endpoint.displayName) returned unexpected smoke HTTP \(statusCode).")
+        }
+    }
+
+    private func probeResult(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint,
+        fixture: PrivateOverlaySmokeFixture,
+        payload: PrivateOverlayRuntimeSmokePayload
+    ) -> PrivateOverlayRuntimeProbeResult {
+        guard let payloadNetwork = payload.network else {
+            return .reachable("\(endpoint.displayName) smoke response did not include a network proof.")
+        }
+        if payloadNetwork.caseInsensitiveCompare(network.id) != .orderedSame {
+            return .misconfigured("\(endpoint.displayName) smoke response identified \(payloadNetwork), expected \(network.id).")
+        }
+        guard let fixtureID = payload.fixtureID else {
+            return .reachable("\(endpoint.displayName) smoke response did not include a fixture id.")
+        }
+        if fixtureID != fixture.id {
+            return .misconfigured("\(endpoint.displayName) smoke response identified fixture \(fixtureID), expected \(fixture.id).")
+        }
+        guard let digest = payload.payloadSHA256?.lowercased() else {
+            return .reachable("\(endpoint.displayName) smoke response did not include a fixture digest.")
+        }
+        guard payload.clearnetFallback != nil,
+              payload.dnsResolution != nil,
+              payload.searchFallback != nil,
+              payload.publicGateway != nil else {
+            return .reachable("\(endpoint.displayName) smoke response did not include all fallback assertions.")
+        }
+        if payload.clearnetFallback == true || payload.dnsResolution == true || payload.searchFallback == true || payload.publicGateway == true {
+            return .blocked("\(endpoint.displayName) smoke response reported DNS, search, public gateway, or clearnet fallback.")
+        }
+        if digest != fixture.expectedPayloadSHA256.lowercased() {
+            return .misconfigured("\(endpoint.displayName) smoke response digest \(digest) did not match expected fixture digest.")
+        }
+
+        let message = payload.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackMessage = "\(endpoint.displayName) smoke fixture \(fixture.id) verified without DNS, search, public gateway, or clearnet fallback."
+        let resolvedMessage = message?.isEmpty == false ? message! : fallbackMessage
+        if payload.verified == true || payload.status?.lowercased() == "verified" {
+            return .verified(resolvedMessage)
+        }
+        return .reachable("\(endpoint.displayName) smoke endpoint is reachable but fixture \(fixture.id) is not verified yet.")
+    }
+}
+
 struct URLSessionPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking, Sendable {
     var timeout: TimeInterval = 0.35
+    var smokeVerifier: (any PrivateOverlayRuntimeSmokeVerifying)? = URLSessionPrivateOverlayRuntimeSmokeVerifier()
 
     func check(
         network: PrivateOverlayNetwork,
@@ -552,11 +801,16 @@ struct URLSessionPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealth
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .misconfigured("\(endpoint.displayName) returned a non-HTTP health response.")
             }
-            return probeResult(
+            let healthResult = probeResult(
                 network: network,
                 endpoint: endpoint,
                 statusCode: httpResponse.statusCode,
                 data: data
+            )
+            return await probeResultAfterSmokeVerification(
+                healthResult: healthResult,
+                network: network,
+                endpoint: endpoint
             )
         } catch {
             return .notInstalled("\(endpoint.displayName) did not respond on \(endpoint.baseURL.absoluteString); runtime may be missing or stopped.")
@@ -576,6 +830,45 @@ struct URLSessionPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealth
             URLQueryItem(name: "adapter", value: network.adapterID)
         ]
         return components.url
+    }
+
+    func mergedProbeResult(
+        healthResult: PrivateOverlayRuntimeProbeResult,
+        smokeResult: PrivateOverlayRuntimeProbeResult
+    ) -> PrivateOverlayRuntimeProbeResult {
+        switch smokeResult.readiness {
+        case .verified, .blocked, .misconfigured:
+            return smokeResult
+        case .notInstalled:
+            if healthResult.readiness == .verified {
+                return healthResult
+            }
+            return PrivateOverlayRuntimeProbeResult(
+                readiness: healthResult.readiness,
+                message: "\(healthResult.message) \(smokeResult.message)"
+            )
+        case .installed, .running, .reachable:
+            if healthResult.readiness == .verified {
+                return healthResult
+            }
+            return PrivateOverlayRuntimeProbeResult(
+                readiness: healthResult.readiness,
+                message: "\(healthResult.message) \(smokeResult.message)"
+            )
+        }
+    }
+
+    private func probeResultAfterSmokeVerification(
+        healthResult: PrivateOverlayRuntimeProbeResult,
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        guard healthResult.readiness.isOperational,
+              let smokeVerifier else {
+            return healthResult
+        }
+        let smokeResult = await smokeVerifier.verify(network: network, endpoint: endpoint)
+        return mergedProbeResult(healthResult: healthResult, smokeResult: smokeResult)
     }
 
     private func probeResult(
@@ -642,5 +935,15 @@ struct URLSessionPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealth
         default:
             return .reachable(resolvedMessage)
         }
+    }
+}
+
+private extension URL {
+    var isPrivateOverlayLoopbackHTTPURL: Bool {
+        guard scheme?.lowercased() == "http",
+              let host = host?.lowercased() else {
+            return false
+        }
+        return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
     }
 }

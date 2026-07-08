@@ -100,6 +100,23 @@ Validation notes:
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-i2p-runtime-build` passed with existing dependency/app-icon warnings.
 - `npm test` and `npm run build` passed in `./web`; Vite still reports the existing Browserslist age and chunk-size warnings.
 
+Deterministic private-overlay smoke verification slice:
+
+- [x] Create the GitHub issue with scope, smoke contract, and validation lane: #165.
+- [x] Add typed deterministic smoke fixtures for Tor, I2P, Hyphanet/Freenet, ZeroNet, and Lokinet.
+- [x] Add a local adapter smoke endpoint request contract carrying fixture URI, digest, adapter id, and no-DNS/no-search/no-clearnet assertions.
+- [x] Evaluate smoke responses so verified readiness requires matching network, fixture, digest, and fallback assertions.
+- [x] Keep health-only adapters as reachable/running rather than fully verified when fixture evidence is missing.
+- [x] Add focused Swift tests for smoke URL construction, verification, fallback blocking, mismatch handling, and health-check integration.
+- [x] Verify focused tests, full `dBrowserTests`, and macOS build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- Focused private-overlay smoke verifier tests passed, including smoke URL construction, fixture verification, fallback blocking, digest/network mismatch handling, missing-assertion downgrades, and health/smoke result merging.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-build` passed with existing dependency/app-icon warnings.
+
 ## Design Review Polish For Local Developer Workflows (#160)
 
 Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.

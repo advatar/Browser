@@ -24,6 +24,17 @@ private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHeal
     }
 }
 
+private struct StubPrivateOverlayRuntimeSmokeVerifier: PrivateOverlayRuntimeSmokeVerifying {
+    var result: PrivateOverlayRuntimeProbeResult
+
+    func verify(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        result
+    }
+}
+
 private struct StaticPrivateOverlayRuntimeExecutableResolver: PrivateOverlayRuntimeExecutableResolving {
     var executableURL: URL?
 
@@ -236,6 +247,151 @@ struct dBrowserTests {
         #expect(snapshot.status(for: .lokinet)?.blocksNavigation == true)
         #expect(snapshot.hasOperationalRuntime)
         #expect(snapshot.summary.contains("verified") || snapshot.summary.contains("operational"))
+    }
+
+    @Test func privateOverlaySmokeFixturesBuildLoopbackAdapterRequests() {
+        let verifier = URLSessionPrivateOverlayRuntimeSmokeVerifier()
+
+        for network in PrivateOverlayNetwork.allCases {
+            guard let endpoint = PrivateOverlayAdapterConfiguration.localDefaults.endpoint(for: network.id) else {
+                Issue.record("Missing endpoint for \(network.id)")
+                continue
+            }
+            let fixture = network.smokeFixture
+            guard let url = verifier.smokeURL(for: network, endpoint: endpoint, fixture: fixture),
+                  let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                Issue.record("Expected smoke URL for \(network.id)")
+                continue
+            }
+            let query = Dictionary(
+                uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") }
+            )
+
+            #expect(url.scheme == "http")
+            #expect(url.host == "127.0.0.1")
+            #expect(components.path == "/private-overlay/\(network.id)/smoke")
+            #expect(query["network"] == network.id)
+            #expect(query["adapter"] == network.adapterID)
+            #expect(query["fixture_id"] == fixture.id)
+            #expect(query["uri"] == fixture.uri)
+            #expect(query["expected_sha256"] == fixture.expectedPayloadSHA256)
+            #expect(query["no_dns"] == "1")
+            #expect(query["no_search"] == "1")
+            #expect(query["no_public_gateway"] == "1")
+            #expect(query["no_clearnet"] == "1")
+        }
+    }
+
+    @Test func privateOverlaySmokeVerifierRequiresFixtureDigestAndFallbackAssertions() {
+        let verifier = URLSessionPrivateOverlayRuntimeSmokeVerifier()
+        let endpoint = PrivateOverlayAdapterConfiguration.localDefaults.endpoint(for: "tor")!
+        let fixture = PrivateOverlayNetwork.tor.smokeFixture
+        let verifiedPayload = """
+        {
+          "network": "tor",
+          "fixture_id": "dbrowser-smoke-tor-v1",
+          "status": "verified",
+          "payload_sha256": "\(fixture.expectedPayloadSHA256)",
+          "clearnet_fallback": false,
+          "dns_resolution": false,
+          "search_fallback": false,
+          "public_gateway": false,
+          "message": "Tor smoke fixture fetched through the local adapter."
+        }
+        """.data(using: .utf8)!
+
+        let verified = verifier.probeResult(
+            network: .tor,
+            endpoint: endpoint,
+            fixture: fixture,
+            statusCode: 200,
+            data: verifiedPayload
+        )
+        #expect(verified.readiness == .verified)
+        #expect(verified.message.contains("local adapter"))
+
+        let fallbackPayload = """
+        {
+          "network": "tor",
+          "fixture_id": "dbrowser-smoke-tor-v1",
+          "status": "verified",
+          "payload_sha256": "\(fixture.expectedPayloadSHA256)",
+          "clearnet_fallback": true,
+          "dns_resolution": false,
+          "search_fallback": false,
+          "public_gateway": false
+        }
+        """.data(using: .utf8)!
+        #expect(verifier.probeResult(network: .tor, endpoint: endpoint, fixture: fixture, statusCode: 200, data: fallbackPayload).readiness == .blocked)
+
+        let mismatchPayload = """
+        {
+          "network": "tor",
+          "fixture_id": "dbrowser-smoke-tor-v1",
+          "status": "verified",
+          "payload_sha256": "deadbeef",
+          "clearnet_fallback": false,
+          "dns_resolution": false,
+          "search_fallback": false,
+          "public_gateway": false
+        }
+        """.data(using: .utf8)!
+        #expect(verifier.probeResult(network: .tor, endpoint: endpoint, fixture: fixture, statusCode: 200, data: mismatchPayload).readiness == .misconfigured)
+
+        let missingAssertionsPayload = """
+        {
+          "network": "tor",
+          "fixture_id": "dbrowser-smoke-tor-v1",
+          "status": "verified",
+          "payload_sha256": "\(fixture.expectedPayloadSHA256)"
+        }
+        """.data(using: .utf8)!
+        #expect(verifier.probeResult(network: .tor, endpoint: endpoint, fixture: fixture, statusCode: 200, data: missingAssertionsPayload).readiness == .reachable)
+
+        let wrongNetworkPayload = """
+        {
+          "network": "i2p",
+          "fixture_id": "dbrowser-smoke-tor-v1",
+          "status": "verified",
+          "payload_sha256": "\(fixture.expectedPayloadSHA256)",
+          "clearnet_fallback": false,
+          "dns_resolution": false,
+          "search_fallback": false,
+          "public_gateway": false
+        }
+        """.data(using: .utf8)!
+        #expect(verifier.probeResult(network: .tor, endpoint: endpoint, fixture: fixture, statusCode: 200, data: wrongNetworkPayload).readiness == .misconfigured)
+    }
+
+    @Test func privateOverlayHealthMergesSmokeVerificationWithoutOverstatingPendingAdapters() {
+        let checker = URLSessionPrivateOverlayRuntimeHealthChecker(
+            smokeVerifier: StubPrivateOverlayRuntimeSmokeVerifier(result: .verified("Smoke fixture verified through local adapter."))
+        )
+
+        let verified = checker.mergedProbeResult(
+            healthResult: .reachable("Health endpoint reachable."),
+            smokeResult: .verified("Smoke fixture verified through local adapter.")
+        )
+        #expect(verified.readiness == .verified)
+
+        let pending = checker.mergedProbeResult(
+            healthResult: .reachable("Health endpoint reachable."),
+            smokeResult: .reachable("Smoke contract pending.")
+        )
+        #expect(pending.readiness == .reachable)
+        #expect(pending.message.contains("Smoke contract pending."))
+
+        let runningPendingSmoke = checker.mergedProbeResult(
+            healthResult: .running("Adapter process is running."),
+            smokeResult: .reachable("Smoke contract pending.")
+        )
+        #expect(runningPendingSmoke.readiness == .running)
+
+        let blocked = checker.mergedProbeResult(
+            healthResult: .reachable("Health endpoint reachable."),
+            smokeResult: .blocked("Smoke reported clearnet fallback.")
+        )
+        #expect(blocked.readiness == .blocked)
     }
 
     @Test func privateOverlayRuntimeHealthSummaryReportsConfiguredAdaptersThatDoNotRespond() async {
