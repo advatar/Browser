@@ -141,7 +141,7 @@ Validation notes:
 
 Landing page update for live private-overlay harness:
 
-- [x] Track the landing page update under #166; a separate GitHub issue creation attempt failed because GitHub was unreachable from the machine.
+- [x] Track the landing page update under #166 alongside the live private-overlay harness scope.
 - [x] Update the `./web` hero and protocol surfaces to advertise the Tor/I2P live smoke harness without overstating anonymity or full dark-web coverage.
 - [x] Extend web content tests for the live smoke harness copy.
 - [x] Run web tests and production build before committing.
@@ -149,9 +149,8 @@ Landing page update for live private-overlay harness:
 Validation notes:
 
 - `npm test && npm run build` passed in `./web`; Vite reported existing Browserslist age and large chunk warnings.
-- `git -C web push origin main` failed because `github.com` could not be resolved from the machine.
-- `git push origin feature/app-intents` failed because `github.com` could not be resolved from the machine.
-- `gh issue comment 166 && gh issue close 166` failed because GitHub was unreachable from the machine.
+- `git -C web push origin main` passed on retry after network access was restored.
+- `git push origin feature/app-intents` passed on retry after network access was restored.
 
 ## Design Review Polish For Local Developer Workflows (#160)
 
