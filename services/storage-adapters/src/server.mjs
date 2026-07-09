@@ -6,21 +6,31 @@ import {
   resolveNativeAdapterRequest,
   sampleAdapterRequestURL
 } from './handlers.mjs';
+import {
+  fetchPrivateOverlayNativeContent,
+  privateOverlayHandlers,
+  privateOverlaySummary,
+  resolvePrivateOverlayHealth,
+  resolvePrivateOverlayNativeRequest,
+  resolvePrivateOverlaySmoke,
+  samplePrivateOverlaySmokeURL
+} from './private-overlays.mjs';
 
 const args = new Set(process.argv.slice(2));
 const hostname = process.env.DBROWSER_STORAGE_ADAPTER_HOST ?? '127.0.0.1';
 const startedAt = Date.now();
 
 if (args.has('--snapshot')) {
-  console.log(`[storage-adapters] ${nativeProtocolHandlers.length} native handlers indexed`);
+  console.log(`[storage-adapters] ${nativeProtocolHandlers.length} native handlers and ${privateOverlayHandlers.length} private-overlay handlers indexed`);
   process.exit(0);
 }
 
 if (args.has('--lint')) {
-  const ports = new Set(nativeProtocolHandlers.map(handler => handler.port));
-  const routes = new Set(nativeProtocolHandlers.map(handler => handler.routePath));
-  if (ports.size !== nativeProtocolHandlers.length || routes.size !== nativeProtocolHandlers.length) {
-    console.error('[storage-adapters] duplicate port or route detected');
+  const allHandlers = nativeProtocolHandlers.concat(privateOverlayHandlers);
+  const ports = new Set(allHandlers.map(handler => handler.port));
+  const routes = new Set(allHandlers.map(handler => handler.routePath));
+  if (ports.size !== allHandlers.length || routes.size !== allHandlers.length) {
+    console.error('[storage-adapters] duplicate port or route detected across native and private-overlay handlers');
     process.exit(1);
   }
   console.log('[storage-adapters] handler registry OK');
@@ -28,12 +38,12 @@ if (args.has('--lint')) {
 }
 
 if (args.has('--self-test')) {
-  runSelfTest();
+  await runSelfTest();
   console.log('[storage-adapters] self-test passed');
   process.exit(0);
 }
 
-const servers = nativeProtocolHandlers.map(handler => {
+const servers = nativeProtocolHandlers.concat(privateOverlayHandlers).map(handler => {
   const server = http.createServer((req, res) => handleRequest(req, res));
   server.listen(handler.port, hostname, () => {
     console.log(`[storage-adapters] ${handler.id} listening on http://${hostname}:${handler.port}${handler.routePath}`);
@@ -50,7 +60,8 @@ function handleRequest(req, res) {
       contract: handlerContractVersion,
       uptimeMs: Date.now() - startedAt,
       handlers: nativeProtocolHandlers.length,
-      ports: nativeProtocolHandlers.map(handler => handler.port)
+      privateOverlayHandlers: privateOverlayHandlers.length,
+      ports: nativeProtocolHandlers.concat(privateOverlayHandlers).map(handler => handler.port)
     });
   }
 
@@ -58,8 +69,24 @@ function handleRequest(req, res) {
     return sendJson(res, 200, {
       ok: true,
       contract: handlerContractVersion,
-      data: handlerSummary()
+      data: handlerSummary(),
+      privateOverlays: privateOverlaySummary()
     });
+  }
+
+  const privateOverlayHealthMatch = requestURL.pathname.match(/^\/private-overlay\/([^/]+)\/health$/);
+  if (req.method === 'GET' && privateOverlayHealthMatch) {
+    return handlePrivateOverlayHealthRequest(privateOverlayHealthMatch[1], requestURL, res);
+  }
+
+  const privateOverlaySmokeMatch = requestURL.pathname.match(/^\/private-overlay\/([^/]+)\/smoke$/);
+  if (req.method === 'GET' && privateOverlaySmokeMatch) {
+    return handlePrivateOverlaySmokeRequest(privateOverlaySmokeMatch[1], requestURL, res);
+  }
+
+  const privateOverlayNativeMatch = requestURL.pathname.match(/^\/private-overlay\/([^/]+)\/native$/);
+  if (req.method === 'GET' && privateOverlayNativeMatch) {
+    return handlePrivateOverlayNativeRequest(privateOverlayNativeMatch[1], requestURL, req, res);
   }
 
   const nativeMatch = requestURL.pathname.match(/^\/dweb\/([^/]+)\/native$/);
@@ -72,6 +99,16 @@ function handleRequest(req, res) {
     error: 'not found',
     contract: handlerContractVersion
   });
+}
+
+async function handlePrivateOverlayHealthRequest(networkID, requestURL, res) {
+  const result = await resolvePrivateOverlayHealth(networkID, requestURL, process.env);
+  return sendJson(res, result.statusCode, result.payload);
+}
+
+async function handlePrivateOverlaySmokeRequest(networkID, requestURL, res) {
+  const result = await resolvePrivateOverlaySmoke(networkID, requestURL, process.env);
+  return sendJson(res, result.statusCode, result.payload);
 }
 
 async function handleNativeAdapterRequest(networkID, requestURL, req, res) {
@@ -98,6 +135,36 @@ async function handleNativeAdapterRequest(networkID, requestURL, req, res) {
   }
 
   return proxyTarget(req, res, result);
+}
+
+async function handlePrivateOverlayNativeRequest(networkID, requestURL, req, res) {
+  const result = resolvePrivateOverlayNativeRequest(networkID, requestURL, process.env);
+  const wantsJson = requestURL.searchParams.get('format') === 'json'
+    || acceptsJson(req)
+    || requestURL.searchParams.get('mode') === 'describe';
+
+  if (wantsJson || result.state !== 'ready') {
+    return sendJson(res, result.statusCode, publicPrivateOverlayResult(result));
+  }
+
+  try {
+    const fetched = await fetchPrivateOverlayNativeContent(result);
+    res.writeHead(fetched.statusCode, {
+      'Content-Type': fetched.contentType,
+      'Cache-Control': 'no-store',
+      'X-dBrowser-Private-Overlay': result.network.id,
+      'X-dBrowser-Private-Overlay-Adapter': result.adapter.id
+    });
+    res.end(fetched.body);
+  } catch (err) {
+    return sendJson(res, 502, {
+      ok: false,
+      state: 'proxy_failed',
+      network: result.network?.id,
+      adapter: result.adapter?.id,
+      message: `Private-overlay proxy fetch failed: ${err.message ?? err}`
+    });
+  }
 }
 
 async function proxyTarget(req, res, result) {
@@ -140,7 +207,7 @@ async function proxyTarget(req, res, result) {
   }
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   for (const handler of nativeProtocolHandlers) {
     const missingBackend = resolveNativeAdapterRequest(handler.id, sampleAdapterRequestURL(handler), {});
     if (missingBackend.state !== 'backend_required') {
@@ -172,6 +239,24 @@ function runSelfTest() {
   if (invalidResult.state !== 'invalid' || invalidResult.statusCode !== 400) {
     throw new Error('invalid adapter metadata should be rejected');
   }
+
+  for (const handler of privateOverlayHandlers) {
+    const missingRuntime = await resolvePrivateOverlaySmoke(
+      handler.id,
+      samplePrivateOverlaySmokeURL(handler),
+      { [handler.proxyVariables[0]]: `${handler.proxyMode === 'socks5' ? 'socks5' : 'http'}://127.0.0.1:9` }
+    );
+    if (missingRuntime.payload.verified) {
+      throw new Error(`${handler.id} smoke must not verify when the local runtime is absent`);
+    }
+
+    const invalidSmoke = samplePrivateOverlaySmokeURL(handler);
+    invalidSmoke.searchParams.set('adapter', 'wrong.adapter');
+    const invalidSmokeResult = await resolvePrivateOverlaySmoke(handler.id, invalidSmoke, {});
+    if (invalidSmokeResult.statusCode !== 400 || invalidSmokeResult.payload.status !== 'misconfigured') {
+      throw new Error(`${handler.id} invalid smoke metadata should be rejected`);
+    }
+  }
 }
 
 function acceptsJson(req) {
@@ -180,6 +265,13 @@ function acceptsJson(req) {
 
 function publicResult(result) {
   const copy = structuredClone(result);
+  delete copy.proxy;
+  return copy;
+}
+
+function publicPrivateOverlayResult(result) {
+  const copy = structuredClone(result);
+  delete copy.handler;
   delete copy.proxy;
   return copy;
 }

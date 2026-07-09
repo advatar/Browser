@@ -7,6 +7,6 @@
     "dev": "node ./src/server.mjs",
     "build": "node ./src/server.mjs --snapshot",
     "lint": "node ./src/server.mjs --lint",
-    "test": "node --test ./src/handlers.test.mjs && node ./src/server.mjs --self-test"
+    "test": "node --test ./src/handlers.test.mjs ./src/private-overlays.test.mjs && node ./src/server.mjs --self-test"
   }
 }

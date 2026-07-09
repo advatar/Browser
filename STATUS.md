@@ -32,7 +32,8 @@ Add a first-class native ad/tracker blocker to the current Swift dBrowser produc
 - [x] Preserve localhost, private-overlay, and decentralized adapter routes so privacy infrastructure is not blocked as advertising.
 - [x] Add focused Swift tests for default state, rule coverage, and local route exclusions.
 - [x] Verify focused/full native Swift tests and macOS build locally before committing.
-- [x] Commit and push the scoped implementation.
+- [x] Commit the scoped implementation locally.
+- [ ] Push the web submodule and parent repository commits once GitHub DNS/network access is restored.
 
 Validation notes:
 
@@ -116,6 +117,41 @@ Validation notes:
 - Focused private-overlay smoke verifier tests passed, including smoke URL construction, fixture verification, fallback blocking, digest/network mismatch handling, missing-assertion downgrades, and health/smoke result merging.
 - `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-full-tests -only-testing:dBrowserTests` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-build` passed with existing dependency/app-icon warnings.
+
+Live Tor/I2P private-overlay smoke harness slice:
+
+- [x] Create the GitHub issue with scope, adapter endpoints, and validation lane: #166.
+- [x] Extend the repo-owned local adapter service with Tor and I2P private-overlay `/health`, `/smoke`, and native route endpoints on ports 4893 and 4894.
+- [x] Implement Tor smoke fetches through SOCKS5 without system DNS, search, public gateway, or clearnet fallback.
+- [x] Implement I2P smoke fetches through the local I2P HTTP proxy without system DNS, search, public gateway, or clearnet fallback.
+- [x] Validate smoke request metadata and return Swift-compatible smoke JSON that never marks missing runtimes verified.
+- [x] Reject native private-overlay requests whose target host is outside the expected `.onion` or `.i2p` boundary.
+- [x] Decode chunked HTTP responses from SOCKS5-backed Tor fetches so native content proxying works beyond fixed-length fixtures.
+- [x] Add Node tests with local fake SOCKS5 and HTTP proxy fixtures for the live harness.
+- [x] Update README/architecture docs with the bounded live-harness claim.
+- [x] Verify storage-adapter tests, full `dBrowserTests`, and macOS build locally before committing.
+- [x] Commit and push the scoped implementation.
+
+Validation notes:
+
+- `pnpm --filter @browser/storage-adapters build`, `pnpm --filter @browser/storage-adapters lint`, and `pnpm --filter @browser/storage-adapters test` passed with 16 Node tests.
+- `./scripts/dweb-engines/smoke.sh` passed, including the new Tor/I2P private-overlay health, fake proxy smoke, overlay-host validation, and SOCKS5 chunked-response tests.
+- `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-full-tests -only-testing:dBrowserTests` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-build` passed with existing dependency/app-icon warnings.
+
+Landing page update for live private-overlay harness:
+
+- [x] Track the landing page update under #166; a separate GitHub issue creation attempt failed because GitHub was unreachable from the machine.
+- [x] Update the `./web` hero and protocol surfaces to advertise the Tor/I2P live smoke harness without overstating anonymity or full dark-web coverage.
+- [x] Extend web content tests for the live smoke harness copy.
+- [x] Run web tests and production build before committing.
+
+Validation notes:
+
+- `npm test && npm run build` passed in `./web`; Vite reported existing Browserslist age and large chunk warnings.
+- `git -C web push origin main` failed because `github.com` could not be resolved from the machine.
+- `git push origin feature/app-intents` failed because `github.com` could not be resolved from the machine.
+- `gh issue comment 166 && gh issue close 166` failed because GitHub was unreachable from the machine.
 
 ## Design Review Polish For Local Developer Workflows (#160)
 
