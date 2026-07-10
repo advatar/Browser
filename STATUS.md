@@ -161,8 +161,8 @@ Merge the completed `feature/app-intents` product branch into `main` without bla
 - [x] Fetch origin and fast-forward local `main` to `origin/main`.
 - [x] Merge `feature/app-intents` into `main`.
 - [x] Run focused validation after the merge.
-- [ ] Push `main`.
-- [ ] Comment on and close #167 with commit and validation details.
+- [x] Push `main`.
+- [x] Comment on and close #167 with commit and validation details.
 
 Validation notes:
 
@@ -172,6 +172,8 @@ Validation notes:
 - `swift test --package-path swift/Packages/BrowserAutomationKit` passed with 5 tests.
 - `xcodebuild test -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-full-tests -only-testing:dBrowserTests` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-private-overlay-smoke-build` passed with existing dependency warnings.
+- `git push origin main` passed after one transient SSH retry.
+- #167 was commented and closed.
 
 ## Design Review Polish For Local Developer Workflows (#160)
 
