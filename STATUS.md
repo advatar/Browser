@@ -152,6 +152,18 @@ Validation notes:
 - `git -C web push origin main` passed on retry after network access was restored.
 - `git push origin feature/app-intents` passed on retry after network access was restored.
 
+## Mainline Integration For Private Overlay Work (#167)
+
+Merge the completed `feature/app-intents` product branch into `main` without blanket-merging independent dependency-update branches.
+
+- [x] Create the GitHub issue with branch assessment and validation plan.
+- [x] Confirm `swiftlm-local-llms` is already present in the visible history and remote Dependabot branches remain independent update branches.
+- [ ] Fetch origin and fast-forward local `main` to `origin/main`.
+- [ ] Merge `feature/app-intents` into `main`.
+- [ ] Run focused validation after the merge.
+- [ ] Push `main`.
+- [ ] Comment on and close #167 with commit and validation details.
+
 ## Design Review Polish For Local Developer Workflows (#160)
 
 Run an extensive code and UX review of the local-first developer workflow automation surfaces, then fix the issues that would weaken a design review without compromising approval-gated mutations or local evidence storage.
