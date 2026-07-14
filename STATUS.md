@@ -601,6 +601,28 @@ Validation notes:
 - Changed-line non-ASCII scan passed for the scoped files.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS' -derivedDataPath /tmp/dBrowser-strawberry-gap-closure-build` passed.
 
+## Paid AFM Expert Inference Marketplace (#168)
+
+Extend the repo-owned AFM marketplace from local artifact publishing into a production-shaped seller API without claiming a bundled payment processor or model runtime.
+
+- [x] Assess the current catalog, expert pricing, payout, inference, metering, and settlement gaps.
+- [x] Create the GitHub issue with scope, API plan, safety boundaries, and acceptance criteria (#168).
+- [x] Add backwards-compatible free/metered commerce configuration and HTTP runner endpoints to published experts.
+- [x] Add bound inference quotes, idempotent execution, authoritative usage charging, royalty allocation, and privacy-preserving provider receipts.
+- [x] Keep paid execution fail-closed behind injected model-executor and payment-processor boundaries.
+- [x] Add focused unit and HTTP tests for validation, quote integrity/expiry, payment failures, idempotency, charge rounding, receipt privacy, and free-mode execution.
+- [x] Update marketplace documentation with accurate seller capability and limitation language.
+- [x] Verify marketplace tests, build, lint, and scoped diff hygiene locally.
+- [x] Commit and push only scoped changes.
+
+Validation notes:
+
+- `pnpm --filter @browser/afm-marketplace test` passed all 17 tests across four suites, including the seller inference HTTP API.
+- `pnpm --filter @browser/afm-marketplace build` passed the marketplace self-test with quote, inference, and receipt coverage.
+- `pnpm --filter @browser/afm-marketplace lint` passed.
+- `node --check apps/afm-marketplace/src/main.mjs` passed.
+- `git diff --check -- README.md STATUS.md docs/ARCHITECTURE.md apps/afm-marketplace/src/main.mjs apps/afm-marketplace/src/main.test.mjs` passed.
+
 ## Local AFM Expert Training Marketplace
 
 - [x] Create GitHub issue for local AFM expert training and marketplace build-out (#136).

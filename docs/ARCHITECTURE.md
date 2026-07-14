@@ -279,6 +279,38 @@ Current Swift app surface:
 - `AFMServicesClient` checks `/health`, reads `/packs`, posts `/route`, and posts `/jobs`.
 - `MobileRuntimeBridge.runCopilot` uses AFM services when available.
 
+#### Local AFM Seller Inference Backend (Issue #168)
+
+`apps/afm-marketplace` owns an additive seller-side backend contract for published local experts. Existing training clients remain compatible because the optional top-level `commerce` request is normalized to an explicit `free` policy when omitted. A metered policy uses the following normalized fields:
+
+| Field | Meaning |
+| --- | --- |
+| `mode` | `free` or `metered`; omitted commerce becomes `free` |
+| `basis` | Always `total_tokens` for this version |
+| `rateMinorUnitsPer1K` | Positive integer asset minor units charged per 1,000 authoritative total tokens |
+| `asset`, `assetDecimals` | Asset identifier and its decimal precision; calculations never use floating-point asset amounts |
+| `network` | Settlement network identifier |
+| `payTo` | Required provider payout destination for metered commerce; `null` for free commerce |
+| `minChargeMinorUnits` | Non-negative minimum charge applied to a metered inference |
+
+Metered charges use integer arithmetic: multiply authoritative total tokens by the per-1K rate, round the division by 1,000 upward, then apply the minimum charge. Publishing copies normalized pricing and payout metadata into the expert record and gives the expert an HTTP `ingestUrl` under the configured `publicBaseURL` at `/api/runners/:id`. The default public base URL remains loopback and does not imply public reachability.
+
+The HTTP flow is:
+
+| Method and path | Responsibility |
+| --- | --- |
+| `POST /api/runners/:id/quotes` | Validate prompt, context, and generation limits; bind input, parameters, runner profile, manifest, pricing revision, expiry, and the maximum billable amount into a quote. Metered quotes require the injected authoritative tokenizer and include a dBrowser-compatible x402 payment requirement. |
+| `POST /api/runners/:id/inferences` | Execute a matching open quote. Requires `Idempotency-Key`; identical retries return the existing inference, while conflicting reuse is rejected. Metered requests must include payment authorization bound to the quote requirement. |
+| `GET /api/inferences/:id` | Return inference lifecycle, authoritative usage, charge, output, and receipt linkage without returning the original prompt or context. |
+| `GET /api/receipts/:id` | Return the completed free or settled inference receipt. |
+| `GET /api/provider/summary` | Return privacy-safe runner, quote, inference, receipt, and per-asset/network charge totals without prompt or context material. |
+
+Execution deliberately stops at injected provider boundaries. Every inference requires a configured `inferenceExecutor`; otherwise the service returns an unavailable error instead of fabricating output. Metered quotes also require a synchronous `tokenEstimator` that uses the same tokenizer as the executor, preventing heuristic prompt counts from defining the authorization cap. The executor must return output plus consistent authoritative prompt, completion, and total-token counts, a tokenizer identifier, and a usage attestation. Metered inference additionally requires a `paymentProcessor` with authorization and settlement operations whose results echo the quote, requirement, inference, expiry, payout terms, usage/output/royalty commitments, charged amount, and authorization remainder. Missing or mismatched payment, insufficient authorization, an unavailable processor, invalid authoritative usage, a prompt-token mismatch, completion above the requested cap, a charge above the quoted maximum, or failed settlement fails closed; model execution does not start until metered authorization succeeds.
+
+A completed receipt records commitments for the input, output, runner profile, and manifest; authoritative usage; the immutable pricing revision; authorized and charged minor-unit amounts plus the unconsumed authorization remainder; royalty allocation; and payment authorization/settlement references. It intentionally excludes raw prompt and context text. This provides a verifiable integration record without presenting the in-process maps as durable accounting.
+
+Production boundaries remain outside Issue #168. Quote creation receives plaintext prompt and context for tokenization and must not be confused with the encrypted ZeroK gateway route. The repository does not bundle a production inference executor/model host, tokenizer, usage-attestation verifier, receipt signer, or payment processor. The service stores jobs, quotes, inferences, idempotency records, and receipts in memory and does not supply public authentication, tenant isolation, TLS termination, durable persistence, crash-safe payment reconciliation, or production key management. Receipt and usage-attestation commitments are tamper-evident references, not verified signatures by themselves. A reverse proxy/API perimeter, durable transactional storage, and real verified provider adapters are required before network exposure. Swift models and seller UI for commerce configuration, paid inference operations, provider summaries, and receipt inspection are follow-up work; the current Swift app continues to create and publish the existing training request shape.
+
 Target Swift package:
 
 - `AFMarketKit`.
