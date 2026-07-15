@@ -151,6 +151,7 @@ struct CopilotRunRequest: Equatable {
     var prompt: String
     var pageURLString: String?
     var pageSnapshot: PageSnapshot?
+    var relatedPageSnapshots: [PageSnapshot]
     var preferredAFMPackID: String?
     var preferredModelID: String?
     var conversationID: UUID?
@@ -162,6 +163,7 @@ struct CopilotRunRequest: Equatable {
         prompt: String,
         pageURLString: String? = nil,
         pageSnapshot: PageSnapshot? = nil,
+        relatedPageSnapshots: [PageSnapshot] = [],
         preferredAFMPackID: String? = nil,
         preferredModelID: String? = nil,
         conversationID: UUID? = nil,
@@ -172,6 +174,9 @@ struct CopilotRunRequest: Equatable {
         self.prompt = prompt
         self.pageURLString = pageURLString
         self.pageSnapshot = pageSnapshot
+        self.relatedPageSnapshots = Array(
+            relatedPageSnapshots.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
+        )
         self.preferredAFMPackID = preferredAFMPackID
         self.preferredModelID = preferredModelID
         self.conversationID = conversationID
@@ -743,6 +748,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let snapshotContext = request.pageSnapshot.map { snapshot in
             " Snapshot includes \(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, and \(snapshot.formControls.count) form controls."
         } ?? ""
+        let relatedSnapshotContext = request.relatedPageSnapshots.isEmpty
+            ? ""
+            : " Related context includes \(request.relatedPageSnapshots.count) explicitly selected page snapshot\(request.relatedPageSnapshots.count == 1 ? "" : "s") with \(request.relatedPageSnapshots.reduce(0) { $0 + $1.visibleText.count }) text characters."
         let conversationContext = request.renderedConversationContext.map { rendered in
             let compression = rendered.wasCompressed ? " with compressed prior context" : ""
             return " Conversation \(request.conversationID?.uuidString ?? "context") rendered \(rendered.estimatedPromptTokens) prompt tokens\(compression)."
@@ -790,6 +798,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     request.renderedConversationContext == nil ? "Router received the current prompt without rendered conversation context." : "Router received rendered conversation context with \(request.renderedConversationContext?.estimatedPromptTokens ?? 0) estimated prompt tokens.",
                     memoryIDs.isEmpty ? "No governed memory IDs were sent to the router." : "Router received approved memory IDs: \(memoryIDs.joined(separator: ", "))."
                 ]
+                if !relatedSnapshotContext.isEmpty {
+                    suggestions.append(relatedSnapshotContext.trimmingCharacters(in: .whitespaces))
+                }
                 if let usage = response.usage {
                     suggestions.append("Router usage: \(usage.promptTokens ?? 0) prompt, \(usage.completionTokens ?? 0) completion, \(usage.totalTokens ?? 0) total tokens.")
                 }
@@ -846,6 +857,9 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     memoryIDs.isEmpty ? "No governed memory IDs were disclosed to the gateway." : "Only approved memory-derived context was included; \(memoryIDs.count) local memory ID\(memoryIDs.count == 1 ? "" : "s") remained local.",
                     response.boundarySummary
                 ]
+                if !relatedSnapshotContext.isEmpty {
+                    suggestions.append(relatedSnapshotContext.trimmingCharacters(in: .whitespaces))
+                }
                 if let usage = response.usage {
                     suggestions.append("Gateway usage: \(usage.promptTokens ?? 0) prompt, \(usage.completionTokens ?? 0) completion, \(usage.totalTokens ?? 0) total tokens.")
                 }
@@ -901,7 +915,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 pageSnapshotCommitment: snapshotCommitment,
                 memoryContextIDs: memoryIDs
             )
-            var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(conversationContext)\(memoryContext)"
+            var summary = "Routed \(page) through \(selectedPack) and queued pipelines job \(job.id).\(snapshotContext)\(relatedSnapshotContext)\(conversationContext)\(memoryContext)"
             if let routeRequest = route.request {
                 summary += " Route contract \(route.contract) used \(routeRequest.reward) \(routeRequest.rewardToken) on \(routeRequest.chainRef)."
             }
@@ -1001,7 +1015,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
 
         return CopilotRunResult(
             title: "Local Copilot bridge",
-            summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(conversationContext)\(memoryContext)",
+            summary: "Prepared a mobile Copilot run for \(page): \(task)\(snapshotContext)\(relatedSnapshotContext)\(conversationContext)\(memoryContext)",
             suggestions: [
                 llmRouterFailureMessage,
                 llmGatewayFailureMessage,

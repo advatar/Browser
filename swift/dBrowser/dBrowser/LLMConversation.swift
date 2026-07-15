@@ -325,6 +325,10 @@ struct LLMPageSnapshotAttachment: Codable, Equatable {
     }
 
     init(snapshot: PageSnapshot) {
+        self.init(snapshot: snapshot, excerptCharacterLimit: 800)
+    }
+
+    init(snapshot: PageSnapshot, excerptCharacterLimit: Int) {
         self.init(
             urlString: snapshot.urlString,
             title: snapshot.title,
@@ -333,9 +337,17 @@ struct LLMPageSnapshotAttachment: Codable, Equatable {
             formControlCount: snapshot.formControls.count,
             redactionCount: snapshot.redactionCount,
             commitment: OpenMindMemoryClient.snapshotCommitment(for: snapshot),
-            excerpt: SmartHistoryIndexer.boundedText(snapshot.modelContextSummary, limit: 800)
+            excerpt: SmartHistoryIndexer.boundedText(
+                snapshot.modelContextSummary,
+                limit: max(1, excerptCharacterLimit)
+            )
         )
     }
+}
+
+enum LLMRelatedPageSnapshotPolicy {
+    nonisolated static let maximumSnapshots = 4
+    nonisolated static let excerptCharacterLimit = 600
 }
 
 struct LLMMemoryCitation: Codable, Equatable, Identifiable {
@@ -369,9 +381,24 @@ struct LLMConversationMessage: Codable, Equatable, Identifiable {
     var modelID: String?
     var pageURLString: String?
     var snapshotAttachment: LLMPageSnapshotAttachment?
+    var relatedSnapshotAttachments: [LLMPageSnapshotAttachment]
     var memoryCitations: [LLMMemoryCitation]
     var usage: CopilotCreditUsage?
     var sourceRunID: UUID?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case text
+        case createdAt
+        case modelID
+        case pageURLString
+        case snapshotAttachment
+        case relatedSnapshotAttachments
+        case memoryCitations
+        case usage
+        case sourceRunID
+    }
 
     nonisolated init(
         id: UUID = UUID(),
@@ -381,6 +408,7 @@ struct LLMConversationMessage: Codable, Equatable, Identifiable {
         modelID: String? = nil,
         pageURLString: String? = nil,
         snapshotAttachment: LLMPageSnapshotAttachment? = nil,
+        relatedSnapshotAttachments: [LLMPageSnapshotAttachment] = [],
         memoryCitations: [LLMMemoryCitation] = [],
         usage: CopilotCreditUsage? = nil,
         sourceRunID: UUID? = nil
@@ -392,9 +420,49 @@ struct LLMConversationMessage: Codable, Equatable, Identifiable {
         self.modelID = modelID
         self.pageURLString = pageURLString
         self.snapshotAttachment = snapshotAttachment
+        self.relatedSnapshotAttachments = Array(
+            relatedSnapshotAttachments.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
+        )
         self.memoryCitations = memoryCitations
         self.usage = usage
         self.sourceRunID = sourceRunID
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            role: try container.decode(LLMConversationRole.self, forKey: .role),
+            text: try container.decode(String.self, forKey: .text),
+            createdAt: try container.decode(Date.self, forKey: .createdAt),
+            modelID: try container.decodeIfPresent(String.self, forKey: .modelID),
+            pageURLString: try container.decodeIfPresent(String.self, forKey: .pageURLString),
+            snapshotAttachment: try container.decodeIfPresent(LLMPageSnapshotAttachment.self, forKey: .snapshotAttachment),
+            relatedSnapshotAttachments: try container.decodeIfPresent(
+                [LLMPageSnapshotAttachment].self,
+                forKey: .relatedSnapshotAttachments
+            ) ?? [],
+            memoryCitations: try container.decodeIfPresent([LLMMemoryCitation].self, forKey: .memoryCitations) ?? [],
+            usage: try container.decodeIfPresent(CopilotCreditUsage.self, forKey: .usage),
+            sourceRunID: try container.decodeIfPresent(UUID.self, forKey: .sourceRunID)
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(role, forKey: .role)
+        try container.encode(text, forKey: .text)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(modelID, forKey: .modelID)
+        try container.encodeIfPresent(pageURLString, forKey: .pageURLString)
+        try container.encodeIfPresent(snapshotAttachment, forKey: .snapshotAttachment)
+        if !relatedSnapshotAttachments.isEmpty {
+            try container.encode(relatedSnapshotAttachments, forKey: .relatedSnapshotAttachments)
+        }
+        try container.encode(memoryCitations, forKey: .memoryCitations)
+        try container.encodeIfPresent(usage, forKey: .usage)
+        try container.encodeIfPresent(sourceRunID, forKey: .sourceRunID)
     }
 }
 
@@ -597,10 +665,15 @@ enum LLMConversationContextRenderer {
         conversation: LLMConversation,
         model: LLMModelProfile,
         latestPageSnapshot: PageSnapshot?,
+        relatedPageSnapshots: [PageSnapshot] = [],
         memoryRecall: OpenMindMemoryRecallResult? = nil
     ) -> LLMRenderedConversationContext {
         let memoryCitations = memoryRecall?.memories.map(LLMMemoryCitation.init(memory:)) ?? []
         let snapshotAttachment = latestPageSnapshot.map(LLMPageSnapshotAttachment.init(snapshot:))
+        let relatedSnapshotAttachments = boundedRelatedSnapshotAttachments(
+            from: relatedPageSnapshots,
+            excluding: snapshotAttachment
+        )
         let switchEvents = conversation.events
             .filter { $0.kind == .modelSwitched }
             .suffix(4)
@@ -616,6 +689,7 @@ enum LLMConversationContextRenderer {
             compressedSummary: compressedSummary(for: compressedMessages),
             renderedMessages: renderedMessages.map(\.text),
             snapshotAttachment: snapshotAttachment,
+            relatedSnapshotAttachments: relatedSnapshotAttachments,
             memoryCitations: memoryCitations
         )) > tokenBudget, renderedMessages.count > 2 {
             compressedMessages.append(renderedMessages.removeFirst())
@@ -627,6 +701,7 @@ enum LLMConversationContextRenderer {
             compressedSummary: compressedSummary(for: compressedMessages),
             renderedMessages: renderedMessages.map(\.text),
             snapshotAttachment: snapshotAttachment,
+            relatedSnapshotAttachments: relatedSnapshotAttachments,
             memoryCitations: memoryCitations
         )
 
@@ -653,6 +728,12 @@ enum LLMConversationContextRenderer {
         if let attachment = message.snapshotAttachment {
             lines.append("snapshot: \(attachment.title) \(attachment.commitment ?? "uncommitted")")
         }
+        for (index, attachment) in message.relatedSnapshotAttachments
+            .prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
+            .enumerated()
+        {
+            lines.append("related snapshot \(index + 1): \(attachment.title) \(attachment.commitment ?? "uncommitted")")
+        }
         if !message.memoryCitations.isEmpty {
             lines.append("memory citations: \(message.memoryCitations.map(\.id).joined(separator: ", "))")
         }
@@ -665,6 +746,7 @@ enum LLMConversationContextRenderer {
         compressedSummary: String?,
         renderedMessages: [String],
         snapshotAttachment: LLMPageSnapshotAttachment?,
+        relatedSnapshotAttachments: [LLMPageSnapshotAttachment],
         memoryCitations: [LLMMemoryCitation]
     ) -> String {
         var sections = [
@@ -690,6 +772,20 @@ enum LLMConversationContextRenderer {
                 """
             )
         }
+        if !relatedSnapshotAttachments.isEmpty {
+            let relatedPages = relatedSnapshotAttachments.enumerated().map { index, attachment in
+                """
+                Related page \(index + 1):
+                URL: \(attachment.urlString)
+                Title: \(attachment.title)
+                Commitment: \(attachment.commitment ?? "uncommitted")
+                Excerpt: \(attachment.excerpt)
+                """
+            }
+            sections.append(
+                "Explicitly selected related page snapshots (\(relatedSnapshotAttachments.count)):\n\n\(relatedPages.joined(separator: "\n\n"))"
+            )
+        }
         if !memoryCitations.isEmpty {
             let memories = memoryCitations
                 .map { "- \($0.id) [\($0.source)]: \($0.summary)" }
@@ -698,6 +794,33 @@ enum LLMConversationContextRenderer {
         }
         sections.append("Conversation messages:\n\(renderedMessages.joined(separator: "\n\n"))")
         return sections.joined(separator: "\n\n")
+    }
+
+    private static func boundedRelatedSnapshotAttachments(
+        from snapshots: [PageSnapshot],
+        excluding activeAttachment: LLMPageSnapshotAttachment?
+    ) -> [LLMPageSnapshotAttachment] {
+        let activeKey = activeAttachment.map(snapshotKey)
+        var seenKeys = Set<String>()
+        var attachments: [LLMPageSnapshotAttachment] = []
+
+        for snapshot in snapshots {
+            let attachment = LLMPageSnapshotAttachment(
+                snapshot: snapshot,
+                excerptCharacterLimit: LLMRelatedPageSnapshotPolicy.excerptCharacterLimit
+            )
+            let key = snapshotKey(attachment)
+            guard key != activeKey, seenKeys.insert(key).inserted else { continue }
+            attachments.append(attachment)
+            if attachments.count == LLMRelatedPageSnapshotPolicy.maximumSnapshots {
+                break
+            }
+        }
+        return attachments
+    }
+
+    private static func snapshotKey(_ attachment: LLMPageSnapshotAttachment) -> String {
+        attachment.commitment ?? attachment.urlString
     }
 
     private static func compressedSummary(for messages: [(id: UUID, text: String)]) -> String? {
