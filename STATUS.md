@@ -1717,3 +1717,19 @@ Validation notes:
 - [x] Gate browser automation capabilities by platform so unsupported desktop targets do not advertise broken agent tools.
 - [x] Standardize CI on the supported runtime/frontend path and stop relying on the broken legacy frontend npm lane.
 - [x] Align docs and defaults with the actual runtime architecture, including decentralized protocol handling and telemetry behavior.
+
+## BrowserOS Feature Parity Assessment (#170)
+
+Compare the supported native Swift product with BrowserOS using pinned, source-visible evidence; keep BrowserClaw-only capabilities and dBrowser's decentralized differentiation outside the common-core parity claim.
+
+- [x] Pin the clean dBrowser `main` baseline and BrowserOS v0.47.16 source revision.
+- [x] Inventory current browser, agent, model, MCP, workflow, privacy, distribution, and test capabilities on both sides.
+- [x] Separate BrowserOS capabilities from BrowserClaw-only cockpit, replay, and isolated-agent-tab features.
+- [x] Identify common-core parity gaps, dBrowser advantages, architecture constraints, evidence caveats, and licensing boundaries.
+- [x] Create the detailed evidence-gated gap analysis, benchmark corpus, and phased closure plan in GitHub issue #170.
+- [x] Verify the scoped status change and current macOS build, then commit and push only this assessment artifact.
+
+Validation notes:
+
+- `git diff --check -- STATUS.md` passed.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-browseros-parity-build CODE_SIGNING_ALLOWED=NO` passed.
