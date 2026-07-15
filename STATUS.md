@@ -39,7 +39,7 @@ Start the Comet-parity build-out with the browser/assistant context boundary: ke
 - [x] Add focused Swift tests for fresh-context waiting, stale-result rejection, cancellation, cache invalidation, related-tab opt-in/caps, prompt rendering, and private-tab exclusion.
 - [x] Update architecture documentation with the shipped context behavior and remaining Comet-parity boundaries.
 - [x] Verify focused/full Swift tests, macOS build, and scoped diff hygiene locally.
-- [ ] Commit, push, and open a draft PR containing only the scoped parity changes.
+- [x] Commit, push, and open draft PR #171 containing only the scoped parity changes.
 
 Validation notes:
 
