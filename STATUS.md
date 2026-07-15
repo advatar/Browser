@@ -21,6 +21,26 @@
 
 ## Active Task
 
+## Complete Documented Comet Parity Gaps (#172)
+
+Close every remaining gap listed in the Copilot architecture section while preserving the fresh-context, privacy, prompt-budget, and explicit-provider boundaries from #169.
+
+- [x] Translate every gap at `docs/ARCHITECTURE.md:502-515` into executable acceptance and safety criteria.
+- [x] Create umbrella issue #172 with scope, implementation plan, non-goals, and validation requirements.
+- [ ] Add persistent multi-conversation selection plus streamed presentation, bounded file attachments, regenerate, boundary labels, and explicit run states.
+- [ ] Add linked context-summary artifacts for model-window compression without silently discarding source history.
+- [ ] Add AI-native research search sessions with bounded cited sources, synthesis, and research-ledger persistence.
+- [ ] Add truthful Gmail/Calendar-style connector configuration, scoped permissions, and approval-gated action proposals without bundled credentials.
+- [ ] Add an explicit voice-permission/recording/transcript lifecycle that never auto-submits speech.
+- [ ] Add inline assistance from an audited, bounded current-page text-selection capture.
+- [ ] Convert provider tool calls into allowlisted tab/navigation-bound proposals that require approval before typed automation execution.
+- [ ] Execute persisted saved-workflow schedules observably while preserving fresh context and every normal approval boundary.
+- [ ] Add explicit, visible, one-tab-at-a-time inactive-tab live capture without background capture or trace-minimized-tab leakage.
+- [ ] Add focused unit coverage for each capability and adversarial boundary.
+- [ ] Replace the remaining-gap documentation with precise shipped behavior and honest external-configuration limits.
+- [ ] Pass focused/full non-Keychain Swift tests, macOS build, parse/diff hygiene, and an independent release audit.
+- [ ] Commit only scoped files, push the branch, update #172, and open a draft PR.
+
 ## Comet Context Parity: Copilot Sidecar And Fresh Multi-Tab Grounding (#169)
 
 Start the Comet-parity build-out with the browser/assistant context boundary: keep the page visible beside Copilot, guarantee fresh active-page grounding before inference, and make every related tab an explicit bounded opt-in.
