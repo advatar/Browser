@@ -21,6 +21,33 @@
 
 ## Active Task
 
+## Comet Context Parity: Copilot Sidecar And Fresh Multi-Tab Grounding (#169)
+
+Start the Comet-parity build-out with the browser/assistant context boundary: keep the page visible beside Copilot, guarantee fresh active-page grounding before inference, and make every related tab an explicit bounded opt-in.
+
+- [x] Audit the current Swift sidecar, snapshot timing, multi-tab, provider-context, and privacy gaps against Comet.
+- [x] Create the GitHub issue with scope, non-goals, implementation plan, safety rules, and acceptance criteria (#169).
+- [x] Add current-URL-bound per-tab snapshot caching, invalidation, and trace-minimized tab exclusion.
+- [x] Add a queued fresh-context run lifecycle that cannot invoke a model until its matching active-tab snapshot succeeds.
+- [x] Bind captures to a navigation generation, own their timeout in the view model, and reject cancelled or replayed results.
+- [x] Reject never-issued snapshot and DOM results before they can enter automation history or page-context caches.
+- [x] Add explicit selection of at most four cached related tabs and render their labeled excerpts and commitments into provider-neutral context.
+- [x] Enforce the effective model prompt budget, bound untrusted memory fields, and keep omitted related-page metadata out of provider prompts.
+- [x] Fail closed when contextual prompts would cross the selected model's trust boundary or silently fall back to another provider.
+- [x] Surface explicitly selected router or gateway execution failures as failed runs without assistant-message misattribution.
+- [x] Keep the browser visible beside Copilot on macOS and regular-width Apple layouts, with a compact-layout fallback.
+- [x] Add focused Swift tests for fresh-context waiting, stale-result rejection, cancellation, cache invalidation, related-tab opt-in/caps, prompt rendering, and private-tab exclusion.
+- [x] Update architecture documentation with the shipped context behavior and remaining Comet-parity boundaries.
+- [x] Verify focused/full Swift tests, macOS build, and scoped diff hygiene locally.
+- [ ] Commit, push, and open a draft PR containing only the scoped parity changes.
+
+Validation notes:
+
+- Focused context, provider-boundary, memory-budget, stale-result, and compatibility regression lanes passed, including the five-test broad-suite hardening lane.
+- `xcodebuild build-for-testing -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -disableAutomaticPackageResolution CODE_SIGNING_ALLOWED=NO -jobs 2` passed; this compiled the app and updated test bundle.
+- `xcodebuild test-without-building ... -only-testing:dBrowserTests` passed 276/276 executed tests. Eleven pre-existing wallet tests that call Security.framework Keychain APIs were excluded because `SecItemCopyMatching` blocks in the headless runner; they were not reported as passing.
+- `xcrun swiftc -parse` passed for every changed Swift file, `git diff --check` passed, and an independent release audit found no remaining P0/P1 correctness or security issue.
+
 ## Native Ad And Tracker Blocking (#161)
 
 Add a first-class native ad/tracker blocker to the current Swift dBrowser product so normal WKWebView browsing blocks common ad and tracking requests by default while preserving local/decentralized adapter routes.

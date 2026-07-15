@@ -176,7 +176,7 @@ The current Swift app already has a usable shell:
 | URL resolution | `BrowserURLResolver` accepts HTTP/HTTPS, blocks unsupported schemes, delegates IPFS/IPNS/ENS to runtime bridge | Current |
 | Runtime status | `MobileRuntimeBridge` exposes feature states for browsing, decentralized protocols, AFM, Copilot, wallet, downloads | Current |
 | AFM service checks | `AFMServicesClient` checks router, registry, pipelines, node, and local marketplace services; it calls route, pack, job, training, publish, and marketplace discovery APIs | Prototype |
-| Copilot | `runCopilot` routes through AFM services when available, otherwise returns deterministic local fallback | Prototype |
+| Copilot | The composer and App Intent handoff queue inference until fresh active-page context is validated; explicit model selection is fail-closed and AFMarket runs only when AFMarket is selected | Current context boundary; provider runtime prototype |
 | Wallet | Local typed policy simulator for connect/disconnect/spend decision | Prototype |
 | Downloads | Native `URLSession` download tracking with queued/downloading/completed/cancelled/failed states | Current |
 | Bundled LLM | Gemma 4 E2B IT 4-bit MLX through `mlx-swift-lm` packages | Current selection, inference integration next |
@@ -184,6 +184,14 @@ The current Swift app already has a usable shell:
 
 Current limitations:
 
+- The Copilot sidecar now keeps the browser visible, waits for a fresh active-tab
+  snapshot before inference on normal web pages, and accepts at most four
+  explicitly selected cached related tabs. Comet-style AI search, connectors,
+  voice input, inline page assistance, autonomous tool execution, and live
+  capture of inactive tabs remain future work.
+- Saved and developer workflows remain compatibility entry points: they use
+  cached or no page context and do not yet make the composer's fresh-capture
+  guarantee. Scheduled workflow capture needs a separate lifecycle design.
 - Typed `WKWebView` automation, DOM snapshots, page actions, Copilot run state,
   model switching, saved workflows, Smart History, wallet/explorer state, and
   the Strawberry parity scorecard are implemented in Swift, but still need
@@ -427,7 +435,75 @@ Adopt it only if dBrowser needs production attestation-gated signing, identity-g
 
 ## LLM Conversation And Page Automation Plan
 
-The key gap is a first-class Swift LLM surface that can hold real conversation context, switch models without losing that context, and operate the active `WKWebView` page through approved typed actions.
+The Swift app has a first-class conversation ledger, model switching, typed page snapshots, and a browser-adjacent Copilot surface. The remaining gap is production-grade streamed inference and approved tool execution across every supported provider.
+
+### Current Copilot context boundary
+
+- On macOS and regular-width layouts, Copilot opens as a trailing sidecar while
+  the active `WKWebView` remains mounted and visible. Compact layouts stack the
+  same browser and Copilot surfaces.
+- Submitting from the production Copilot composer creates a queued run and a
+  bounded active-tab snapshot request. No OpenMind recall, provider bridge, or
+  model invocation starts until the result matches the request tab and the
+  tab's current URL and navigation generation. The App Intent prompt handoff
+  uses the same path. Send and Snapshot wait until the page finishes loading.
+- Page snapshots are cached per tab and bound to their captured URL and
+  navigation generation. Navigation (including same-URL reload, back, and
+  forward), tab reset, and tab close invalidate the cache and remove that tab
+  from the related-context selection. View-model-owned timeouts and terminal
+  request IDs suppress coordinator replays and all late automation results.
+  Snapshot and DOM callbacks must match a view-model-issued request or a
+  registered capture context; unknown callbacks are discarded before they can
+  enter automation history or a page-context cache.
+- A user may explicitly attach up to four inactive tabs whose URL-matched
+  snapshots already exist. dBrowser never captures an inactive tab merely
+  because it appears in the tab strip.
+- Provider-neutral prompt rendering labels the active page separately from each
+  selected related page, treats page fields as untrusted data, strips URL
+  credentials/query/fragment, bounds titles and excerpts, and uses SHA-256
+  commitments over canonical redacted snapshots. Token-budget omissions are
+  recorded by commitment and omitted snapshots do not enter the provider
+  envelope. Historical attachment metadata is never re-rendered into a later
+  prompt, so an omitted related page cannot leak through the conversation ledger.
+- Rendering enforces the selected model's effective prompt budget using a
+  conservative UTF-8 byte ceiling rather than a grapheme-count estimate. It
+  compresses older turns, then drops related pages and bounded untrusted memory
+  citations; a prompt that still cannot fit is rejected before conversation
+  mutation, memory access, or provider execution. Memory citation counts and
+  fields are capped before they can contribute to a prompt or provider envelope.
+  The effective input ceiling also reserves the selected provider's maximum
+  output allowance, separately supplied system prompt, and conservative chat
+  framing overhead inside the advertised model context window. Router and
+  gateway requests are revalidated against the freshly fetched model window
+  immediately before inference.
+- Home, private-overlay, and torrent-transfer tabs contribute no current page URL
+  or snapshot. Prior sanitized conversation context remains in the ledger. Stale,
+  mismatched, failed, timed-out, cancelled, or late captures fail closed without
+  adding the user turn to the conversation or invoking a model.
+- Explicit Local MLX, LLM Router, LLM Gateway, and AFMarket choices do not silently
+  fall through to another provider. AFMarket pack selection is shown only for the
+  AFMarket model. A selected router, gateway, or AFMarket execution failure
+  terminates the run as failed and retains diagnostic state without creating a
+  synthetic assistant message. Remote OpenMind HTTP recall is blocked for the
+  strict on-device model boundary; loopback/disabled memory remains supported.
+- Approved memory citations persist locally for audit and correction, but their
+  identifiers do not re-enter later prompts unless the current OpenMind recall
+  approves them again. Empty identifiers and collisions after bounding are
+  discarded so every disclosed citation has one canonical envelope identity.
+  The remote gateway aliases only structured current-memory citation fields and
+  rechecks the exact aliased prompt budget before inference; ordinary page and
+  user text is never globally rewritten by an untrusted ID.
+- Saved and developer workflows still call the compatibility run path and do not
+  promise a fresh capture or mutate the canonical conversation. They share the
+  same pre-memory prompt-budget guard and bounded memory-ID envelope. This first
+  slice's freshness claim covers the Copilot composer and App Intent prompt
+  handoff only.
+
+This is the first Comet-parity slice, not a claim of full Comet parity. Remaining
+work includes AI-native search/result pages, citations and research synthesis,
+Gmail/Calendar-style connectors, voice input, inline page assistance, approved
+autonomous tools, task scheduling, and an explicit inactive-tab live-capture
+flow if that can be offered with an equally clear privacy boundary.
 
 The target UI should feel like a native desktop chat app:
 
@@ -497,10 +573,10 @@ Do not keep dual product paths. The Rust code can be mined for behavior, contrac
 | Boundary | Rule |
 | --- | --- |
 | Web content to app | `WKWebView` loads only allowed URL schemes. Future automation uses audited scripts only, never arbitrary model JavaScript. |
-| Copilot to page | Typed commands, tab IDs, timeouts, redaction, approvals, and cancellation. |
-| Copilot to memory | OpenMind access intent first; approved context only; blocked memory stays visible as a notice without hidden content. |
-| Copilot to AFMarket | Pack, lease, dispatch, attestation, proof, and settlement states are visible. Mock states are labeled. |
-| App to LLM | Conversation context is provider-neutral. Local MLX first where possible. Gateway calls carry selected/redacted context only. |
+| Copilot to page | Typed commands, tab IDs, navigation generations, view-model timeouts, redaction, approvals, cancellation, and bounded terminal replay suppression. Fresh composer inference waits for a loaded page and an exact request/tab/URL/generation snapshot match. |
+| Copilot to memory | OpenMind access intent first; approved context only; blocked memory stays visible as a notice without hidden content. A remote HTTP memory endpoint is blocked for an explicitly on-device model. |
+| Copilot to AFMarket | AFMarket is an explicit model/egress choice; no local/router/gateway failure silently falls through to it. Pack, lease, dispatch, attestation, proof, and settlement states are visible. Mock states are labeled. |
+| App to LLM | Conversation context is provider-neutral and frozen per run before awaits. Provider envelopes contain sanitized URLs and bounded attachments only. Calls carry the fresh active snapshot and at most four explicitly selected, current cached related snapshots, subject to the model token budget; private/torrent/home tabs contribute no current context. |
 | App to chain | Light-client verified or explicitly labeled fallback. RPC fallback is transport, not trust. |
 | App to wallet | Secure Enclave, WalletConnect, or policy-backed signing; spend and signature requests require explicit approval. |
 
@@ -525,14 +601,15 @@ LLM conversation:
 
 1. User opens the LLM surface with or without an active tab.
 2. User selects a model or keeps the current default.
-3. App stores messages and selected context in the provider-neutral ledger.
-4. App builds a page snapshot and access intent when browser context is attached.
-5. BrIAn/OpenMind gates personal memory.
-6. AFMarket routes to a runner pack when selected and available.
-7. Local MLX or gateway model executes the approved prompt.
-8. User may switch models at any point; the next turn is rendered from the same ledger.
-9. Page actions, memory writes, downloads, wallet operations, and settlement require approval.
-10. Run activity shows model, events, usage, trust state, and final output.
+3. User optionally selects up to four related tabs with current cached snapshots.
+4. On a normal web page, the app queues the turn and requests a fresh bounded snapshot of the active tab.
+5. Only an exact request, tab, current URL, and navigation-generation result adds the message and selected context to the provider-neutral ledger; any mismatch fails closed.
+6. BrIAn/OpenMind gates personal memory.
+7. AFMarket routes to a runner pack only when the user selected the AFMarket model; other selected providers fail closed inside their own boundary.
+8. The selected Local MLX, router, or gateway model executes the approved, minimized prompt.
+9. User may switch models at any point; the next turn is rendered from the same ledger.
+10. Page actions, memory writes, downloads, wallet operations, and settlement require approval.
+11. Run activity shows model, context attachment events, usage, trust state, and final output.
 
 Memory writeback:
 

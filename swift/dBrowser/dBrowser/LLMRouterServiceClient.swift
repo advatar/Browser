@@ -470,15 +470,19 @@ final class LLMRouterServiceClient {
             ),
             options: LLMRouterCompletionOptions(
                 temperature: 0.6,
-                maxTokens: 768,
-                systemPrompt: "You are dBrowser Copilot. Use only the provided conversation, page, and approved memory context."
+                maxTokens: LLMConversationContextRenderer.routerMaximumOutputTokens,
+                systemPrompt: LLMConversationContextRenderer.routerCompletionSystemPrompt
             ),
             context: LLMRouterCompletionContext(
                 conversationID: conversationID,
                 runID: runID,
                 pageURLString: pageURLString,
                 snapshotCommitment: renderedContext?.snapshotCommitment,
-                memoryContextIDs: renderedContext?.memoryContextIDs ?? memoryRecall?.memories.map(\.id) ?? [],
+                memoryContextIDs: renderedContext.map {
+                    LLMMemoryContextPolicy.boundedIDs(from: $0.memoryContextIDs)
+                }
+                    ?? memoryRecall.map { LLMMemoryContextPolicy.boundedIDs(from: $0.memories) }
+                    ?? [],
                 estimatedPromptTokens: renderedContext?.estimatedPromptTokens,
                 includedMessageIDs: renderedContext?.includedMessageIDs ?? [],
                 compressedMessageIDs: renderedContext?.compressedMessageIDs ?? []

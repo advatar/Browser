@@ -150,8 +150,8 @@ struct RuntimeBridgeResolution: Equatable {
 struct CopilotRunRequest: Equatable {
     var prompt: String
     var pageURLString: String?
-    var pageSnapshot: PageSnapshot?
-    var relatedPageSnapshots: [PageSnapshot]
+    var pageSnapshotAttachment: LLMPageSnapshotAttachment?
+    var relatedSnapshotAttachments: [LLMPageSnapshotAttachment]
     var preferredAFMPackID: String?
     var preferredModelID: String?
     var conversationID: UUID?
@@ -172,11 +172,16 @@ struct CopilotRunRequest: Equatable {
         memoryRecall: OpenMindMemoryRecallResult? = nil
     ) {
         self.prompt = prompt
-        self.pageURLString = pageURLString
-        self.pageSnapshot = pageSnapshot
-        self.relatedPageSnapshots = Array(
-            relatedPageSnapshots.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
-        )
+        self.pageURLString = LLMPageContextSanitizer.sanitizedURLString(pageURLString)
+        self.pageSnapshotAttachment = pageSnapshot.map(LLMPageSnapshotAttachment.init(snapshot:))
+        self.relatedSnapshotAttachments = relatedPageSnapshots
+            .prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
+            .map {
+                LLMPageSnapshotAttachment(
+                    snapshot: $0,
+                    excerptCharacterLimit: LLMRelatedPageSnapshotPolicy.excerptCharacterLimit
+                )
+            }
         self.preferredAFMPackID = preferredAFMPackID
         self.preferredModelID = preferredModelID
         self.conversationID = conversationID
@@ -199,6 +204,7 @@ struct CopilotRunResult: Equatable, Identifiable {
     let llmGatewayResponse: LLMGatewayCompletionResponse?
     let chainTrustUpdate: ChainTrustStatus?
     let usageProviderKey: String?
+    let executionFailureMessage: String?
 
     init(
         id: UUID = UUID(),
@@ -212,7 +218,8 @@ struct CopilotRunResult: Equatable, Identifiable {
         llmRouterResponse: LLMRouterCompletionResponse? = nil,
         llmGatewayResponse: LLMGatewayCompletionResponse? = nil,
         chainTrustUpdate: ChainTrustStatus? = nil,
-        usageProviderKey: String? = nil
+        usageProviderKey: String? = nil,
+        executionFailureMessage: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -226,6 +233,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.llmGatewayResponse = llmGatewayResponse
         self.chainTrustUpdate = chainTrustUpdate
         self.usageProviderKey = usageProviderKey
+        self.executionFailureMessage = executionFailureMessage
     }
 }
 
@@ -745,21 +753,42 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         let page = target?.isEmpty == false ? target! : "the active page"
         let task = prompt.isEmpty ? "Assist with the current browsing task." : prompt
         let adapterPrompt = request.renderedConversationContext?.prompt ?? task
-        let snapshotContext = request.pageSnapshot.map { snapshot in
-            " Snapshot includes \(snapshot.visibleText.count) text characters, \(snapshot.links.count) links, and \(snapshot.formControls.count) form controls."
+        let snapshotContext = request.pageSnapshotAttachment.map { snapshot in
+            " Snapshot includes \(snapshot.textCharacterCount) text characters, \(snapshot.linkCount) links, and \(snapshot.formControlCount) form controls."
         } ?? ""
-        let relatedSnapshotContext = request.relatedPageSnapshots.isEmpty
+        let relatedSnapshotContext = request.relatedSnapshotAttachments.isEmpty
             ? ""
-            : " Related context includes \(request.relatedPageSnapshots.count) explicitly selected page snapshot\(request.relatedPageSnapshots.count == 1 ? "" : "s") with \(request.relatedPageSnapshots.reduce(0) { $0 + $1.visibleText.count }) text characters."
+            : " Related context includes \(request.relatedSnapshotAttachments.count) explicitly selected page snapshot\(request.relatedSnapshotAttachments.count == 1 ? "" : "s") with \(request.relatedSnapshotAttachments.reduce(0) { $0 + $1.textCharacterCount }) text characters."
         let conversationContext = request.renderedConversationContext.map { rendered in
             let compression = rendered.wasCompressed ? " with compressed prior context" : ""
             return " Conversation \(request.conversationID?.uuidString ?? "context") rendered \(rendered.estimatedPromptTokens) prompt tokens\(compression)."
         } ?? ""
-        let memoryIDs = request.memoryRecall?.memories.map(\.id) ?? []
+        let memoryIDs = request.renderedConversationContext.map {
+            LLMMemoryContextPolicy.boundedIDs(from: $0.memoryContextIDs)
+        }
+            ?? request.memoryRecall.map { LLMMemoryContextPolicy.boundedIDs(from: $0.memories) }
+            ?? []
         let memoryContext = request.memoryRecall.map { recall in
             recall.memories.isEmpty ? " No governed memory context was approved." : " OpenMind approved \(recall.memories.count) governed memory item\(recall.memories.count == 1 ? "" : "s")."
         } ?? ""
-        let snapshotCommitment = OpenMindMemoryClient.snapshotCommitment(for: request.pageSnapshot)
+        let snapshotCommitment = request.pageSnapshotAttachment?.commitment
+        let permitsAFMServiceExecution = request.preferredModelID == nil
+            || request.preferredModelID == LLMModelRegistry.afMarketRouterID
+        let contextBoundaryMessage: String? = {
+            guard !permitsAFMServiceExecution else {
+                return nil
+            }
+            switch request.preferredModelID {
+            case LLMModelRegistry.localGemmaID:
+                return "The Copilot request stayed inside the selected on-device model boundary; AFMarket fallback was not attempted."
+            case LLMModelRegistry.llmRouterAppleFoundationID:
+                return "The Copilot request stayed inside the selected no-egress LLM Router boundary; AFMarket fallback was not attempted."
+            case LLMModelRegistry.llmGatewayID:
+                return "The Copilot request stayed inside the selected LLM Gateway boundary; AFMarket fallback was not attempted."
+            default:
+                return "Copilot context was not sent to AFMarket because the selected model boundary is not an AFMarket route."
+            }
+        }()
         var llmRouterFailureMessage: String?
         var llmGatewayFailureMessage: String?
 
@@ -791,12 +820,19 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     renderedContext: request.renderedConversationContext,
                     memoryRecall: request.memoryRecall
                 )
+                let routerModel = LLMModelRegistry.models(llmRouterSnapshot: routerSnapshot)
+                    .first { $0.id == LLMModelRegistry.llmRouterAppleFoundationID }
+                if let routerModel,
+                   LLMConversationContextRenderer.estimatedTokens(for: completionRequest.prompt)
+                    > LLMConversationContextRenderer.effectiveTokenBudget(for: routerModel) {
+                    throw LLMRouterServiceClientError.invalidResponse
+                }
                 let response = try await llmRouterServiceClient.complete(completionRequest)
                 var suggestions = [
                     "LLM router completed with \(response.provider.rawValue) for \(page).",
                     "Router policy stayed local-first with no-egress enabled.",
                     request.renderedConversationContext == nil ? "Router received the current prompt without rendered conversation context." : "Router received rendered conversation context with \(request.renderedConversationContext?.estimatedPromptTokens ?? 0) estimated prompt tokens.",
-                    memoryIDs.isEmpty ? "No governed memory IDs were sent to the router." : "Router received approved memory IDs: \(memoryIDs.joined(separator: ", "))."
+                    memoryIDs.isEmpty ? "No governed memory IDs were sent to the router." : "Router received \(memoryIDs.count) approved governed memory citation\(memoryIDs.count == 1 ? "" : "s")."
                 ]
                 if !relatedSnapshotContext.isEmpty {
                     suggestions.append(relatedSnapshotContext.trimmingCharacters(in: .whitespaces))
@@ -850,6 +886,15 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     renderedContext: request.renderedConversationContext,
                     memoryRecall: request.memoryRecall
                 )
+                let gatewayModel = LLMModelRegistry.models(llmGatewaySnapshot: gatewaySnapshot)
+                    .first { $0.id == LLMModelRegistry.llmGatewayID }
+                if let gatewayModel,
+                   LLMConversationContextRenderer.estimatedTokens(for: completionRequest.prompt)
+                    > LLMConversationContextRenderer.effectiveTokenBudget(for: gatewayModel) {
+                    throw LLMGatewayServiceClientError.invalidResponse(
+                        "The minimized gateway prompt exceeded the selected model input budget after memory aliasing."
+                    )
+                }
                 let response = try await llmGatewayServiceClient.complete(completionRequest)
                 var suggestions = [
                     "LLM Gateway completed encrypted /v1/infer for \(page) using \(completionRequest.tokenClass.rawValue) token-class padding.",
@@ -877,6 +922,22 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             } catch {
                 llmGatewayFailureMessage = "LLM Gateway unavailable for selected model: \(error.localizedDescription)."
             }
+        }
+
+        if let contextBoundaryMessage {
+            return CopilotRunResult(
+                title: "Local Copilot bridge",
+                summary: "Prepared a boundary-preserving Copilot run for \(page): \(task)\(snapshotContext)\(relatedSnapshotContext)\(conversationContext)\(memoryContext)",
+                suggestions: [
+                    llmRouterFailureMessage,
+                    llmGatewayFailureMessage,
+                    contextBoundaryMessage,
+                    request.renderedConversationContext == nil ? "No alternate model provider received this request." : "Keep the rendered conversation ledger inside the selected model boundary.",
+                    "Choose AFMarket explicitly before sharing this page context with AFMarket services."
+                ].compactMap { $0 },
+                mode: .local,
+                executionFailureMessage: llmRouterFailureMessage ?? llmGatewayFailureMessage
+            )
         }
 
         do {
@@ -1011,6 +1072,20 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 mcpServers: mcpServers
             )
             refreshWalletFeatureState()
+            if request.preferredModelID == LLMModelRegistry.afMarketRouterID {
+                let failureMessage = "AFMarket unavailable for selected model: \(error.localizedDescription)."
+                return CopilotRunResult(
+                    title: "AFMarket Copilot unavailable",
+                    summary: "The explicitly selected AFMarket route failed before a job was accepted.",
+                    suggestions: [
+                        failureMessage,
+                        "No alternate model provider received this request.",
+                        "Retry after AFMarket router and pipelines health is restored."
+                    ],
+                    mode: .local,
+                    executionFailureMessage: failureMessage
+                )
+            }
         }
 
         return CopilotRunResult(

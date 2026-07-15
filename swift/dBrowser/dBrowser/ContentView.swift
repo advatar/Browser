@@ -1045,6 +1045,7 @@ private struct CopilotPanelView: View {
                             .help("Capture the current page")
                             .accessibilityLabel("Capture current page")
                             .accessibilityIdentifier("copilot-snapshot")
+                            .disabled(!browser.canRequestActivePageSnapshot)
 
                             Button {
                                 saveWorkflow()
@@ -1083,13 +1084,14 @@ private struct CopilotPanelView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(
                                 activeRun != nil
+                                    || !browser.canSendCopilotMessageWithFreshContext
                                     || draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             )
                             .accessibilityIdentifier("copilot-run")
                         }
                     }
 
-                    if !browser.availableAFMPacks.isEmpty {
+                    if browser.activeLLMModel.providerKind == .afMarket, !browser.availableAFMPacks.isEmpty {
                         Picker(
                             "Runner pack",
                             selection: Binding(
@@ -1421,19 +1423,36 @@ private struct CopilotContextPicker: View {
         VStack(alignment: .leading, spacing: 10) {
             if let activeTab = browser.activeTab {
                 HStack(spacing: 8) {
-                    Label("Current tab", systemImage: "globe")
+                    Label(
+                        browser.isWaitingForActivePageContext
+                            ? "Waiting for page"
+                            : (browser.canAttachActivePageToCopilotContext ? "Current tab" : "Page context off"),
+                        systemImage: browser.isWaitingForActivePageContext
+                            ? "clock"
+                            : (browser.canAttachActivePageToCopilotContext ? "globe" : "shield.slash")
+                    )
                         .font(.subheadline.weight(.semibold))
                     Spacer(minLength: 8)
                     Text(activeTab.title)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.accentColor)
+                    Image(
+                        systemName: browser.canAttachActivePageToCopilotContext
+                            ? "checkmark.circle.fill"
+                            : (browser.isWaitingForActivePageContext ? "circle.dotted" : "minus.circle.fill")
+                    )
+                        .foregroundStyle(browser.canAttachActivePageToCopilotContext ? Color.accentColor : Color.gray)
                         .accessibilityHidden(true)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Current tab, \(activeTab.title)")
+                .accessibilityLabel(
+                    browser.isWaitingForActivePageContext
+                        ? "Waiting for current tab to finish loading, \(activeTab.title)"
+                        : browser.canAttachActivePageToCopilotContext
+                        ? "Current tab context, \(activeTab.title)"
+                        : "Page context off, \(activeTab.title)"
+                )
                 .accessibilityHint(activeTab.displayURL)
             }
 
@@ -1449,10 +1468,14 @@ private struct CopilotContextPicker: View {
                             Button {
                                 browser.setCopilotContextTab(option.id, isSelected: !option.isSelected)
                             } label: {
-                                Label(
-                                    "\(option.title) · \(option.availabilityLabel)",
-                                    systemImage: option.isSelected ? "checkmark.circle.fill" : "circle"
-                                )
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label(
+                                        "\(option.title) · \(option.availabilityLabel)",
+                                        systemImage: option.isSelected ? "checkmark.circle.fill" : "circle"
+                                    )
+                                    Text(option.displayURL)
+                                        .font(.caption2)
+                                }
                             }
                             .disabled(!option.isAvailable && !option.isSelected)
                             .accessibilityLabel(option.title)
@@ -1475,7 +1498,13 @@ private struct CopilotContextPicker: View {
             }
 
             if selectedCount == 0 {
-                Text("Current tab only. Visit another tab to capture it before adding it as context.")
+                Text(
+                    browser.isWaitingForActivePageContext
+                        ? "Waiting for the current tab to finish loading before a fresh snapshot can be attached."
+                        : browser.canAttachActivePageToCopilotContext
+                        ? "Current tab only. Visit another tab to capture it before adding it as context."
+                        : "This tab contributes no current URL or snapshot. Prior conversation context remains in the selected model's minimized ledger."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1492,7 +1521,7 @@ private struct CopilotContextPicker: View {
                                         Text(option.title)
                                             .font(.caption.weight(.semibold))
                                             .lineLimit(1)
-                                        Text(option.availabilityLabel)
+                                        Text(option.displayURL)
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)

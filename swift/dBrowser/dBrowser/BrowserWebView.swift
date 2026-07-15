@@ -487,7 +487,7 @@ struct BrowserWebView: BrowserViewRepresentable {
               }
               return JSON.stringify({
                 urlString: String(location.href),
-                title: document.title || '',
+                title: compact(document.title || '', 200) || '',
                 visibleText,
                 headings,
                 links,

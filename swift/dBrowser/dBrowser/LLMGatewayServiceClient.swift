@@ -925,20 +925,32 @@ final class LLMGatewayServiceClient: LLMGatewayServicing {
         renderedContext: LLMRenderedConversationContext?,
         memoryRecall: OpenMindMemoryRecallResult?
     ) -> LLMGatewayCompletionRequest {
-        LLMGatewayCompletionRequest(
-            prompt: providerPrompt(prompt: prompt, renderedContext: renderedContext, memoryRecall: memoryRecall),
+        let memoryIDs = renderedContext.map {
+            LLMMemoryContextPolicy.boundedIDs(from: $0.memoryContextIDs)
+        }
+            ?? memoryRecall.map { LLMMemoryContextPolicy.boundedIDs(from: $0.memories) }
+            ?? []
+        let memoryAliases = memoryIDs.indices.map { "approved-memory-\($0 + 1)" }
+        let minimizedPrompt = providerPrompt(
+            prompt: prompt,
+            renderedContext: renderedContext,
+            memoryIDs: memoryIDs,
+            memoryAliases: memoryAliases
+        )
+        return LLMGatewayCompletionRequest(
+            prompt: minimizedPrompt,
             modelID: configuration.modelID,
             tokenClass: configuration.tokenClass,
             temperature: configuration.temperature,
             maxTokens: configuration.tokenClass.maxOutputTokensHint,
-            systemPrompt: "You are dBrowser Copilot. Use only the provided minimized conversation, page, and approved memory context. Do not assume hidden browser history, wallet state, or private memory.",
+            systemPrompt: LLMConversationContextRenderer.gatewayCompletionSystemPrompt,
             context: LLMGatewayCompletionContext(
                 conversationID: conversationID,
                 runID: runID,
                 pageURLString: pageURLString,
                 snapshotCommitment: renderedContext?.snapshotCommitment,
-                memoryContextIDs: renderedContext?.memoryContextIDs ?? memoryRecall?.memories.map(\.id) ?? [],
-                estimatedPromptTokens: renderedContext?.estimatedPromptTokens,
+                memoryContextIDs: memoryAliases,
+                estimatedPromptTokens: LLMConversationContextRenderer.estimatedTokens(for: minimizedPrompt),
                 includedMessageIDs: renderedContext?.includedMessageIDs ?? [],
                 compressedMessageIDs: renderedContext?.compressedMessageIDs ?? []
             )
@@ -948,14 +960,30 @@ final class LLMGatewayServiceClient: LLMGatewayServicing {
     private func providerPrompt(
         prompt: String,
         renderedContext: LLMRenderedConversationContext?,
-        memoryRecall: OpenMindMemoryRecallResult?
+        memoryIDs: [String],
+        memoryAliases: [String]
     ) -> String {
-        var providerPrompt = renderedContext?.prompt ?? prompt
-        let memoryIDs = renderedContext?.memoryContextIDs ?? memoryRecall?.memories.map(\.id) ?? []
-        for (index, id) in memoryIDs.enumerated() where !id.isEmpty {
-            providerPrompt = providerPrompt.replacingOccurrences(of: id, with: "approved-memory-\(index + 1)")
+        let providerPrompt = renderedContext?.prompt ?? prompt
+        guard !memoryIDs.isEmpty else { return providerPrompt }
+        let aliases = Array(zip(memoryIDs, memoryAliases))
+
+        return providerPrompt.components(separatedBy: "\n").map { line in
+            for (id, alias) in aliases {
+                let citationPrefix = "- \(id) ["
+                if line.hasPrefix(citationPrefix) {
+                    return "- \(alias) [" + String(line.dropFirst(citationPrefix.count))
+                }
+            }
+
+            let legacyPrefix = "memory citations: "
+            guard line.hasPrefix(legacyPrefix) else { return line }
+            let citations = line.dropFirst(legacyPrefix.count).components(separatedBy: ", ")
+            let redacted = citations.map { citation in
+                aliases.first(where: { $0.0 == citation })?.1 ?? citation
+            }
+            return legacyPrefix + redacted.joined(separator: ", ")
         }
-        return providerPrompt
+        .joined(separator: "\n")
     }
 
     private func health() async throws -> HealthResponse {

@@ -122,6 +122,15 @@ struct PageSnapshot: Codable, Equatable {
     }
 }
 
+struct CopilotContextTabOption: Identifiable, Equatable {
+    let id: UUID
+    var title: String
+    var displayURL: String
+    var isSelected: Bool
+    var isAvailable: Bool
+    var availabilityLabel: String
+}
+
 struct BrowserDOMAction: Codable, Equatable {
     enum Kind: String, Codable, Equatable, CaseIterable {
         case click
@@ -345,6 +354,8 @@ enum CopilotRunStatus: String, Codable, Equatable {
 enum CopilotRunEventKind: String, Codable, Equatable {
     case queued
     case pageSnapshotRequested
+    case pageSnapshotAttached
+    case relatedPageContextAttached
     case memoryAccessStarted
     case memoryAccessCompleted
     case memoryAccessDenied
@@ -431,6 +442,7 @@ struct CopilotRun: Identifiable, Equatable {
     var targetURLString: String?
     var conversationID: UUID?
     var modelID: String?
+    var contextTabIDs: [UUID]
     var status: CopilotRunStatus
     var startedAt: Date
     var finishedAt: Date?
@@ -446,6 +458,7 @@ struct CopilotRun: Identifiable, Equatable {
         targetURLString: String?,
         conversationID: UUID? = nil,
         modelID: String? = nil,
+        contextTabIDs: [UUID] = [],
         status: CopilotRunStatus = .queued,
         startedAt: Date = Date(),
         finishedAt: Date? = nil,
@@ -460,6 +473,7 @@ struct CopilotRun: Identifiable, Equatable {
         self.targetURLString = targetURLString
         self.conversationID = conversationID
         self.modelID = modelID
+        self.contextTabIDs = contextTabIDs
         self.status = status
         self.startedAt = startedAt
         self.finishedAt = finishedAt
@@ -540,7 +554,7 @@ enum SmartHistoryIndexer {
         return boundedText([title, host, path].filter { !$0.isEmpty }.joined(separator: " "), limit: 500)
     }
 
-    static func boundedText(_ text: String, limit: Int) -> String {
+    nonisolated static func boundedText(_ text: String, limit: Int) -> String {
         let cleaned = text
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

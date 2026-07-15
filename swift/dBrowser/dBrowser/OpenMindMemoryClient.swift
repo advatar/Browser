@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum OpenMindHTTPTransportPreference: String, Codable, Equatable {
     case auto
@@ -1200,6 +1201,15 @@ final class OpenMindMemoryClient {
         self.session = session
     }
 
+    var hasRemoteHTTPEndpoint: Bool {
+        guard let host = configuration.httpBaseURL?.host?.lowercased() else { return false }
+        return host != "localhost"
+            && host != "127.0.0.1"
+            && host != "::1"
+            && host != "[::1]"
+            && !host.hasSuffix(".localhost")
+    }
+
     func refreshCapabilities() async -> OpenMindMemoryCapabilityState {
         guard configuration.httpBaseURL != nil else {
             return .disabled
@@ -1483,7 +1493,7 @@ final class OpenMindMemoryClient {
         OpenMindAccessIntent(
             prompt: prompt,
             pageURLString: pageURLString,
-            pageTitle: pageSnapshot?.title,
+            pageTitle: pageSnapshot.map { SmartHistoryIndexer.boundedText($0.title, limit: 200) },
             snapshotCommitment: snapshotCommitment(for: pageSnapshot),
             purpose: "copilot_recall",
             sensitivityCeiling: "normal"
@@ -1493,18 +1503,13 @@ final class OpenMindMemoryClient {
     nonisolated static func snapshotCommitment(for snapshot: PageSnapshot?) -> String? {
         guard let snapshot else { return nil }
         let text = [
-            snapshot.urlString,
-            snapshot.title,
+            LLMPageContextSanitizer.sanitizedURLString(snapshot.urlString),
+            SmartHistoryIndexer.boundedText(snapshot.title, limit: 200),
             snapshot.visibleText,
             snapshot.headings.joined(separator: "\n")
         ].joined(separator: "\n")
-
-        var hash: UInt64 = 0xcbf29ce484222325
-        for byte in text.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 0x100000001b3
-        }
-        return "fnv1a64:\(String(hash, radix: 16))"
+        let digest = SHA256.hash(data: Data(text.utf8))
+        return "sha256:\(digest.map { String(format: "%02x", $0) }.joined())"
     }
 
     private static func domains(from pageURLString: String?) -> [String] {
