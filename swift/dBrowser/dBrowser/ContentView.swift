@@ -153,9 +153,21 @@ struct ContentView: View {
 
     @ViewBuilder
     private var browserSurface: some View {
-        if let panel = browser.selectedPanel {
+        if let panel = browser.selectedPanel, panel != .copilot {
             BrowserPanelContentView(browser: browser, panel: panel)
-        } else if let index = browser.activeTabIndex {
+        } else {
+            CopilotBrowserWorkspace(
+                browser: browser,
+                showsCopilot: browser.selectedPanel == .copilot
+            ) {
+                activeBrowserSurface
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeBrowserSurface: some View {
+        if let index = browser.activeTabIndex {
             let tab = browser.tabs[index]
             if tab.urlString == BrowserURLResolver.homeURLString {
                 BrowserHomeView(browser: browser)
@@ -304,6 +316,73 @@ private struct BrowserRootLayout<Content: View>: View {
 #else
         content()
 #endif
+    }
+}
+
+private struct CopilotBrowserWorkspace<BrowserContent: View>: View {
+    @ObservedObject var browser: BrowserViewModel
+    let showsCopilot: Bool
+    private let browserContent: BrowserContent
+
+    init(
+        browser: BrowserViewModel,
+        showsCopilot: Bool,
+        @ViewBuilder browserContent: () -> BrowserContent
+    ) {
+        self.browser = browser
+        self.showsCopilot = showsCopilot
+        self.browserContent = browserContent()
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let isCompact = proxy.size.width < 760
+            let sidecarWidth = min(max(proxy.size.width * 0.38, 320), 420)
+            let compactPanelHeight = min(
+                max(proxy.size.height * 0.44, 200),
+                min(380, proxy.size.height * 0.55)
+            )
+            let workspaceLayout = showsCopilot && isCompact
+                ? AnyLayout(VStackLayout(spacing: 0))
+                : AnyLayout(HStackLayout(spacing: 0))
+
+            workspaceLayout {
+                browserContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("browser-web-content")
+
+                if showsCopilot {
+                    Divider()
+
+                    copilotPanel(
+                        isCompact: isCompact,
+                        sidecarWidth: sidecarWidth,
+                        compactPanelHeight: compactPanelHeight
+                    )
+                }
+            }
+        }
+        .accessibilityIdentifier(showsCopilot ? "copilot-browser-workspace" : "browser-workspace")
+    }
+
+    @ViewBuilder
+    private func copilotPanel(
+        isCompact: Bool,
+        sidecarWidth: CGFloat,
+        compactPanelHeight: CGFloat
+    ) -> some View {
+        if isCompact {
+            BrowserPanelContentView(browser: browser, panel: .copilot)
+                .frame(maxWidth: .infinity)
+                .frame(height: compactPanelHeight)
+                .accessibilityIdentifier("copilot-sidecar")
+        } else {
+            BrowserPanelContentView(browser: browser, panel: .copilot)
+                .frame(width: sidecarWidth)
+                .frame(maxHeight: .infinity)
+                .accessibilityIdentifier("copilot-sidecar")
+        }
     }
 }
 
@@ -877,11 +956,23 @@ private struct CopilotPanelView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                PanelHeaderView(
-                    title: "Copilot",
-                    systemImage: BrowserPanel.copilot.systemImage,
-                    subtitle: "Run, inspect, and stop page-scoped AI work."
-                )
+                HStack(alignment: .top, spacing: 12) {
+                    PanelHeaderView(
+                        title: "Copilot",
+                        systemImage: BrowserPanel.copilot.systemImage,
+                        subtitle: "Work with the tabs you choose while keeping the page in view."
+                    )
+                    Spacer(minLength: 8)
+                    Button {
+                        browser.selectPanel(nil)
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Close Copilot")
+                    .accessibilityLabel("Close Copilot")
+                    .accessibilityIdentifier("copilot-sidecar-close")
+                }
 
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .firstTextBaseline) {
@@ -921,6 +1012,8 @@ private struct CopilotPanelView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                    CopilotContextPicker(browser: browser)
+
                     if browser.activeLLMModel.providerKind == .llmGateway || !browser.llmGatewayServiceSnapshot.tokenPackages.isEmpty {
                         LLMGatewayTokenPurchaseSectionView(browser: browser)
                     }
@@ -934,47 +1027,66 @@ private struct CopilotPanelView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityIdentifier("copilot-prompt")
 
-                    HStack {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text(browser.activeTab?.displayURL ?? "Home")
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                        Spacer()
-                        Button {
-                            browser.requestPageSnapshot()
-                        } label: {
-                            Label("Snapshot", systemImage: "doc.viewfinder")
-                        }
-                        .buttonStyle(.bordered)
 
-                        Button {
-                            saveWorkflow()
-                        } label: {
-                            Label("Save", systemImage: "tray.and.arrow.down")
-                        }
-                        .buttonStyle(.bordered)
-
-                        if let activeRun {
+                        HStack(spacing: 8) {
                             Button {
-                                browser.cancelCopilotRun(activeRun.id)
+                                browser.requestPageSnapshot()
                             } label: {
-                                Label("Stop", systemImage: "stop.circle")
+                                Label("Snapshot", systemImage: "doc.viewfinder")
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityIdentifier("copilot-stop")
-                        }
+                            .labelStyle(.iconOnly)
+                            .help("Capture the current page")
+                            .accessibilityLabel("Capture current page")
+                            .accessibilityIdentifier("copilot-snapshot")
 
-                        Button {
-                            if browser.sendLLMMessage(draftMessage) != nil {
-                                draftMessage = ""
+                            Button {
+                                saveWorkflow()
+                            } label: {
+                                Label("Save", systemImage: "tray.and.arrow.down")
                             }
-                        } label: {
-                            Label(activeRun == nil ? "Send" : "Running", systemImage: "paperplane.fill")
+                            .buttonStyle(.bordered)
+                            .labelStyle(.iconOnly)
+                            .help("Save as workflow")
+                            .accessibilityLabel("Save as workflow")
+                            .accessibilityIdentifier("copilot-save-workflow")
+
+                            Spacer(minLength: 8)
+
+                            if let activeRun {
+                                Button {
+                                    browser.cancelCopilotRun(activeRun.id)
+                                } label: {
+                                    Label("Stop", systemImage: "stop.circle")
+                                }
+                                .buttonStyle(.bordered)
+                                .labelStyle(.iconOnly)
+                                .help("Stop Copilot run")
+                                .accessibilityLabel("Stop Copilot run")
+                                .accessibilityIdentifier("copilot-stop")
+                            }
+
+                            Button {
+                                sendMessage()
+                            } label: {
+                                Label(
+                                    activeRun == nil ? "Send" : "Running",
+                                    systemImage: "paperplane.fill"
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                activeRun != nil
+                                    || draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            )
+                            .accessibilityIdentifier("copilot-run")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(activeRun != nil || draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityIdentifier("copilot-run")
                     }
 
                     if !browser.availableAFMPacks.isEmpty {
@@ -1206,6 +1318,12 @@ private struct CopilotPanelView: View {
         )
     }
 
+    private func sendMessage() {
+        if browser.sendLLMMessageWithFreshContext(draftMessage) != nil {
+            draftMessage = ""
+        }
+    }
+
     private func modelBoundarySystemImage(_ model: LLMModelProfile) -> String {
         switch model.trustBoundary {
         case .onDevice:
@@ -1289,6 +1407,118 @@ private struct CopilotPanelView: View {
         case .unavailable:
             return "Unavailable: \(recall.decision.reason)"
         }
+    }
+}
+
+private struct CopilotContextPicker: View {
+    @ObservedObject var browser: BrowserViewModel
+
+    private var selectedCount: Int {
+        browser.copilotContextTabOptions.filter(\.isSelected).count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let activeTab = browser.activeTab {
+                HStack(spacing: 8) {
+                    Label("Current tab", systemImage: "globe")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(activeTab.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityHidden(true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Current tab, \(activeTab.title)")
+                .accessibilityHint(activeTab.displayURL)
+            }
+
+            HStack(spacing: 8) {
+                Label("Related tabs", systemImage: "square.stack.3d.up")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                Menu {
+                    if browser.copilotContextTabOptions.isEmpty {
+                        Text("No tabs available")
+                    } else {
+                        ForEach(browser.copilotContextTabOptions) { option in
+                            Button {
+                                browser.setCopilotContextTab(option.id, isSelected: !option.isSelected)
+                            } label: {
+                                Label(
+                                    "\(option.title) · \(option.availabilityLabel)",
+                                    systemImage: option.isSelected ? "checkmark.circle.fill" : "circle"
+                                )
+                            }
+                            .disabled(!option.isAvailable && !option.isSelected)
+                            .accessibilityLabel(option.title)
+                            .accessibilityValue(option.isSelected ? "Selected" : "Not selected")
+                            .accessibilityHint("\(option.displayURL). \(option.availabilityLabel)")
+                            .accessibilityIdentifier("copilot-context-tab-\(option.id)")
+                        }
+                    }
+                } label: {
+                    Label(
+                        selectedCount == 1 ? "1 related" : "\(selectedCount) related",
+                        systemImage: "chevron.down"
+                    )
+                }
+                .fixedSize()
+                .help("Choose related open tabs Copilot may use with the current tab")
+                .accessibilityLabel("Choose related Copilot tabs")
+                .accessibilityValue("\(selectedCount) related tabs selected")
+                .accessibilityIdentifier("copilot-context-picker")
+            }
+
+            if selectedCount == 0 {
+                Text("Current tab only. Visit another tab to capture it before adding it as context.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(browser.copilotContextTabOptions.filter(\.isSelected)) { option in
+                            Button {
+                                browser.setCopilotContextTab(option.id, isSelected: false)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "globe")
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(option.title)
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text(option.availabilityLabel)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Image(systemName: "xmark")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove \(option.title) from context")
+                            .accessibilityLabel("Remove \(option.title) from Copilot context")
+                            .accessibilityHint("\(option.displayURL). \(option.availabilityLabel)")
+                            .accessibilityIdentifier("copilot-context-chip-\(option.id)")
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityIdentifier("copilot-context")
     }
 }
 
