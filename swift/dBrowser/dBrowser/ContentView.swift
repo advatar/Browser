@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
 import AppKit
@@ -31,7 +32,12 @@ struct ContentView: View {
         }
         .task {
             BrowserAdBlocker.prewarm()
+            browser.startWorkflowScheduler()
             await browser.refreshRuntimeBridgeStatus()
+        }
+        .onOpenURL { url in
+            guard browser.connectorCoordinator.oauthConfiguration.matchesCallbackURL(url) else { return }
+            Task { await browser.connectorCoordinator.handleOAuthCallback(url) }
         }
     }
 
@@ -153,38 +159,61 @@ struct ContentView: View {
 
     @ViewBuilder
     private var browserSurface: some View {
-        if let panel = browser.selectedPanel, panel != .copilot {
-            BrowserPanelContentView(browser: browser, panel: panel)
-        } else {
+        ZStack {
             CopilotBrowserWorkspace(
                 browser: browser,
                 showsCopilot: browser.selectedPanel == .copilot
             ) {
                 activeBrowserSurface
             }
+            .opacity(browser.selectedPanel != nil && browser.selectedPanel != .copilot ? 0 : 1)
+            .allowsHitTesting(browser.selectedPanel == nil || browser.selectedPanel == .copilot)
+
+            if let panel = browser.selectedPanel, panel != .copilot {
+                BrowserPanelContentView(browser: browser, panel: panel)
+                    .background(platformBackgroundColor)
+            }
         }
     }
 
     @ViewBuilder
     private var activeBrowserSurface: some View {
-        if let index = browser.activeTabIndex {
-            let tab = browser.tabs[index]
-            if tab.urlString == BrowserURLResolver.homeURLString {
-                BrowserHomeView(browser: browser)
-            } else if let notice = tab.mobileNotice {
-                RuntimeNoticeView(urlString: tab.urlString, message: notice)
-            } else {
-                BrowserWebView(
-                    tab: $browser.tabs[index],
-                    command: browser.webCommand,
-                    adBlockingMode: browser.adBlockingMode,
-                    automationRequest: browser.automationRequest,
-                    onNavigationUpdate: browser.applyNavigationUpdate,
-                    onAutomationResult: browser.applyAutomationResult
-                )
+        ZStack {
+            ForEach($browser.tabs) { $tab in
+                if tab.urlString != BrowserURLResolver.homeURLString,
+                   tab.mobileNotice == nil,
+                   !tab.isTraceMinimized,
+                   browser.searchSessionsByTabID[tab.id] == nil {
+                    BrowserWebView(
+                        tab: $tab,
+                        command: browser.webCommand,
+                        adBlockingMode: browser.adBlockingMode,
+                        automationRequest: browser.automationRequest,
+                        navigationGeneration: browser.navigationGeneration(for: tab.id),
+                        onApprovedAutomationDispatch: browser.claimApprovedAutomationDispatch,
+                        onNavigationUpdate: browser.applyNavigationUpdate,
+                        onAutomationResult: browser.applyAutomationResult
+                    )
+                    .opacity(tab.id == browser.activeTabID ? 1 : 0)
+                    .allowsHitTesting(tab.id == browser.activeTabID)
+                    .accessibilityHidden(tab.id != browser.activeTabID)
+                    .zIndex(tab.id == browser.activeTabID ? 1 : 0)
+                }
             }
-        } else {
-            BrowserHomeView(browser: browser)
+
+            if let tab = browser.activeTab, let session = browser.searchSessionsByTabID[tab.id] {
+                BrowserNativeSearchResultsView(browser: browser, tabID: tab.id, session: session)
+                    .zIndex(2)
+            } else if let tab = browser.activeTab, tab.urlString == BrowserURLResolver.homeURLString {
+                BrowserHomeView(browser: browser)
+                    .zIndex(2)
+            } else if let tab = browser.activeTab, let notice = tab.mobileNotice {
+                RuntimeNoticeView(urlString: tab.urlString, message: notice)
+                    .zIndex(2)
+            } else if browser.activeTab == nil {
+                BrowserHomeView(browser: browser)
+                    .zIndex(2)
+            }
         }
     }
 
@@ -939,14 +968,165 @@ private struct BookmarksPanelView: View {
     }
 }
 
-private struct CopilotPanelView: View {
+private struct BrowserNativeSearchResultsView: View {
     @ObservedObject var browser: BrowserViewModel
+    let tabID: UUID
+    let session: BrowserSearchSession
+
+    private var synthesis: BrowserResearchSynthesisResult? {
+        browser.researchSynthesisResultsBySessionID[session.id]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("Native research search", systemImage: "sparkle.magnifyingglass")
+                            .font(.title2.weight(.semibold))
+                        Text(session.query)
+                            .font(.title3)
+                        Text(session.provider.map { "Structured results from \($0)" }
+                            ?? "Structured search stays inside the configured JSON boundary.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if session.status == .completed {
+                        Button {
+                            browser.synthesizeSearchSession(tabID: tabID)
+                        } label: {
+                            Label("Synthesize with citations", systemImage: "text.book.closed")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(browser.activeCopilotRunCount > 0 || session.results.isEmpty)
+                        .accessibilityIdentifier("native-search-synthesize")
+                    }
+                }
+
+                switch session.status {
+                case .idle, .loading:
+                    ProgressView("Searching the configured structured endpoint…")
+                case .configurationRequired:
+                    Label(
+                        session.errorMessage ?? "Configure DBROWSER_SEARCH_ENDPOINT with a dbrowser.search.v1 JSON service.",
+                        systemImage: "gear.badge.questionmark"
+                    )
+                    .foregroundStyle(.secondary)
+                case .failed:
+                    Label(session.errorMessage ?? "Search failed.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                case .cancelled:
+                    Label("Search cancelled.", systemImage: "xmark.circle")
+                        .foregroundStyle(.secondary)
+                case .completed:
+                    if session.results.isEmpty {
+                        Text("No structured results were returned.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ForEach(session.results) { result in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            browser.openSearchResult(result)
+                        } label: {
+                            Text(result.title)
+                                .font(.headline)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .buttonStyle(.plain)
+                        Text(result.urlString)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(result.snippet)
+                            .foregroundStyle(.secondary)
+                        Text(String(result.commitment.prefix(22)))
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.07))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                if let synthesis {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Cited synthesis", systemImage: "checkmark.seal")
+                            .font(.headline)
+                        Text(synthesis.answer)
+                            .textSelection(.enabled)
+                        ForEach(synthesis.citations) { citation in
+                            Link(destination: URL(string: citation.source.urlString)!) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(citation.source.title)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(citation.claim)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else if let synthesisError = browser.researchSynthesisErrorsBySessionID[session.id] {
+                    Label(synthesisError, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 980, alignment: .leading)
+        }
+        .background(platformBackgroundColor)
+        .accessibilityIdentifier("native-search-results")
+    }
+}
+
+private struct CopilotPanelView: View {
+    private enum WorkflowScheduleChoice: String, CaseIterable, Identifiable {
+        case manual
+        case everyLaunch
+        case intervalHours
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .manual: "Manual"
+            case .everyLaunch: "Every launch"
+            case .intervalHours: "Hour interval"
+            }
+        }
+    }
+
+    @ObservedObject var browser: BrowserViewModel
+    @StateObject private var voiceInput = BrowserVoiceInputController()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var draftMessage = "Summarize this page and suggest next actions."
     @State private var correctionTargetID: String?
     @State private var correctionText = ""
+    @State private var draftAttachments: [LLMTextFileAttachment] = []
+    @State private var showsFileImporter = false
+    @State private var attachmentError: String?
+    @State private var showsWorkflowEditor = false
+    @State private var workflowTitle = "Saved Copilot prompt"
+    @State private var workflowTargetPattern = ""
+    @State private var workflowScheduleChoice = WorkflowScheduleChoice.manual
+    @State private var workflowIntervalHours = 24
+    @State private var showsEarlierRuns = false
+    @State private var visibleEarlierRunCount = 4
 
     private var latestRun: CopilotRun? {
-        browser.copilotRuns.first
+        conversationRuns.first
+    }
+
+    private var conversationRuns: [CopilotRun] {
+        browser.copilotRuns.filter { $0.conversationID == browser.llmConversation.id }
     }
 
     private var activeRun: CopilotRun? {
@@ -979,12 +1159,34 @@ private struct CopilotPanelView: View {
                         Text("Conversation")
                             .font(.headline)
                         Spacer()
+                        Menu {
+                            ForEach(browser.llmConversations.sorted { $0.updatedAt > $1.updatedAt }) { conversation in
+                                Button {
+                                    browser.selectLLMConversation(conversation.id)
+                                } label: {
+                                    Label(
+                                        conversation.title,
+                                        systemImage: conversation.id == browser.llmConversation.id
+                                            ? "checkmark.circle.fill"
+                                            : "message"
+                                    )
+                                }
+                            }
+                        } label: {
+                            Label("History", systemImage: "sidebar.left")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(!browser.canChangeLLMConversation)
+                        .help("Open a persisted conversation")
+                        .accessibilityIdentifier("copilot-conversation-list")
+
                         Button {
                             browser.startNewLLMConversation()
                         } label: {
                             Label("New", systemImage: "plus.message")
                         }
                         .buttonStyle(.borderless)
+                        .disabled(!browser.canChangeLLMConversation)
                         .help("Start a new conversation")
                         .accessibilityIdentifier("copilot-new-conversation")
 
@@ -1014,6 +1216,8 @@ private struct CopilotPanelView: View {
 
                     CopilotContextPicker(browser: browser)
 
+                    BrowserConnectorSectionView(coordinator: browser.connectorCoordinator)
+
                     if browser.activeLLMModel.providerKind == .llmGateway || !browser.llmGatewayServiceSnapshot.tokenPackages.isEmpty {
                         LLMGatewayTokenPurchaseSectionView(browser: browser)
                     }
@@ -1027,6 +1231,72 @@ private struct CopilotPanelView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityIdentifier("copilot-prompt")
 
+                    if !draftAttachments.isEmpty || attachmentError != nil {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(draftAttachments) { attachment in
+                                HStack(spacing: 8) {
+                                    Label(attachment.displayName, systemImage: "doc.text")
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(attachment.textUTF8ByteCount) B")
+                                        .font(.caption2.monospaced())
+                                        .foregroundStyle(.secondary)
+                                    Button {
+                                        draftAttachments.removeAll { $0.id == attachment.id }
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Remove \(attachment.displayName)")
+                                }
+                            }
+                            if let attachmentError {
+                                Label(attachmentError, systemImage: "exclamationmark.triangle")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityIdentifier("copilot-file-attachments")
+                    }
+
+                    if voiceInput.state.isCapturingAudio || !voiceInput.transcript.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(voiceInputStatusText, systemImage: "waveform")
+                                .font(.caption.weight(.semibold))
+                            TextEditor(
+                                text: Binding(
+                                    get: { voiceInput.transcript },
+                                    set: { voiceInput.editTranscript($0) }
+                                )
+                            )
+                            .frame(minHeight: 70)
+                            .padding(6)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .accessibilityIdentifier("copilot-voice-transcript")
+                            HStack(spacing: 8) {
+                                Button("Use transcript") {
+                                    let transcript = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !transcript.isEmpty else { return }
+                                    draftMessage = transcript
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                Button("Clear") {
+                                    voiceInput.clearTranscript()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+
                     VStack(alignment: .leading, spacing: 10) {
                         Text(browser.activeTab?.displayURL ?? "Home")
                             .font(.caption.monospaced())
@@ -1035,6 +1305,37 @@ private struct CopilotPanelView: View {
                             .truncationMode(.middle)
 
                         HStack(spacing: 8) {
+                            Button {
+                                showsFileImporter = true
+                            } label: {
+                                Label("Attach text files", systemImage: "paperclip")
+                            }
+                            .buttonStyle(.bordered)
+                            .labelStyle(.iconOnly)
+                            .disabled(draftAttachments.count >= LLMTextFileAttachmentPolicy.maximumAttachments)
+                            .help("Attach up to four bounded text files")
+                            .accessibilityIdentifier("copilot-file-attachment")
+
+                            Button {
+                                Task {
+                                    if voiceInput.state.isCapturingAudio {
+                                        voiceInput.stopFromUserAction()
+                                    } else {
+                                        await voiceInput.startFromUserAction()
+                                    }
+                                }
+                            } label: {
+                                Label(
+                                    voiceInput.state.isCapturingAudio ? "Stop voice input" : "Voice input",
+                                    systemImage: voiceInput.state.isCapturingAudio ? "stop.circle" : "mic"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .labelStyle(.iconOnly)
+                            .disabled(!voiceInput.state.isCapturingAudio && !voiceInput.canStartFromUserAction)
+                            .help(voiceInput.state.isCapturingAudio ? "Stop voice input" : "Start on-device voice input")
+                            .accessibilityIdentifier("copilot-voice-input")
+
                             Button {
                                 browser.requestPageSnapshot()
                             } label: {
@@ -1048,15 +1349,28 @@ private struct CopilotPanelView: View {
                             .disabled(!browser.canRequestActivePageSnapshot)
 
                             Button {
-                                saveWorkflow()
+                                browser.requestTextSelection()
+                            } label: {
+                                Label("Capture selection", systemImage: "character.cursor.ibeam")
+                            }
+                            .buttonStyle(.bordered)
+                            .labelStyle(.iconOnly)
+                            .help("Capture the current page text selection for inline assistance")
+                            .accessibilityLabel("Capture selected page text")
+                            .accessibilityIdentifier("copilot-inline-selection")
+                            .disabled(!browser.canRequestActivePageSnapshot)
+
+                            Button {
+                                prepareWorkflowEditor()
                             } label: {
                                 Label("Save", systemImage: "tray.and.arrow.down")
                             }
                             .buttonStyle(.bordered)
                             .labelStyle(.iconOnly)
-                            .help("Save as workflow")
-                            .accessibilityLabel("Save as workflow")
+                            .help("Configure and save as a manual or scheduled workflow")
+                            .accessibilityLabel("Configure and save workflow")
                             .accessibilityIdentifier("copilot-save-workflow")
+                            .disabled(draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                             Spacer(minLength: 8)
 
@@ -1071,6 +1385,16 @@ private struct CopilotPanelView: View {
                                 .help("Stop Copilot run")
                                 .accessibilityLabel("Stop Copilot run")
                                 .accessibilityIdentifier("copilot-stop")
+                            } else if browser.llmConversation.latestAssistantMessage != nil {
+                                Button {
+                                    browser.regenerateLastAssistantMessage()
+                                } label: {
+                                    Label("Regenerate", systemImage: "arrow.clockwise")
+                                }
+                                .buttonStyle(.bordered)
+                                .labelStyle(.iconOnly)
+                                .help("Regenerate the last response with fresh page context")
+                                .accessibilityIdentifier("copilot-regenerate")
                             }
 
                             Button {
@@ -1089,6 +1413,30 @@ private struct CopilotPanelView: View {
                             )
                             .accessibilityIdentifier("copilot-run")
                         }
+                    }
+
+                    if let selection = browser.latestTextSelection {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Selected page text", systemImage: "text.quote")
+                                .font(.caption.weight(.semibold))
+                            Text(selection.text)
+                                .font(.caption)
+                                .lineLimit(4)
+                            HStack {
+                                Text(String(selection.commitment.prefix(12)))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Add to composer") {
+                                    draftMessage = "Help with this selected passage:\n\n\(selection.text)"
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(10)
+                        .background(Color.secondary.opacity(0.06))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityIdentifier("copilot-inline-selection-preview")
                     }
 
                     if browser.activeLLMModel.providerKind == .afMarket, !browser.availableAFMPacks.isEmpty {
@@ -1138,6 +1486,21 @@ private struct CopilotPanelView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                        if let presentation = browser.copilotRunPresentations[latestRun.id] {
+                            Label(
+                                presentation.statusMessage,
+                                systemImage: presentation.phase == .streaming ? "waveform" : "circle.dotted"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            if !presentation.partialText.isEmpty,
+                               latestRun.status == .queued || latestRun.status == .running {
+                                Text(presentation.partialText)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+
                         if let summary = latestRun.result?.summary {
                             Text(summary)
                                 .foregroundStyle(.secondary)
@@ -1153,7 +1516,7 @@ private struct CopilotPanelView: View {
                             .accessibilityIdentifier("copilot-openmind-writeback")
                         }
 
-                        ForEach(latestRun.events.suffix(5)) { event in
+                        ForEach(latestRun.events) { event in
                             Label(event.message, systemImage: event.kind == .approvalRequired ? "exclamationmark.triangle" : "checkmark.circle")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -1164,6 +1527,83 @@ private struct CopilotPanelView: View {
                     .background(Color.secondary.opacity(0.08))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityIdentifier("copilot-result")
+                }
+
+                if conversationRuns.count > 1 {
+                    DisclosureGroup("Earlier run activity", isExpanded: $showsEarlierRuns) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(conversationRuns.dropFirst().prefix(visibleEarlierRunCount)) { run in
+                                earlierRunActivityCard(run)
+                            }
+                            if conversationRuns.count - 1 > visibleEarlierRunCount {
+                                Button("Show more runs") {
+                                    visibleEarlierRunCount += 4
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.top, 8)
+                    }
+                    .padding(14)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-run-history")
+                }
+
+                if !browser.copilotToolProposals.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Tool approvals", systemImage: "checkmark.shield")
+                            .font(.headline)
+                        ForEach(browser.copilotToolProposals.prefix(6)) { proposal in
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack {
+                                    Text(proposal.toolName)
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(proposal.status.rawValue)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(proposal.statusMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(proposal.command.approvalSummary)
+                                    .font(.caption)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if let targetTab = browser.tabs.first(where: { $0.id == proposal.targetTabID }) {
+                                    Text("Exact current page: \(targetTab.urlString)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Text("Page \(proposal.targetPageCommitment.map { String($0.prefix(12)) } ?? "legacy/unbound") · command \(proposal.commandCommitment.map { String($0.prefix(12)) } ?? "legacy/unbound") · arguments \(String(proposal.argumentCommitment.prefix(12))) · binding \(proposal.approvalBindingCommitment.map { String($0.prefix(12)) } ?? "legacy/unbound")")
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                if proposal.status == .pendingApproval {
+                                    HStack(spacing: 8) {
+                                        Button("Approve once") {
+                                            browser.approveToolProposal(proposal.id)
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        Button("Deny") {
+                                            browser.denyToolProposal(proposal.id)
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.secondary.opacity(0.06))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        }
+                    }
+                    .padding(14)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityIdentifier("copilot-tool-proposals")
                 }
 
                 if let recall = browser.latestOpenMindRecall {
@@ -1285,6 +1725,10 @@ private struct CopilotPanelView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                    Text(workflowScheduleLabel(workflow))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
                                 }
                                 Spacer()
                                 Button {
@@ -1297,6 +1741,12 @@ private struct CopilotPanelView: View {
                                 .help("Run workflow")
                             }
                             .padding(.vertical, 6)
+
+                            if let state = browser.scheduledWorkflowStates.first(where: { $0.workflowID == workflow.id }) {
+                                Label(state.message, systemImage: state.phase == .waitingForUser ? "person.crop.circle.badge.clock" : "clock.arrow.circlepath")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .padding(16)
@@ -1310,19 +1760,230 @@ private struct CopilotPanelView: View {
         }
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-copilot")
+        .fileImporter(
+            isPresented: $showsFileImporter,
+            allowedContentTypes: [.plainText, .utf8PlainText, .json, .commaSeparatedText, .sourceCode],
+            allowsMultipleSelection: true
+        ) { result in
+            importTextAttachments(result)
+        }
+        .sheet(isPresented: $showsWorkflowEditor) {
+            workflowEditor
+        }
+        .onDisappear {
+            voiceInput.cancel()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                voiceInput.cancel()
+            }
+        }
+        .onChange(of: browser.llmConversation.id) { _, _ in
+            showsEarlierRuns = false
+            visibleEarlierRunCount = 4
+        }
+    }
+
+    private var voiceInputStatusText: String {
+        switch voiceInput.state {
+        case .recording:
+            "Recording on device"
+        case .transcribing:
+            "Transcribing on device"
+        case .stopped:
+            "Editable voice transcript"
+        case .unavailable(let reason), .denied(let reason):
+            reason
+        case .failed(let message):
+            message
+        }
+    }
+
+    private var workflowEditor: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Save workflow")
+                .font(.title2.weight(.semibold))
+            Text("Scheduled workflows run only while dBrowser is open, on a visible fully loaded tab that exactly matches the target. Browser and connector mutations still require their normal approvals.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("Workflow title", text: $workflowTitle)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("copilot-workflow-title")
+            TextField("Target URL pattern (blank allows any eligible tab)", text: $workflowTargetPattern)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("copilot-workflow-target")
+
+            Picker("Schedule", selection: $workflowScheduleChoice) {
+                ForEach(WorkflowScheduleChoice.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("copilot-workflow-schedule")
+
+            if workflowScheduleChoice == .intervalHours {
+                Stepper(
+                    "Run every \(workflowIntervalHours) hour\(workflowIntervalHours == 1 ? "" : "s")",
+                    value: $workflowIntervalHours,
+                    in: 1...720
+                )
+                .accessibilityIdentifier("copilot-workflow-interval")
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    showsWorkflowEditor = false
+                }
+                .buttonStyle(.bordered)
+                Button("Save workflow") {
+                    saveWorkflow()
+                    showsWorkflowEditor = false
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    workflowTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || draftMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+                .accessibilityIdentifier("copilot-workflow-save-confirm")
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 560)
+    }
+
+    private func earlierRunActivityCard(_ run: CopilotRun) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(run.result?.title ?? "Copilot run")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(run.status.rawValue.capitalized)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let summary = run.result?.summary {
+                Text(summary)
+                    .font(.caption)
+                    .textSelection(.enabled)
+            }
+            if let usage = run.usage {
+                Text("\(NSDecimalNumber(decimal: usage.creditsSpent).stringValue) credits")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(run.events) { event in
+                Label(
+                    event.message,
+                    systemImage: event.kind == .approvalRequired
+                        ? "exclamationmark.triangle"
+                        : "checkmark.circle"
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func prepareWorkflowEditor() {
+        let tabTitle = browser.activeTab?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        workflowTitle = tabTitle.isEmpty ? "Saved Copilot prompt" : "\(tabTitle) workflow"
+        workflowTargetPattern = workflowDefaultTargetPattern()
+        workflowScheduleChoice = .manual
+        workflowIntervalHours = 24
+        showsWorkflowEditor = true
     }
 
     private func saveWorkflow() {
+        let target = workflowTargetPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let schedule: CopilotWorkflowSchedule = switch workflowScheduleChoice {
+        case .manual:
+            .manual
+        case .everyLaunch:
+            .everyLaunch
+        case .intervalHours:
+            .interval(hours: workflowIntervalHours)
+        }
         _ = browser.saveCopilotWorkflow(
-            title: "Saved Copilot prompt",
+            title: workflowTitle,
             promptTemplate: draftMessage,
-            allowedActions: [.click, .focus, .scroll, .waitForSelector]
+            targetURLPattern: target.isEmpty ? nil : target,
+            allowedActions: [.click, .focus, .scroll, .waitForSelector],
+            schedule: schedule
         )
     }
 
+    private func workflowDefaultTargetPattern() -> String {
+        guard let rawURL = browser.activeTab?.urlString,
+              let components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host, !host.isEmpty else {
+            return ""
+        }
+        var target = "\(scheme)://\(host)"
+        if let port = components.port {
+            target += ":\(port)"
+        }
+        return target
+    }
+
+    private func workflowScheduleLabel(_ workflow: SavedCopilotWorkflow) -> String {
+        let schedule: String = switch workflow.schedule.kind {
+        case .manual:
+            "Manual"
+        case .everyLaunch:
+            "Every launch while dBrowser is open"
+        case .intervalHours:
+            "Every \(workflow.schedule.intervalHours ?? 1) hour(s) while dBrowser is open"
+        }
+        return "\(schedule) · Target: \(workflow.targetURLPattern ?? "any eligible visible tab")"
+    }
+
     private func sendMessage() {
-        if browser.sendLLMMessageWithFreshContext(draftMessage) != nil {
+        if browser.sendLLMMessageWithFreshContext(
+            draftMessage,
+            fileAttachments: draftAttachments
+        ) != nil {
             draftMessage = ""
+            draftAttachments = []
+            attachmentError = nil
+        }
+    }
+
+    private func importTextAttachments(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            var imported = draftAttachments
+            for url in urls where imported.count < LLMTextFileAttachmentPolicy.maximumAttachments {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer {
+                    if accessed { url.stopAccessingSecurityScopedResource() }
+                }
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let data = try handle.read(upToCount: LLMTextFileAttachmentPolicy.textUTF8ByteLimit + 1) ?? Data()
+                guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+                    throw CocoaError(.fileReadInapplicableStringEncoding)
+                }
+                let mediaType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "text/plain"
+                imported.append(
+                    LLMTextFileAttachment(
+                        displayName: url.lastPathComponent,
+                        mediaType: mediaType,
+                        text: text
+                    )
+                )
+            }
+            draftAttachments = imported
+            attachmentError = nil
+        } catch {
+            attachmentError = error.localizedDescription
         }
     }
 
@@ -1466,18 +2127,23 @@ private struct CopilotContextPicker: View {
                     } else {
                         ForEach(browser.copilotContextTabOptions) { option in
                             Button {
-                                browser.setCopilotContextTab(option.id, isSelected: !option.isSelected)
+                                if option.isAvailable || option.isSelected {
+                                    browser.setCopilotContextTab(option.id, isSelected: !option.isSelected)
+                                } else {
+                                    browser.prepareInactiveTabCapture(option.id)
+                                }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Label(
                                         "\(option.title) · \(option.availabilityLabel)",
-                                        systemImage: option.isSelected ? "checkmark.circle.fill" : "circle"
+                                        systemImage: option.isSelected
+                                            ? "checkmark.circle.fill"
+                                            : (option.isAvailable ? "circle" : "camera.viewfinder")
                                     )
                                     Text(option.displayURL)
                                         .font(.caption2)
                                 }
                             }
-                            .disabled(!option.isAvailable && !option.isSelected)
                             .accessibilityLabel(option.title)
                             .accessibilityValue(option.isSelected ? "Selected" : "Not selected")
                             .accessibilityHint("\(option.displayURL). \(option.availabilityLabel)")
@@ -1495,6 +2161,47 @@ private struct CopilotContextPicker: View {
                 .accessibilityLabel("Choose related Copilot tabs")
                 .accessibilityValue("\(selectedCount) related tabs selected")
                 .accessibilityIdentifier("copilot-context-picker")
+            }
+
+            if browser.inactiveTabCaptureState.phase != .idle {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        browser.inactiveTabCaptureState.tabTitle ?? "Inactive tab capture",
+                        systemImage: "eye.trianglebadge.exclamationmark"
+                    )
+                    .font(.caption.weight(.semibold))
+                    Text(browser.inactiveTabCaptureState.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let displayURL = browser.inactiveTabCaptureState.displayURLString {
+                        Text(displayURL)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    if browser.inactiveTabCaptureState.phase == .awaitingConfirmation {
+                        HStack(spacing: 8) {
+                            Button("Capture once") {
+                                browser.confirmInactiveTabCapture()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            Button("Cancel") {
+                                browser.cancelInactiveTabCapture()
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else if browser.inactiveTabCaptureState.phase == .captured
+                                || browser.inactiveTabCaptureState.phase == .failed {
+                        Button("Dismiss") {
+                            browser.cancelInactiveTabCapture()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityIdentifier("copilot-inactive-tab-capture")
             }
 
             if selectedCount == 0 {
@@ -1875,6 +2582,9 @@ private struct LLMGatewayTokenPurchaseSectionView: View {
 
 private struct LLMConversationTranscriptView: View {
     @ObservedObject var browser: BrowserViewModel
+    @State private var visibleMessageCount = 20
+    @State private var visibleEventCount = 20
+    @State private var showsAuditEvents = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1887,7 +2597,16 @@ private struct LLMConversationTranscriptView: View {
                     .background(Color.secondary.opacity(0.06))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                ForEach(browser.llmConversation.messages.suffix(8)) { message in
+                if browser.llmConversation.messages.count > visibleMessageCount {
+                    Button(
+                        "Show \(min(20, browser.llmConversation.messages.count - visibleMessageCount)) older messages"
+                    ) {
+                        visibleMessageCount += 20
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("copilot-show-older-messages")
+                }
+                ForEach(browser.llmConversation.messages.suffix(visibleMessageCount)) { message in
                     LLMConversationMessageRow(
                         message: message,
                         modelName: modelName(for: message.modelID)
@@ -1895,12 +2614,34 @@ private struct LLMConversationTranscriptView: View {
                 }
             }
 
-            if let event = browser.llmConversation.events.last {
-                Label(event.message, systemImage: conversationEventSystemImage(event.kind))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+            if !browser.llmConversation.events.isEmpty {
+                DisclosureGroup(
+                    "Conversation audit · \(browser.llmConversation.events.count) events",
+                    isExpanded: $showsAuditEvents
+                ) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if browser.llmConversation.events.count > visibleEventCount {
+                            Button("Show older audit events") {
+                                visibleEventCount += 20
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        ForEach(browser.llmConversation.events.suffix(visibleEventCount)) { event in
+                            Label(event.message, systemImage: conversationEventSystemImage(event.kind))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .accessibilityIdentifier("copilot-conversation-audit")
             }
+        }
+        .onChange(of: browser.llmConversation.id) { _, _ in
+            visibleMessageCount = 20
+            visibleEventCount = 20
+            showsAuditEvents = false
         }
         .accessibilityIdentifier("copilot-conversation")
     }
@@ -1930,6 +2671,20 @@ private struct LLMConversationTranscriptView: View {
             return "rectangle.compress.vertical"
         case .providerFallback:
             return "arrow.uturn.backward.circle"
+        case .toolProposed:
+            return "wrench.and.screwdriver"
+        case .toolApproved:
+            return "checkmark.shield"
+        case .toolDenied:
+            return "xmark.shield"
+        case .toolExecuted:
+            return "play.square.stack"
+        case .summaryArtifactCreated:
+            return "rectangle.compress.vertical"
+        case .researchSourcesAttached:
+            return "text.book.closed"
+        case .regenerated:
+            return "arrow.clockwise.circle"
         }
     }
 }
@@ -1960,6 +2715,16 @@ private struct LLMConversationMessageRow: View {
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let provenance = message.providerProvenance {
+                Label(
+                    "\(provenance.providerDisplayName) · \(provenance.trustBoundary.title) · \(provenance.actualModelID)",
+                    systemImage: provenance.trustBoundary == .onDevice ? "cpu" : "network"
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .help(provenance.boundarySummary)
+            }
+
             if let snapshot = message.snapshotAttachment {
                 Label(snapshot.title, systemImage: "doc.text.magnifyingglass")
                     .font(.caption)
@@ -1972,6 +2737,35 @@ private struct LLMConversationMessageRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+
+            ForEach(message.fileAttachments) { attachment in
+                Label(
+                    "\(attachment.displayName) · \(String(attachment.contentSHA256.prefix(18)))",
+                    systemImage: "doc.text"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            ForEach(message.sourceCitations) { citation in
+                if let urlString = citation.urlString, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        Label(citation.title, systemImage: "link")
+                    }
+                    .font(.caption)
+                } else {
+                    Label(citation.title, systemImage: "text.book.closed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if message.regeneratedFromMessageID != nil {
+                Label("Regenerated response", systemImage: "arrow.clockwise.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(12)

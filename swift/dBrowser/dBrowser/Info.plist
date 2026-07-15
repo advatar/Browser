@@ -2,11 +2,26 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.advatarsystems.dBrowser.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>dbrowser</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>dBrowser uses the microphone only when you start voice input to create an editable Copilot draft.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>dBrowser transcribes speech only when you start voice input and never sends the resulting draft automatically.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

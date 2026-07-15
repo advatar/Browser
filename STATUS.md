@@ -25,21 +25,28 @@
 
 Close every remaining gap listed in the Copilot architecture section while preserving the fresh-context, privacy, prompt-budget, and explicit-provider boundaries from #169.
 
-- [x] Translate every gap at `docs/ARCHITECTURE.md:502-515` into executable acceptance and safety criteria.
+- [x] Translate every gap in `docs/ARCHITECTURE.md`'s LLM conversation and page-automation section into executable acceptance and safety criteria.
 - [x] Create umbrella issue #172 with scope, implementation plan, non-goals, and validation requirements.
-- [ ] Add persistent multi-conversation selection plus streamed presentation, bounded file attachments, regenerate, boundary labels, and explicit run states.
-- [ ] Add linked context-summary artifacts for model-window compression without silently discarding source history.
-- [ ] Add AI-native research search sessions with bounded cited sources, synthesis, and research-ledger persistence.
-- [ ] Add truthful Gmail/Calendar-style connector configuration, scoped permissions, and approval-gated action proposals without bundled credentials.
-- [ ] Add an explicit voice-permission/recording/transcript lifecycle that never auto-submits speech.
-- [ ] Add inline assistance from an audited, bounded current-page text-selection capture.
-- [ ] Convert provider tool calls into allowlisted tab/navigation-bound proposals that require approval before typed automation execution.
-- [ ] Execute persisted saved-workflow schedules observably while preserving fresh context and every normal approval boundary.
-- [ ] Add explicit, visible, one-tab-at-a-time inactive-tab live capture without background capture or trace-minimized-tab leakage.
-- [ ] Add focused unit coverage for each capability and adversarial boundary.
-- [ ] Replace the remaining-gap documentation with precise shipped behavior and honest external-configuration limits.
-- [ ] Pass focused/full non-Keychain Swift tests, macOS build, parse/diff hygiene, and an independent release audit.
-- [ ] Commit only scoped files, push the branch, update #172, and open a draft PR.
+- [x] Add persistent multi-conversation selection plus streamed presentation, bounded file attachments, regenerate, boundary labels, and explicit run states.
+- [x] Add linked context-summary artifacts for model-window compression without silently discarding source history.
+- [x] Add AI-native research search sessions with bounded cited sources, synthesis, and research-ledger persistence.
+- [x] Add truthful Gmail/Calendar-style connector configuration, scoped permissions, and approval-gated action proposals without bundled credentials.
+- [x] Add an explicit voice-permission/recording/transcript lifecycle that never auto-submits speech.
+- [x] Add inline assistance from an audited, bounded current-page text-selection capture.
+- [x] Convert provider tool calls into allowlisted tab/navigation-bound proposals that require approval before typed automation execution.
+- [x] Execute persisted saved-workflow schedules observably while preserving fresh context and every normal approval boundary.
+- [x] Add explicit, visible, one-tab-at-a-time inactive-tab live capture without background capture or trace-minimized-tab leakage.
+- [x] Add focused unit coverage for each capability and adversarial boundary.
+- [x] Replace the remaining-gap documentation with precise shipped behavior and honest external-configuration limits.
+- [x] Pass focused/full Swift tests, macOS build, parse/diff hygiene, and an independent release audit.
+- [x] Commit only scoped files, push the branch, update #172, and update draft PR #171.
+
+Validation notes:
+
+- `xcodebuild build-for-testing` passed for the macOS app and test bundle on the final production tree; the only output was the pre-existing MLX `Cmlx` umbrella-header warning.
+- The complete `dBrowserTests` test bundle passed 323/323 tests with no failures, skips, or expected failures, including the Keychain-backed wallet tests and all `CometParityGapTests`.
+- Focused release regressions passed for buffered router normalization, one-time WebKit ownership, source-only quarantine, exact initial/post-memory artifacts, frozen concurrent-run context, local-MLX fail-closed behavior, durable connector mutations, and idle workflow scheduling.
+- `xcrun swiftc -parse` passed for every app and test Swift file, `git diff --check` passed, and an independent final audit reported no remaining P0/P1 finding.
 
 ## Comet Context Parity: Copilot Sidecar And Fresh Multi-Tab Grounding (#169)
 

@@ -6,25 +6,32 @@ struct BrowserAutomationRequest: Equatable, Identifiable {
     var command: BrowserAutomationCommand
     var createdAt: Date
     var timeoutSeconds: TimeInterval
+    var navigationGeneration: UInt64
+    var approvalGrant: BrowserAutomationApprovalGrant?
 
     init(
         id: UUID = UUID(),
         tabID: UUID,
         command: BrowserAutomationCommand,
         createdAt: Date = Date(),
-        timeoutSeconds: TimeInterval = 3
+        timeoutSeconds: TimeInterval = 3,
+        navigationGeneration: UInt64 = 0,
+        approvalGrant: BrowserAutomationApprovalGrant? = nil
     ) {
         self.id = id
         self.tabID = tabID
         self.command = command
         self.createdAt = createdAt
         self.timeoutSeconds = timeoutSeconds
+        self.navigationGeneration = navigationGeneration
+        self.approvalGrant = approvalGrant
     }
 }
 
 enum BrowserAutomationCommand: Equatable {
     case domQuery(DOMQueryRequest)
     case pageSnapshot(PageSnapshotRequest)
+    case textSelection(BrowserTextSelectionRequest)
     case action(BrowserDOMAction)
 }
 
@@ -108,6 +115,104 @@ struct PageSnapshot: Codable, Equatable {
     var truncated: Bool
     var redactionCount: Int
 
+    private enum CodingKeys: String, CodingKey {
+        case urlString
+        case title
+        case visibleText
+        case headings
+        case links
+        case buttons
+        case formControls
+        case metadata
+        case truncated
+        case redactionCount
+    }
+
+    nonisolated init(
+        urlString: String,
+        title: String,
+        visibleText: String,
+        headings: [String],
+        links: [DOMElementRecord],
+        buttons: [DOMElementRecord],
+        formControls: [DOMElementRecord],
+        metadata: [String: String],
+        truncated: Bool,
+        redactionCount: Int
+    ) {
+        self.urlString = urlString.utf8.count <= 2_048 ? urlString : ""
+        self.title = String(title.prefix(240))
+        self.visibleText = String(visibleText.prefix(20_000))
+        self.headings = headings.prefix(100).map { String($0.prefix(160)) }
+        self.links = links.prefix(100).map(Self.boundedElement)
+        self.buttons = buttons.prefix(100).map(Self.boundedElement)
+        self.formControls = formControls.prefix(100).map(Self.boundedElement)
+        var boundedMetadata: [String: String] = [:]
+        for (key, value) in metadata.sorted(by: { $0.key < $1.key }).prefix(30) {
+            let boundedKey = String(key.prefix(120))
+            if boundedMetadata[boundedKey] == nil {
+                boundedMetadata[boundedKey] = String(value.prefix(240))
+            }
+        }
+        self.metadata = boundedMetadata
+        self.truncated = truncated
+            || visibleText.count > 20_000
+            || headings.count > 100
+            || links.count > 100
+            || buttons.count > 100
+            || formControls.count > 100
+            || metadata.count > 30
+            || self.urlString.isEmpty != urlString.isEmpty
+        self.redactionCount = min(max(0, redactionCount), 100_000)
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            urlString: try container.decode(String.self, forKey: .urlString),
+            title: try container.decode(String.self, forKey: .title),
+            visibleText: try container.decode(String.self, forKey: .visibleText),
+            headings: try container.decodeIfPresent([String].self, forKey: .headings) ?? [],
+            links: try container.decodeIfPresent([DOMElementRecord].self, forKey: .links) ?? [],
+            buttons: try container.decodeIfPresent([DOMElementRecord].self, forKey: .buttons) ?? [],
+            formControls: try container.decodeIfPresent([DOMElementRecord].self, forKey: .formControls) ?? [],
+            metadata: try container.decodeIfPresent([String: String].self, forKey: .metadata) ?? [:],
+            truncated: try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false,
+            redactionCount: try container.decodeIfPresent(Int.self, forKey: .redactionCount) ?? 0
+        )
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(urlString, forKey: .urlString)
+        try container.encode(title, forKey: .title)
+        try container.encode(visibleText, forKey: .visibleText)
+        try container.encode(headings, forKey: .headings)
+        try container.encode(links, forKey: .links)
+        try container.encode(buttons, forKey: .buttons)
+        try container.encode(formControls, forKey: .formControls)
+        try container.encode(metadata, forKey: .metadata)
+        try container.encode(truncated, forKey: .truncated)
+        try container.encode(redactionCount, forKey: .redactionCount)
+    }
+
+    private nonisolated static func boundedElement(_ element: DOMElementRecord) -> DOMElementRecord {
+        DOMElementRecord(
+            index: min(max(0, element.index), 100_000),
+            tagName: String(element.tagName.prefix(64)),
+            role: element.role.map { String($0.prefix(120)) },
+            ariaLabel: element.ariaLabel.map { String($0.prefix(180)) },
+            text: element.text.map { String($0.prefix(180)) },
+            value: element.value.map { String($0.prefix(120)) },
+            href: element.href.map { String($0.prefix(2_048)) },
+            inputType: element.inputType.map { String($0.prefix(64)) },
+            name: element.name.map { String($0.prefix(180)) },
+            placeholder: element.placeholder.map { String($0.prefix(180)) },
+            disabled: element.disabled,
+            hidden: element.hidden
+        )
+    }
+
     var modelContextSummary: String {
         let pieces = [
             title,
@@ -152,7 +257,7 @@ struct BrowserDOMAction: Codable, Equatable {
     var y: Double?
     var urlString: String?
 
-    init(
+    nonisolated init(
         kind: Kind,
         selector: String? = nil,
         elementIndex: Int? = nil,
@@ -209,10 +314,15 @@ struct BrowserAutomationResult: Equatable, Identifiable {
     let id: UUID
     var requestID: UUID
     var tabID: UUID
+    /// Identifies the representable coordinator that atomically claimed an
+    /// approved one-time dispatch. Results without the matching owner are
+    /// discarded by the view model before they can terminalize the request.
+    var approvedAutomationDispatchOwnerID: UUID?
     var status: BrowserAutomationStatus
     var message: String
     var domQuery: DOMQueryResult?
     var pageSnapshot: PageSnapshot?
+    var textSelection: BrowserTextSelection?
     var actionResult: BrowserActionResult?
     var approval: BrowserAutomationApproval?
 
@@ -220,20 +330,24 @@ struct BrowserAutomationResult: Equatable, Identifiable {
         id: UUID = UUID(),
         requestID: UUID,
         tabID: UUID,
+        approvedAutomationDispatchOwnerID: UUID? = nil,
         status: BrowserAutomationStatus,
         message: String,
         domQuery: DOMQueryResult? = nil,
         pageSnapshot: PageSnapshot? = nil,
+        textSelection: BrowserTextSelection? = nil,
         actionResult: BrowserActionResult? = nil,
         approval: BrowserAutomationApproval? = nil
     ) {
         self.id = id
         self.requestID = requestID
         self.tabID = tabID
+        self.approvedAutomationDispatchOwnerID = approvedAutomationDispatchOwnerID
         self.status = status
         self.message = message
         self.domQuery = domQuery
         self.pageSnapshot = pageSnapshot
+        self.textSelection = textSelection
         self.actionResult = actionResult
         self.approval = approval
     }
@@ -383,6 +497,7 @@ enum CopilotRunEventKind: String, Codable, Equatable {
     case modelStarted
     case modelCompleted
     case actionRequested
+    case actionCompleted
     case approvalRequired
     case cancelled
     case failed

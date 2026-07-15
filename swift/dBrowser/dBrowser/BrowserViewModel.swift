@@ -10,12 +10,26 @@ private struct PendingFreshCopilotContext {
     let model: LLMModelProfile
     let relatedTabIDs: [UUID]
     let navigationGeneration: UInt64
+    let fileAttachments: [LLMTextFileAttachment]
+    let sourceMessageID: UUID?
+    let regeneratedFromMessageID: UUID?
 }
 
 private struct PageSnapshotCaptureContext {
     let tabID: UUID
     let targetURLString: String
     let navigationGeneration: UInt64
+}
+
+private struct CopilotRunPageBinding {
+    let tabID: UUID
+    let targetPageCommitment: String
+    let navigationGeneration: UInt64
+}
+
+private enum CopilotRunContextPolicy {
+    case standard
+    case disclosedResearchSourcesOnly
 }
 
 @MainActor
@@ -32,11 +46,19 @@ final class BrowserViewModel: ObservableObject {
     @Published var automationResults: [BrowserAutomationResult] = []
     @Published var latestDOMQueryResult: DOMQueryResult?
     @Published var latestPageSnapshot: PageSnapshot?
+    @Published var latestTextSelection: BrowserTextSelection?
     @Published private(set) var pageSnapshotsByTabID: [UUID: PageSnapshot] = [:]
     @Published private(set) var selectedCopilotContextTabIDs: Set<UUID> = []
+    @Published private(set) var inactiveTabCaptureState: InactiveTabCaptureState = .idle
     @Published var copilotRuns: [CopilotRun] = []
+    @Published private(set) var copilotRunPresentations: [UUID: CopilotRunPresentation] = [:]
+    @Published private(set) var copilotToolProposals: [CopilotToolProposal] = []
     @Published var copilotWorkflows: [SavedCopilotWorkflow] = []
+    @Published private(set) var scheduledWorkflowStates: [CopilotScheduledWorkflowState] = []
     @Published var researchLedgers: [BrowserResearchLedger] = []
+    @Published private(set) var searchSessionsByTabID: [UUID: BrowserSearchSession] = [:]
+    @Published private(set) var researchSynthesisResultsBySessionID: [UUID: BrowserResearchSynthesisResult] = [:]
+    @Published private(set) var researchSynthesisErrorsBySessionID: [UUID: String] = [:]
     @Published var developerWorkflowRuns: [BrowserDeveloperWorkflowRun] = []
     @Published var runtimeFeatureStates: [RuntimeFeatureState]
     @Published var chainTrustSnapshot: ChainTrustRegistry
@@ -57,6 +79,7 @@ final class BrowserViewModel: ObservableObject {
     @Published var latestOpenMindWriteback: OpenMindWritebackOutcome?
     @Published var latestOpenMindCorrection: OpenMindCorrectionOutcome?
     @Published var llmConversation: LLMConversation
+    @Published private(set) var llmConversations: [LLMConversation]
     @Published var llmModelOptions: [LLMModelProfile]
     @Published var selectedLLMModelID: String
     @Published var localLLMState: LocalLLMManagementState
@@ -74,11 +97,14 @@ final class BrowserViewModel: ObservableObject {
     static weak var shared: BrowserViewModel?
 
     let runtimeBridge: MobileRuntimeBridge
+    let connectorCoordinator: BrowserConnectorCoordinator
     private let workflowStore: CopilotWorkflowStore
     private let researchLedgerStore: ResearchLedgerStore
+    private let browserSearchService: any BrowserSearchServicing
     private let developerWorkflowStore: DeveloperWorkflowStore
     private let historyService: BrowserHistoryService
     private let llmConversationStore: LLMConversationStore
+    private var llmConversationArchive: LLMConversationStorePayload
     private let openMindMemoryClient: OpenMindMemoryClient
     private let localLLMManager: LocalLLMManaging
     private let adBlockingDefaults: UserDefaults
@@ -90,8 +116,19 @@ final class BrowserViewModel: ObservableObject {
     private var automationTimeoutTasks: [UUID: Task<Void, Never>] = [:]
     private var pageNavigationGenerations: [UUID: UInt64] = [:]
     private var pageSnapshotCaptureContexts: [UUID: PageSnapshotCaptureContext] = [:]
+    private var inactiveTabCaptureRequestID: UUID?
+    private var toolProposalByAutomationRequestID: [UUID: UUID] = [:]
+    private var pageBindingByCopilotRunID: [UUID: CopilotRunPageBinding] = [:]
+    private var workflowByCopilotRunID: [UUID: UUID] = [:]
+    private var everyLaunchWorkflowIDsRunThisSession: Set<UUID> = []
+    private var sourceMessageByCopilotRunID: [UUID: UUID] = [:]
+    private var regeneratedAssistantByCopilotRunID: [UUID: UUID] = [:]
+    private var workflowMonitorTask: Task<Void, Never>?
+    private var searchTasksByTabID: [UUID: Task<Void, Never>] = [:]
+    private var pendingResearchSynthesisByRunID: [UUID: (sessionID: UUID, request: BrowserResearchSynthesisRequest)] = [:]
     private var terminalAutomationRequestIDs: Set<UUID> = []
     private var terminalAutomationRequestOrder: [UUID] = []
+    private var approvedAutomationDispatchOwners: [UUID: UUID] = [:]
     private static let maximumRelatedCopilotTabs = 4
     private static let maximumTerminalAutomationRequestIDs = 512
 
@@ -104,6 +141,8 @@ final class BrowserViewModel: ObservableObject {
         runtimeBridge: MobileRuntimeBridge,
         copilotWorkflowStore: CopilotWorkflowStore = CopilotWorkflowStore(),
         researchLedgerStore: ResearchLedgerStore = ResearchLedgerStore(),
+        browserSearchService: (any BrowserSearchServicing)? = nil,
+        connectorCoordinator: BrowserConnectorCoordinator? = nil,
         developerWorkflowStore: DeveloperWorkflowStore = DeveloperWorkflowStore(),
         smartHistoryStore: SmartHistoryStore = SmartHistoryStore(),
         llmConversationStore: LLMConversationStore = LLMConversationStore(),
@@ -121,16 +160,24 @@ final class BrowserViewModel: ObservableObject {
             llmRouterSnapshot: runtimeBridge.llmRouterServiceSnapshot,
             llmGatewaySnapshot: runtimeBridge.llmGatewayServiceSnapshot
         )
+        var restoredLLMArchive = llmConversationStore.load()
+        let reconciliation = Self.reconcileRestoredToolProposals(in: restoredLLMArchive)
+        restoredLLMArchive = reconciliation.payload
         let restoredLLMState = Self.restoredLLMState(
-            from: llmConversationStore.load(),
+            from: restoredLLMArchive,
             models: initialLLMModelOptions
         )
+        restoredLLMArchive.upsertConversation(restoredLLMState.conversation, select: true)
+        restoredLLMArchive.selectedModelID = restoredLLMState.selectedModelID
         self.runtimeBridge = runtimeBridge
+        self.connectorCoordinator = connectorCoordinator ?? BrowserConnectorCoordinator()
         self.workflowStore = copilotWorkflowStore
         self.researchLedgerStore = researchLedgerStore
+        self.browserSearchService = browserSearchService ?? BrowserJSONSearchClient()
         self.developerWorkflowStore = developerWorkflowStore
         self.historyService = historyService
         self.llmConversationStore = llmConversationStore
+        self.llmConversationArchive = restoredLLMArchive
         self.openMindMemoryClient = openMindMemoryClient ?? OpenMindMemoryClient()
         self.localLLMManager = localLLMManager ?? LocalLLMManager()
         self.adBlockingDefaults = adBlockingDefaults
@@ -153,6 +200,8 @@ final class BrowserViewModel: ObservableObject {
         self.llmModelOptions = initialLLMModelOptions
         self.selectedLLMModelID = restoredLLMState.selectedModelID
         self.llmConversation = restoredLLMState.conversation
+        self.llmConversations = restoredLLMArchive.conversations
+        self.copilotToolProposals = Array(restoredLLMState.conversation.toolProposals.reversed())
         self.localLLMState = self.localLLMManager.currentState
         self.tabs = [tab]
         self.activeTabID = tab.id
@@ -161,7 +210,7 @@ final class BrowserViewModel: ObservableObject {
         self.copilotWorkflows = copilotWorkflowStore.load()
         self.researchLedgers = researchLedgerStore.load()
         self.developerWorkflowRuns = developerWorkflowStore.load()
-        if restoredLLMState.shouldPersist {
+        if restoredLLMState.shouldPersist || reconciliation.didChange {
             persistLLMConversation()
         }
         self.hyperactiveWeb = try? HyperactiveWebCoordinator(
@@ -376,6 +425,10 @@ final class BrowserViewModel: ObservableObject {
         return tabs[index]
     }
 
+    func navigationGeneration(for tabID: UUID) -> UInt64 {
+        pageNavigationGenerations[tabID] ?? 0
+    }
+
     var canAttachActivePageToCopilotContext: Bool {
         activeTab.map { isCopilotContextEligible($0) && !$0.isLoading } == true
     }
@@ -448,6 +501,10 @@ final class BrowserViewModel: ObservableObject {
         copilotRuns.filter { $0.status == .queued || $0.status == .running }.count
     }
 
+    var canChangeLLMConversation: Bool {
+        automationRequest?.approvalGrant == nil
+    }
+
     var availableAFMPacks: [AFMPackSummary] {
         afmServiceSnapshot.availablePacks
     }
@@ -484,6 +541,7 @@ final class BrowserViewModel: ObservableObject {
         activeTabID = id
         selectedCopilotContextTabIDs.remove(id)
         latestDOMQueryResult = nil
+        latestTextSelection = nil
         latestPageSnapshot = nil
         latestPageSnapshot = activeTab.flatMap { currentPageSnapshot(for: $0) }
         addressText = activeTab?.urlString ?? BrowserURLResolver.homeURLString
@@ -528,6 +586,8 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func closeTab(_ id: UUID) {
+        searchTasksByTabID.removeValue(forKey: id)?.cancel()
+        searchSessionsByTabID[id] = nil
         cancelCopilotRuns(boundTo: id, reason: "Target tab closed.")
         invalidateAutomationRequest(boundTo: id)
         invalidatePageSnapshotCaptures(boundTo: id)
@@ -586,6 +646,9 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].isTorrentTransfer = false
             tabs[index].torrentTransferNetworkID = nil
             addressText = BrowserURLResolver.homeURLString
+            searchSessionsByTabID[tabs[index].id] = nil
+        case .search(let query):
+            startNativeSearch(query, tabID: tabs[index].id)
         case .web(let url):
             let title = titleForURL(url)
             tabs[index].title = title
@@ -600,11 +663,148 @@ final class BrowserViewModel: ObservableObject {
             addressText = url.absoluteString
             recordHistory(title: title, urlString: url.absoluteString)
             probeHyperactiveWeb(url)
+            searchSessionsByTabID[tabs[index].id] = nil
         case .privateOverlay(let raw, let network, let message):
             resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id, privateOverlayNetwork: network)
         case .unsupported(let raw, let message):
             resolveThroughRuntimeBridge(raw: raw, fallbackMessage: message, tabID: tabs[index].id)
         }
+    }
+
+    private func startNativeSearch(_ query: String, tabID: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        searchTasksByTabID[tabID]?.cancel()
+        let session = BrowserSearchSession.loading(query: query)
+        searchSessionsByTabID[tabID] = session
+        researchSynthesisErrorsBySessionID[session.id] = nil
+        tabs[index].title = "Search: \(SmartHistoryIndexer.boundedText(query, limit: 48))"
+        var components = URLComponents()
+        components.scheme = "about"
+        components.path = "search"
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        tabs[index].urlString = components.string ?? "about:search"
+        tabs[index].loadURLString = nil
+        tabs[index].mobileNotice = nil
+        tabs[index].isLoading = true
+        tabs[index].isPrivateOverlay = false
+        tabs[index].privateOverlayNetworkID = nil
+        tabs[index].isTorrentTransfer = false
+        tabs[index].torrentTransferNetworkID = nil
+        addressText = query
+
+        searchTasksByTabID[tabID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await browserSearchService.search(BrowserSearchRequest(query: query))
+                guard !Task.isCancelled,
+                      searchSessionsByTabID[tabID]?.id == session.id else { return }
+                searchSessionsByTabID[tabID] = session.applying(response)
+                if let tabIndex = tabs.firstIndex(where: { $0.id == tabID }) {
+                    tabs[tabIndex].isLoading = false
+                }
+            } catch is CancellationError {
+                guard searchSessionsByTabID[tabID]?.id == session.id else { return }
+                var cancelled = session
+                cancelled.status = .cancelled
+                cancelled.completedAt = Date()
+                searchSessionsByTabID[tabID] = cancelled
+            } catch {
+                guard searchSessionsByTabID[tabID]?.id == session.id else { return }
+                let configurationRequired = (error as? BrowserSearchClientError) == .configurationRequired
+                searchSessionsByTabID[tabID] = session.failing(
+                    error.localizedDescription,
+                    configurationRequired: configurationRequired
+                )
+                if let tabIndex = tabs.firstIndex(where: { $0.id == tabID }) {
+                    tabs[tabIndex].isLoading = false
+                }
+            }
+            searchTasksByTabID[tabID] = nil
+        }
+    }
+
+    func openSearchResult(_ result: BrowserSearchResult) {
+        navigate(result.urlString)
+    }
+
+    @discardableResult
+    func synthesizeSearchSession(tabID: UUID) -> UUID? {
+        guard let session = searchSessionsByTabID[tabID],
+              activeTabID == tabID,
+              session.status == .completed,
+              !session.results.isEmpty else { return nil }
+        let request = BrowserResearchSynthesisRequest(
+            query: session.query,
+            sources: session.results.map { BrowserResearchSource(result: $0) }
+        )
+        guard !request.sources.isEmpty else { return nil }
+        selectedPanel = .copilot
+        let model = activeLLMModel
+        let renderedContext = LLMRenderedConversationContext(
+            prompt: request.prompt,
+            includedMessageIDs: [],
+            compressedMessageIDs: [],
+            estimatedPromptTokens: LLMConversationContextRenderer.estimatedTokens(for: request.prompt),
+            wasCompressed: false,
+            snapshotCommitment: nil,
+            memoryContextIDs: [],
+            contextMinimization: model.contextMinimization
+        )
+        guard renderedContext.estimatedPromptTokens
+                <= LLMConversationContextRenderer.effectiveTokenBudget(for: model) else {
+            researchSynthesisErrorsBySessionID[session.id] = "The disclosed research sources exceed the selected model's input budget."
+            return nil
+        }
+        let sourceCitations = request.sources.map { source in
+            LLMSourceCitation(
+                id: source.id,
+                kind: .research,
+                title: source.title,
+                source: "native research search",
+                urlString: source.urlString,
+                excerpt: source.evidence
+            )
+        }
+        let userMessage = LLMConversationMessage(
+            role: .user,
+            text: "Research: \(request.query)",
+            sourceCitations: sourceCitations
+        )
+        let conversationBeforeResearch = llmConversation
+        llmConversation.appendMessage(userMessage)
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .userMessageAdded,
+                message: "Added a source-only research synthesis request.",
+                toModelID: model.id,
+                relatedMessageID: userMessage.id
+            )
+        )
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .researchSourcesAttached,
+                message: "Attached \(sourceCitations.count) disclosed native-search source\(sourceCitations.count == 1 ? "" : "s"); page, memory, and prior conversation context are excluded from this run.",
+                toModelID: model.id,
+                relatedMessageID: userMessage.id
+            )
+        )
+        guard let runID = startCopilotRun(
+            prompt: request.prompt,
+            conversationID: llmConversation.id,
+            model: model,
+            renderedContext: renderedContext,
+            recordsAssistantMessage: true,
+            boundTabID: tabID,
+            contextPolicy: .disclosedResearchSourcesOnly
+        ) else {
+            llmConversation = conversationBeforeResearch
+            return nil
+        }
+        sourceMessageByCopilotRunID[runID] = userMessage.id
+        pendingResearchSynthesisByRunID[runID] = (session.id, request)
+        researchSynthesisErrorsBySessionID[session.id] = nil
+        persistLLMConversation()
+        return runID
     }
 
     /// Probe a navigated page for a Hyperactive Web service card. If one is
@@ -938,6 +1138,87 @@ final class BrowserViewModel: ObservableObject {
     }
 
     @discardableResult
+    func requestTextSelection(_ request: BrowserTextSelectionRequest = BrowserTextSelectionRequest()) -> BrowserAutomationRequest? {
+        guard let tab = activeTab, isCopilotContextEligible(tab), !tab.isLoading else { return nil }
+        latestTextSelection = nil
+        return issueAutomationRequest(.textSelection(request))
+    }
+
+    func prepareInactiveTabCapture(_ tabID: UUID) {
+        guard automationRequest == nil,
+              pendingFreshCopilotContexts.isEmpty,
+              tabID != activeTabID,
+              let tab = tabs.first(where: { $0.id == tabID }),
+              isCopilotContextEligible(tab),
+              !tab.isLoading else {
+            inactiveTabCaptureState = InactiveTabCaptureState(
+                phase: .failed,
+                tabID: tabID,
+                tabTitle: tabs.first(where: { $0.id == tabID })?.title,
+                targetURLString: nil,
+                displayURLString: nil,
+                navigationGeneration: nil,
+                message: "That inactive tab is not eligible for a one-time live capture."
+            )
+            return
+        }
+        inactiveTabCaptureState = InactiveTabCaptureState(
+            phase: .awaitingConfirmation,
+            tabID: tab.id,
+            tabTitle: tab.title,
+            targetURLString: tab.urlString,
+            displayURLString: LLMPageContextSanitizer.sanitizedURLString(tab.urlString),
+            navigationGeneration: pageNavigationGenerations[tab.id] ?? 0,
+            message: "Capture one bounded snapshot from this inactive tab now? It will not be attached until you select it."
+        )
+    }
+
+    @discardableResult
+    func confirmInactiveTabCapture() -> BrowserAutomationRequest? {
+        guard inactiveTabCaptureState.phase == .awaitingConfirmation,
+              let tabID = inactiveTabCaptureState.tabID,
+              let tab = tabs.first(where: { $0.id == tabID }),
+              tab.id != activeTabID,
+              isCopilotContextEligible(tab),
+              !tab.isLoading else {
+            cancelInactiveTabCapture()
+            return nil
+        }
+        guard tab.urlString == inactiveTabCaptureState.targetURLString,
+              (pageNavigationGenerations[tab.id] ?? 0) == inactiveTabCaptureState.navigationGeneration else {
+            inactiveTabCaptureState = InactiveTabCaptureState(
+                phase: .failed,
+                tabID: tab.id,
+                tabTitle: tab.title,
+                targetURLString: nil,
+                displayURLString: LLMPageContextSanitizer.sanitizedURLString(tab.urlString),
+                navigationGeneration: nil,
+                message: "That inactive tab changed after review. Nothing was captured; choose it again to review the current page."
+            )
+            return nil
+        }
+        guard let request = issueAutomationRequest(.pageSnapshot(PageSnapshotRequest()), for: tab) else {
+            inactiveTabCaptureState.phase = .failed
+            inactiveTabCaptureState.message = "Another browser capture or action is already in progress."
+            return nil
+        }
+        inactiveTabCaptureRequestID = request.id
+        inactiveTabCaptureState.phase = .capturing
+        inactiveTabCaptureState.message = "Capturing one bounded snapshot from \(tab.title)."
+        return request
+    }
+
+    func cancelInactiveTabCapture() {
+        if let requestID = inactiveTabCaptureRequestID, automationRequest?.id == requestID {
+            automationTimeoutTasks.removeValue(forKey: requestID)?.cancel()
+            markAutomationRequestTerminal(requestID)
+            automationRequest = nil
+        }
+        inactiveTabCaptureRequestID = nil
+        inactiveTabCaptureState = .idle
+    }
+
+    @discardableResult
     func requestDOMAction(_ action: BrowserDOMAction) -> BrowserAutomationRequest? {
         guard let tab = activeTab else { return nil }
         let target = targetElement(for: action)
@@ -961,8 +1242,118 @@ final class BrowserViewModel: ObservableObject {
         return issueAutomationRequest(.action(action))
     }
 
+    @discardableResult
+    func approveToolProposal(_ proposalID: UUID, now: Date = Date()) -> BrowserAutomationRequest? {
+        guard let index = copilotToolProposals.firstIndex(where: { $0.id == proposalID }) else { return nil }
+        var proposal = copilotToolProposals[index]
+        guard proposal.status == .pendingApproval else { return nil }
+        guard proposal.expiresAt > now else {
+            proposal.status = .expired
+            proposal.statusMessage = "Approval expired before execution."
+            copilotToolProposals[index] = proposal
+            updateConversationToolProposal(proposal, eventKind: .toolDenied)
+            return nil
+        }
+        guard let tab = tabs.first(where: { $0.id == proposal.targetTabID }),
+              isCopilotContextEligible(tab),
+              LLMPageContextSanitizer.sanitizedURLString(tab.urlString) == proposal.targetURLString,
+              (pageNavigationGenerations[tab.id] ?? 0) == proposal.navigationGeneration else {
+            proposal.status = .expired
+            proposal.statusMessage = "The tab navigated after this tool was proposed."
+            copilotToolProposals[index] = proposal
+            updateConversationToolProposal(proposal, eventKind: .toolDenied)
+            return nil
+        }
+        guard tab.id == activeTabID else {
+            proposal.statusMessage = "Activate the bound tab and review the exact page before approving this tool."
+            copilotToolProposals[index] = proposal
+            updateConversationToolProposal(proposal, eventKind: .toolProposed)
+            return nil
+        }
+        guard let targetPageCommitment = proposal.targetPageCommitment,
+              let commandCommitment = proposal.commandCommitment,
+              let approvalBindingCommitment = proposal.approvalBindingCommitment,
+              CopilotToolProposalFactory.isCanonicalCommitment(proposal.argumentCommitment),
+              CopilotToolProposalFactory.pageCommitment(urlString: tab.urlString) == targetPageCommitment,
+              CopilotToolProposalFactory.commandCommitment(proposal.command) == commandCommitment,
+              CopilotToolProposalFactory.approvalBindingCommitment(
+                  proposalID: proposal.id,
+                  sourceRunID: proposal.sourceRunID,
+                  targetTabID: proposal.targetTabID,
+                  targetPageCommitment: targetPageCommitment,
+                  navigationGeneration: proposal.navigationGeneration,
+                  argumentCommitment: proposal.argumentCommitment,
+                  commandCommitment: commandCommitment,
+                  expiresAt: proposal.expiresAt
+              ) == approvalBindingCommitment else {
+            proposal.status = .expired
+            proposal.statusMessage = CopilotToolProposalError.staleOrTamperedProposal.localizedDescription
+            copilotToolProposals[index] = proposal
+            updateConversationToolProposal(proposal, eventKind: .toolDenied)
+            return nil
+        }
+        let grant = BrowserAutomationApprovalGrant(
+            proposalID: proposal.id,
+            sourceRunID: proposal.sourceRunID,
+            targetTabID: proposal.targetTabID,
+            targetURLString: proposal.targetURLString,
+            targetPageCommitment: targetPageCommitment,
+            navigationGeneration: proposal.navigationGeneration,
+            argumentCommitment: proposal.argumentCommitment,
+            commandCommitment: commandCommitment,
+            approvalBindingCommitment: approvalBindingCommitment,
+            approvedAt: now,
+            expiresAt: proposal.expiresAt
+        )
+        guard let request = issueAutomationRequest(proposal.command.browserCommand, for: tab, approvalGrant: grant) else {
+            return nil
+        }
+        proposal.status = .executing
+        proposal.statusMessage = "Approved once and executing against the bound page."
+        proposal.automationRequestID = request.id
+        copilotToolProposals[index] = proposal
+        toolProposalByAutomationRequestID[request.id] = proposal.id
+        updateConversationToolProposal(proposal, eventKind: .toolApproved)
+        appendCopilotEvent(
+            runID: proposal.sourceRunID,
+            kind: .actionRequested,
+            message: "Approved tool \(proposal.toolName) for one execution."
+        )
+        return request
+    }
+
+    func denyToolProposal(_ proposalID: UUID) {
+        guard let index = copilotToolProposals.firstIndex(where: {
+            $0.id == proposalID && $0.status == .pendingApproval
+        }) else { return }
+        copilotToolProposals[index].status = .denied
+        copilotToolProposals[index].statusMessage = "Denied by the user; nothing executed."
+        updateConversationToolProposal(copilotToolProposals[index], eventKind: .toolDenied)
+        appendCopilotEvent(
+            runID: copilotToolProposals[index].sourceRunID,
+            kind: .approvalRequired,
+            message: "Denied tool \(copilotToolProposals[index].toolName)."
+        )
+    }
+
     func applyAutomationResult(_ result: BrowserAutomationResult) {
         applyAutomationResult(result, allowsLocallyGeneratedApproval: false)
+    }
+
+    /// Atomically claims a provider-approved request before WebKit dispatch.
+    /// This state lives above a representable coordinator so view/panel
+    /// recreation cannot execute the same one-time grant again.
+    func claimApprovedAutomationDispatch(_ requestID: UUID, ownerID: UUID) -> Bool {
+        guard automationRequest?.id == requestID,
+              automationRequest?.approvalGrant != nil,
+              !terminalAutomationRequestIDs.contains(requestID) else {
+            return false
+        }
+        guard approvedAutomationDispatchOwners[requestID] == nil else {
+            return false
+        }
+        approvedAutomationDispatchOwners[requestID] = ownerID
+        return true
     }
 
     private func applyAutomationResult(
@@ -976,6 +1367,17 @@ final class BrowserViewModel: ObservableObject {
                 automationRequest = nil
             }
             return
+        }
+        if let issuedRequest = automationRequest,
+           issuedRequest.id == result.requestID,
+           issuedRequest.approvalGrant != nil {
+            guard let resultOwnerID = result.approvedAutomationDispatchOwnerID,
+                  approvedAutomationDispatchOwners[result.requestID] == resultOwnerID else {
+                // A replacement representable may still observe the published
+                // request. It cannot fail, complete, or otherwise consume a
+                // grant owned by the coordinator that performed the dispatch.
+                return
+            }
         }
         let registeredCapture = pageSnapshotCaptureContexts[result.requestID]
         let matchesIssuedAutomation = automationRequest?.id == result.requestID
@@ -1004,6 +1406,7 @@ final class BrowserViewModel: ObservableObject {
         if isTraceMinimizedResult {
             storedResult.domQuery = nil
             storedResult.pageSnapshot = nil
+            storedResult.textSelection = nil
             invalidatePageContext(for: result.tabID)
         } else if let snapshot = storedResult.pageSnapshot,
                   result.status != .success
@@ -1012,6 +1415,14 @@ final class BrowserViewModel: ObservableObject {
                     || resultTab.map({ isCopilotContextEligible($0) }) != true
                     || !captureMatchesCurrentNavigation {
             storedResult.pageSnapshot = nil
+        }
+        if let selection = storedResult.textSelection,
+           result.status != .success
+                || resultTab == nil
+                || selection.urlString != LLMPageContextSanitizer.sanitizedURLString(resultTab?.urlString)
+                || resultTab.map({ isCopilotContextEligible($0) }) != true
+                || !captureMatchesCurrentNavigation {
+            storedResult.textSelection = nil
         }
 
         automationResults.insert(storedResult, at: 0)
@@ -1032,9 +1443,16 @@ final class BrowserViewModel: ObservableObject {
             appendDeveloperWorkflowSnapshotEvidence(snapshot, tabID: result.tabID)
         }
 
+        if let selection = storedResult.textSelection, result.tabID == activeTabID {
+            latestTextSelection = selection
+        }
+
         if let approval = storedResult.approval {
             appendApproval(approval, tabID: result.tabID)
         }
+
+        resolveInactiveTabCapture(with: storedResult)
+        resolveToolProposal(with: storedResult)
 
         resumeFreshCopilotContext(with: storedResult)
     }
@@ -1051,7 +1469,12 @@ final class BrowserViewModel: ObservableObject {
     }
 
     @discardableResult
-    func sendLLMMessage(_ text: String) -> UUID? {
+    func sendLLMMessage(
+        _ text: String,
+        fileAttachments: [LLMTextFileAttachment] = [],
+        sourceMessageID: UUID? = nil,
+        regeneratedFromMessageID: UUID? = nil
+    ) -> UUID? {
         guard let tab = activeTab else { return nil }
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return nil }
@@ -1064,18 +1487,34 @@ final class BrowserViewModel: ObservableObject {
             tab: tab,
             snapshot: snapshot,
             relatedContext: relatedContext,
-            model: model
+            model: model,
+            fileAttachments: fileAttachments,
+            sourceMessageID: sourceMessageID,
+            regeneratedFromMessageID: regeneratedFromMessageID
         )
     }
 
     @discardableResult
-    func sendLLMMessageWithFreshContext(_ text: String) -> UUID? {
+    func sendLLMMessageWithFreshContext(
+        _ text: String,
+        fileAttachments: [LLMTextFileAttachment] = [],
+        sourceMessageID: UUID? = nil,
+        regeneratedFromMessageID: UUID? = nil
+    ) -> UUID? {
         guard let tab = activeTab else { return nil }
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return nil }
+        // Keep the idle guarantee in the model boundary, not only in SwiftUI.
+        // App Intents, saved workflows, and other callers share this entry point.
+        guard activeCopilotRunCount == 0 else { return nil }
 
         guard isCopilotContextEligible(tab) else {
-            return sendLLMMessage(prompt)
+            return sendLLMMessage(
+                prompt,
+                fileAttachments: fileAttachments,
+                sourceMessageID: sourceMessageID,
+                regeneratedFromMessageID: regeneratedFromMessageID
+            )
         }
         guard !tab.isLoading, pendingFreshCopilotContexts.isEmpty, automationRequest == nil else { return nil }
 
@@ -1086,7 +1525,8 @@ final class BrowserViewModel: ObservableObject {
         let request = BrowserAutomationRequest(
             tabID: tab.id,
             command: .pageSnapshot(PageSnapshotRequest()),
-            timeoutSeconds: freshCopilotContextTimeoutSeconds
+            timeoutSeconds: freshCopilotContextTimeoutSeconds,
+            navigationGeneration: navigationGeneration
         )
         let run = CopilotRun(
             id: runID,
@@ -1109,6 +1549,13 @@ final class BrowserViewModel: ObservableObject {
             ]
         )
         copilotRuns.insert(run, at: 0)
+        copilotRunPresentations[runID] = CopilotRunPresentation(
+            runID: runID,
+            phase: .waitingForContext,
+            partialText: "",
+            statusMessage: "Waiting for a fresh page snapshot.",
+            providerBoundary: model.trustBoundary.title
+        )
         pendingFreshCopilotContexts[request.id] = PendingFreshCopilotContext(
             runID: runID,
             prompt: prompt,
@@ -1117,7 +1564,10 @@ final class BrowserViewModel: ObservableObject {
             conversationID: llmConversation.id,
             model: model,
             relatedTabIDs: relatedTabIDs,
-            navigationGeneration: navigationGeneration
+            navigationGeneration: navigationGeneration,
+            fileAttachments: Array(fileAttachments.prefix(LLMTextFileAttachmentPolicy.maximumAttachments)),
+            sourceMessageID: sourceMessageID,
+            regeneratedFromMessageID: regeneratedFromMessageID
         )
         registerPageSnapshotCapture(request, for: tab)
         automationRequest = request
@@ -1131,19 +1581,26 @@ final class BrowserViewModel: ObservableObject {
         snapshot: PageSnapshot?,
         relatedContext: [(tabID: UUID, snapshot: PageSnapshot)],
         model: LLMModelProfile,
+        fileAttachments: [LLMTextFileAttachment] = [],
+        sourceMessageID: UUID? = nil,
+        regeneratedFromMessageID: UUID? = nil,
         queuedRunID: UUID? = nil
     ) -> UUID? {
         let relatedSnapshots = relatedContext.map(\.snapshot)
+        let conversationBeforeMutation = llmConversation
         let userMessage = LLMConversationMessage(
             role: .user,
             text: prompt,
             pageURLString: isCopilotContextEligible(tab) ? tab.urlString : nil,
             snapshotAttachment: snapshot.map(LLMPageSnapshotAttachment.init(snapshot:)),
-            relatedSnapshotAttachments: relatedSnapshots.map(LLMPageSnapshotAttachment.init(snapshot:))
+            relatedSnapshotAttachments: relatedSnapshots.map(LLMPageSnapshotAttachment.init(snapshot:)),
+            fileAttachments: fileAttachments,
+            sourceMessageID: sourceMessageID,
+            regeneratedFromMessageID: regeneratedFromMessageID
         )
         var candidateConversation = llmConversation
         candidateConversation.appendMessage(userMessage)
-        let renderedContext = LLMConversationContextRenderer.render(
+        var renderedContext = LLMConversationContextRenderer.render(
             conversation: candidateConversation,
             model: model,
             latestPageSnapshot: snapshot,
@@ -1191,13 +1648,61 @@ final class BrowserViewModel: ObservableObject {
                 )
             )
         }
+        if regeneratedFromMessageID != nil {
+            llmConversation.appendEvent(
+                LLMConversationEvent(
+                    kind: .regenerated,
+                    message: "Regenerated an assistant response from linked source message \(sourceMessageID?.uuidString ?? userMessage.id.uuidString).",
+                    relatedMessageID: userMessage.id
+                )
+            )
+        }
+        if renderedContext.wasCompressed {
+            guard let committedContext = renderContextWithCommittedSummaryArtifact(
+                startingWith: renderedContext,
+                conversationAtBoundary: llmConversation,
+                model: model,
+                latestPageSnapshot: snapshot,
+                relatedPageSnapshots: relatedSnapshots,
+                memoryRecall: nil
+            ) else {
+                llmConversation = conversationBeforeMutation
+                if let queuedRunID {
+                    finishCopilotRun(
+                        queuedRunID,
+                        status: .failed,
+                        result: nil,
+                        message: "The compressed context could not be linked to an exact committed summary artifact within \(model.displayName)'s input budget; no conversation mutation, memory access, or model execution was retained."
+                    )
+                    return queuedRunID
+                }
+                return nil
+            }
+            renderedContext = committedContext
+        }
+        guard renderedContext.estimatedPromptTokens <= effectiveTokenBudget else {
+            // Artifact creation is transactional: a larger linked-artifact
+            // rendering must not leave the user turn or artifact in the
+            // canonical archive when the final provider envelope cannot fit.
+            llmConversation = conversationBeforeMutation
+            if let queuedRunID {
+                finishCopilotRun(
+                    queuedRunID,
+                    status: .failed,
+                    result: nil,
+                    message: "The linked context summary could not fit inside \(model.displayName)'s \(effectiveTokenBudget)-token input budget; no conversation mutation, memory access, or model execution was retained."
+                )
+                return queuedRunID
+            }
+            return nil
+        }
         persistLLMConversation()
 
         if renderedContext.wasCompressed {
             appendContextCompressionEvent(renderedContext, model: model)
         }
 
-        return startCopilotRun(
+        let launchedRunID = startCopilotRun(
             prompt: prompt,
             conversationID: llmConversation.id,
             model: model,
@@ -1210,6 +1715,13 @@ final class BrowserViewModel: ObservableObject {
             runID: queuedRunID,
             reusesQueuedRun: queuedRunID != nil
         )
+        if let launchedRunID {
+            sourceMessageByCopilotRunID[launchedRunID] = userMessage.id
+            if let regeneratedFromMessageID {
+                regeneratedAssistantByCopilotRunID[launchedRunID] = regeneratedFromMessageID
+            }
+        }
+        return launchedRunID
     }
 
     private func resumeFreshCopilotContext(with result: BrowserAutomationResult) {
@@ -1246,6 +1758,9 @@ final class BrowserViewModel: ObservableObject {
             snapshot: snapshot,
             relatedContext: relatedContext,
             model: pending.model,
+            fileAttachments: pending.fileAttachments,
+            sourceMessageID: pending.sourceMessageID,
+            regeneratedFromMessageID: pending.regeneratedFromMessageID,
             queuedRunID: pending.runID
         ) != nil else {
             finishCopilotRun(
@@ -1259,12 +1774,14 @@ final class BrowserViewModel: ObservableObject {
     }
 
     func startNewLLMConversation() {
+        guard canChangeLLMConversation else { return }
         let previousConversationID = llmConversation.id
         let activeConversationRunIDs = copilotRuns
             .filter { $0.conversationID == previousConversationID && ($0.status == .queued || $0.status == .running) }
             .map(\.id)
         activeConversationRunIDs.forEach(cancelCopilotRun)
 
+        llmConversationArchive.upsertConversation(llmConversation)
         normalizeSelectedLLMModelIfNeeded()
         let model = activeLLMModel
         llmConversation = LLMConversation(activeModelID: model.id)
@@ -1273,7 +1790,71 @@ final class BrowserViewModel: ObservableObject {
         latestOpenMindStepUpRequest = nil
         latestOpenMindWriteback = nil
         latestOpenMindCorrection = nil
+        copilotToolProposals = []
         persistLLMConversation()
+    }
+
+    @discardableResult
+    func regenerateLastAssistantMessage() -> UUID? {
+        guard activeCopilotRunCount == 0,
+              let assistantIndex = llmConversation.messages.lastIndex(where: { $0.role == .assistant }) else {
+            return nil
+        }
+        let assistant = llmConversation.messages[assistantIndex]
+        let source: LLMConversationMessage? = {
+            if let sourceMessageID = assistant.sourceMessageID,
+               let linked = llmConversation.messages.first(where: { $0.id == sourceMessageID }) {
+                return linked
+            }
+            return llmConversation.messages[..<assistantIndex].last(where: { $0.role == .user })
+        }()
+        guard let source else { return nil }
+        return sendLLMMessageWithFreshContext(
+            source.text,
+            fileAttachments: source.fileAttachments,
+            sourceMessageID: source.id,
+            regeneratedFromMessageID: assistant.id
+        )
+    }
+
+    @discardableResult
+    func selectLLMConversation(_ id: UUID) -> Bool {
+        guard canChangeLLMConversation else { return false }
+        guard id != llmConversation.id,
+              let selected = llmConversationArchive.conversations.first(where: { $0.id == id }) else {
+            return id == llmConversation.id
+        }
+        let activeConversationRunIDs = copilotRuns
+            .filter { $0.conversationID == llmConversation.id && ($0.status == .queued || $0.status == .running) }
+            .map(\.id)
+        activeConversationRunIDs.forEach(cancelCopilotRun)
+        llmConversationArchive.upsertConversation(llmConversation)
+        guard llmConversationArchive.selectConversation(selected.id) else { return false }
+        llmConversation = selected
+        selectedLLMModelID = selected.activeModelID
+        copilotToolProposals = Array(selected.toolProposals.reversed())
+        normalizeSelectedLLMModelIfNeeded()
+        latestOpenMindRecall = nil
+        latestOpenMindStepUpRequest = nil
+        latestOpenMindWriteback = nil
+        latestOpenMindCorrection = nil
+        persistLLMConversation()
+        return true
+    }
+
+    @discardableResult
+    func deleteLLMConversation(_ id: UUID) -> Bool {
+        guard canChangeLLMConversation else { return false }
+        guard llmConversationArchive.removeConversation(id) else { return false }
+        if id == llmConversation.id {
+            llmConversation = llmConversationArchive.conversation
+            selectedLLMModelID = llmConversation.activeModelID
+            copilotToolProposals = Array(llmConversation.toolProposals.reversed())
+            normalizeSelectedLLMModelIfNeeded()
+        }
+        llmConversations = llmConversationArchive.conversations
+        persistLLMConversation()
+        return true
     }
 
     var developerWorkflowTemplates: [BrowserDeveloperWorkflowTemplate] {
@@ -1336,19 +1917,25 @@ final class BrowserViewModel: ObservableObject {
         relatedPageSnapshots: [PageSnapshot] = [],
         contextTabIDs: [UUID] = [],
         runID existingRunID: UUID? = nil,
-        reusesQueuedRun: Bool = false
+        reusesQueuedRun: Bool = false,
+        contextPolicy: CopilotRunContextPolicy = .standard
     ) -> UUID? {
         guard let tab = boundTabID.flatMap({ id in tabs.first(where: { $0.id == id }) }) ?? activeTab else { return nil }
         let runID = existingRunID ?? UUID()
         let isTraceMinimized = tab.isTraceMinimized
-        let targetURLString = isCopilotContextEligible(tab) ? tab.urlString : nil
-        let snapshot = isCopilotContextEligible(tab) ? (pageSnapshot ?? currentPageSnapshot(for: tab)) : nil
-        let boundedRelatedSnapshots = Array(
-            relatedPageSnapshots.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
-        )
-        let boundedContextTabIDs = Array(
-            contextTabIDs.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots)
-        )
+        let usesSourceOnlyResearch = contextPolicy == .disclosedResearchSourcesOnly
+        let targetURLString = !usesSourceOnlyResearch && isCopilotContextEligible(tab)
+            ? tab.urlString
+            : nil
+        let snapshot = !usesSourceOnlyResearch && isCopilotContextEligible(tab)
+            ? (pageSnapshot ?? currentPageSnapshot(for: tab))
+            : nil
+        let boundedRelatedSnapshots = usesSourceOnlyResearch
+            ? []
+            : Array(relatedPageSnapshots.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots))
+        let boundedContextTabIDs = usesSourceOnlyResearch
+            ? []
+            : Array(contextTabIDs.prefix(LLMRelatedPageSnapshotPolicy.maximumSnapshots))
         let traceMinimizedDescription = tab.isTorrentTransfer ? "a torrent transfer tab" : "a private-overlay tab"
         let preferredPackID = selectedAFMPackID
         let providerPromptForBudget: String = {
@@ -1371,7 +1958,6 @@ final class BrowserViewModel: ObservableObject {
             }
             return nil
         }
-        let usage = CopilotCreditUsage.estimate(prompt: renderedContext?.prompt ?? prompt, snapshot: snapshot, provider: model.providerKind.rawValue)
         var events = [
             CopilotRunEvent(kind: .queued, message: "Queued Copilot run for \(isTraceMinimized ? traceMinimizedDescription : tab.displayURL) with \(model.displayName).")
         ]
@@ -1414,7 +2000,7 @@ final class BrowserViewModel: ObservableObject {
             contextTabIDs: boundedContextTabIDs,
             status: .running,
             events: events,
-            usage: usage
+            usage: nil
         )
         if reusesQueuedRun {
             guard let runIndex = copilotRuns.firstIndex(where: { $0.id == runID && $0.status == .queued }) else {
@@ -1423,7 +2009,7 @@ final class BrowserViewModel: ObservableObject {
             copilotRuns[runIndex].status = .running
             copilotRuns[runIndex].targetURLString = targetURLString
             copilotRuns[runIndex].contextTabIDs = boundedContextTabIDs
-            copilotRuns[runIndex].usage = usage
+            copilotRuns[runIndex].usage = nil
             copilotRuns[runIndex].events.append(
                 CopilotRunEvent(kind: .pageSnapshotAttached, message: "Validated and attached the fresh active-page snapshot.")
             )
@@ -1446,6 +2032,35 @@ final class BrowserViewModel: ObservableObject {
         } else {
             copilotRuns.insert(run, at: 0)
         }
+        if let workflowID = workflowByCopilotRunID[runID],
+           let workflow = copilotWorkflows.first(where: { $0.id == workflowID }) {
+            recordScheduledWorkflowState(
+                workflow: workflow,
+                phase: .running,
+                message: "Workflow is running with fresh page context and normal approval boundaries.",
+                runID: runID
+            )
+        }
+        if let targetURLString,
+           snapshot?.urlString == targetURLString,
+           let targetPageCommitment = CopilotToolProposalFactory.pageCommitment(
+               urlString: targetURLString
+           ) {
+            pageBindingByCopilotRunID[runID] = CopilotRunPageBinding(
+                tabID: tab.id,
+                targetPageCommitment: targetPageCommitment,
+                navigationGeneration: pageNavigationGenerations[tab.id] ?? 0
+            )
+        } else {
+            pageBindingByCopilotRunID[runID] = nil
+        }
+        copilotRunPresentations[runID] = CopilotRunPresentation(
+            runID: runID,
+            phase: .recallingMemory,
+            partialText: "",
+            statusMessage: "Checking governed memory before model work begins.",
+            providerBoundary: "\(model.trustBoundary.title) · \(model.providerKind.title)"
+        )
         if recordsAssistantMessage, let conversationID {
             llmConversation.appendEvent(
                 LLMConversationEvent(
@@ -1461,10 +2076,16 @@ final class BrowserViewModel: ObservableObject {
         let conversationAtLaunch = llmConversation
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
-            appendCopilotEvent(runID: runID, kind: .memoryAccessStarted, message: "Requested governed memory from OpenMind.")
+            if contextPolicy == .standard {
+                appendCopilotEvent(runID: runID, kind: .memoryAccessStarted, message: "Requested governed memory from OpenMind.")
+            }
             latestOpenMindStepUpRequest = nil
             let memoryRecall: OpenMindMemoryRecallResult
-            if model.trustBoundary == .onDevice, openMindMemoryClient.hasRemoteHTTPEndpoint {
+            if contextPolicy == .disclosedResearchSourcesOnly {
+                memoryRecall = .unavailable(
+                    "Memory recall is disabled for source-only research synthesis."
+                )
+            } else if model.trustBoundary == .onDevice, openMindMemoryClient.hasRemoteHTTPEndpoint {
                 memoryRecall = .unavailable(
                     "Remote OpenMind recall was blocked to preserve the selected on-device model boundary."
                 )
@@ -1483,7 +2104,9 @@ final class BrowserViewModel: ObservableObject {
                 message: copilotMemoryMessage(for: memoryRecall)
             )
             guard !Task.isCancelled, isCopilotRunActive(runID) else { return }
-            let renderedWithMemory = recordsAssistantMessage
+            var renderedWithMemory = contextPolicy == .disclosedResearchSourcesOnly
+                ? renderedContext
+                : recordsAssistantMessage
                 ? LLMConversationContextRenderer.render(
                     conversation: conversationAtLaunch,
                     model: model,
@@ -1502,8 +2125,30 @@ final class BrowserViewModel: ObservableObject {
                 )
                 return
             }
-            if recordsAssistantMessage, let renderedWithMemory, renderedWithMemory.wasCompressed, renderedWithMemory.compressedMessageIDs != renderedContext?.compressedMessageIDs {
-                appendContextCompressionEvent(renderedWithMemory, model: model)
+            if recordsAssistantMessage,
+               let memoryExpandedContext = renderedWithMemory,
+               memoryExpandedContext.wasCompressed,
+               memoryExpandedContext.compressedMessageIDs != renderedContext?.compressedMessageIDs {
+                let conversationBeforeMemorySummary = llmConversation
+                guard let committedContext = renderContextWithCommittedSummaryArtifact(
+                    startingWith: memoryExpandedContext,
+                    conversationAtBoundary: conversationAtLaunch,
+                    model: model,
+                    latestPageSnapshot: snapshot,
+                    relatedPageSnapshots: boundedRelatedSnapshots,
+                    memoryRecall: memoryRecall
+                ) else {
+                    llmConversation = conversationBeforeMemorySummary
+                    finishCopilotRun(
+                        runID,
+                        status: .failed,
+                        result: nil,
+                        message: "Memory-expanded context could not be linked to a committed summary artifact within \(model.displayName)'s input budget; no unlinked summary or model execution was retained."
+                    )
+                    return
+                }
+                renderedWithMemory = committedContext
+                appendContextCompressionEvent(committedContext, model: model, runID: runID)
                 appendCopilotEvent(
                     runID: runID,
                     kind: .conversationContextCompressed,
@@ -1544,8 +2189,12 @@ final class BrowserViewModel: ObservableObject {
                     } == true
                 }
             }()
+            let providerConversationID = usesSourceOnlyResearch ? nil : conversationID
+            let providerRunID: UUID? = usesSourceOnlyResearch ? nil : runID
 
             appendCopilotEvent(runID: runID, kind: .modelStarted, message: "Started \(model.displayName) model bridge.")
+            copilotRunPresentations[runID]?.phase = .invokingModel
+            copilotRunPresentations[runID]?.statusMessage = "Waiting for \(model.displayName)."
             let result = await runtimeBridge.runCopilot(
                 CopilotRunRequest(
                     prompt: prompt,
@@ -1554,11 +2203,21 @@ final class BrowserViewModel: ObservableObject {
                     relatedPageSnapshots: disclosedRelatedSnapshots,
                     preferredAFMPackID: preferredPackID,
                     preferredModelID: model.id,
-                    conversationID: conversationID,
-                    runID: runID,
+                    conversationID: providerConversationID,
+                    runID: providerRunID,
                     renderedConversationContext: renderedWithMemory,
                     memoryRecall: memoryRecall
-                )
+                ),
+                onTextDelta: { [weak self] delta in
+                    guard let self, isCopilotRunActive(runID) else { return }
+                    guard !usesSourceOnlyResearch else {
+                        copilotRunPresentations[runID]?.phase = .streaming
+                        copilotRunPresentations[runID]?.statusMessage = "Receiving source-only research synthesis for validation."
+                        return
+                    }
+                    copilotRunPresentations[runID]?.append(delta: delta)
+                    copilotRunPresentations[runID]?.statusMessage = "Streaming verified provider output."
+                }
             )
 
             guard !Task.isCancelled else {
@@ -1572,8 +2231,10 @@ final class BrowserViewModel: ObservableObject {
                 finishCopilotRun(
                     runID,
                     status: .failed,
-                    result: result,
-                    message: executionFailureMessage
+                    result: model.providerKind == .localMLX || usesSourceOnlyResearch ? nil : result,
+                    message: usesSourceOnlyResearch
+                        ? "Source-only research synthesis failed before validation; no provider output was retained."
+                        : executionFailureMessage
                 )
                 return
             }
@@ -1583,32 +2244,86 @@ final class BrowserViewModel: ObservableObject {
                 snapshot: snapshot,
                 provider: provider
             )
-            appendAFMarketEvents(runID: runID, result: result)
-            appendLLMRouterEvents(runID: runID, result: result)
-            appendLLMGatewayEvents(runID: runID, result: result)
-            if recordsAssistantMessage, result.mode != model.runtimeMode {
+            if !usesSourceOnlyResearch {
+                appendAFMarketEvents(runID: runID, result: result)
+                appendLLMRouterEvents(runID: runID, result: result)
+                appendLLMGatewayEvents(runID: runID, result: result)
+            }
+            if usesSourceOnlyResearch {
+                copilotRunPresentations[runID]?.phase = result.transport == .streaming
+                    ? .streaming
+                    : .bufferedResponse
+                copilotRunPresentations[runID]?.partialText = ""
+                copilotRunPresentations[runID]?.statusMessage = "Validating source-only research synthesis."
+            } else if result.transport == .streaming {
+                copilotRunPresentations[runID]?.phase = .streaming
+                copilotRunPresentations[runID]?.partialText = result.summary
+                copilotRunPresentations[runID]?.statusMessage = "Received transport-streamed provider output."
+            } else {
+                copilotRunPresentations[runID]?.phase = .bufferedResponse
+                copilotRunPresentations[runID]?.partialText = result.summary
+                copilotRunPresentations[runID]?.statusMessage = "Provider returned a buffered terminal response."
+            }
+            if recordsAssistantMessage, !usesSourceOnlyResearch, result.mode != model.runtimeMode {
                 appendProviderFallback(runID: runID, requestedModel: model, actualMode: result.mode)
             }
+            let validatedResearchSynthesis: BrowserResearchSynthesisResult?
+            do {
+                validatedResearchSynthesis = try validatePendingResearchSynthesis(
+                    runID: runID,
+                    responseText: result.summary
+                )
+            } catch {
+                copilotRunPresentations[runID]?.partialText = ""
+                finishCopilotRun(
+                    runID,
+                    status: .failed,
+                    result: nil,
+                    message: "Source-only research synthesis failed validation; no provider output was retained."
+                )
+                return
+            }
+            let finalResult = validatedResearchSynthesis.map {
+                sanitizedResearchResult(from: result, answer: $0.answer)
+            } ?? result
+            if let validatedResearchSynthesis {
+                copilotRunPresentations[runID]?.partialText = validatedResearchSynthesis.answer
+                copilotRunPresentations[runID]?.statusMessage = "Validated source-only research synthesis."
+            }
+            let researchSourceCitations = validatedResearchSynthesis?.citations.map { citation in
+                LLMSourceCitation(
+                    id: citation.source.id,
+                    kind: .research,
+                    title: citation.source.title,
+                    source: "native research search",
+                    urlString: citation.source.urlString,
+                    excerpt: citation.claim
+                )
+            } ?? []
             if recordsAssistantMessage, conversationID == llmConversation.id {
                 let disclosedMemoryCitations = LLMMemoryContextPolicy.disclosedCitations(
                     from: memoryRecall.memories,
                     matching: renderedWithMemory?.memoryContextIDs ?? []
                 )
                 appendAssistantConversationMessage(
-                    result: result,
+                    result: finalResult,
                     runID: runID,
                     model: model,
                     targetURLString: targetURLString,
                     memoryCitations: disclosedMemoryCitations,
+                    sourceCitations: researchSourceCitations,
+                    contextSummaryArtifactID: renderedWithMemory?.contextSummaryArtifactID,
                     usage: finalUsage
                 )
             }
             finishCopilotRun(
                 runID,
                 status: .completed,
-                result: result,
+                result: finalResult,
                 usage: finalUsage,
-                message: "Completed Copilot run with \(provider) execution."
+                message: usesSourceOnlyResearch
+                    ? "Completed validated source-only research synthesis."
+                    : "Completed Copilot run with \(provider) execution."
             )
         }
         copilotTasks[runID] = task
@@ -1781,10 +2496,144 @@ final class BrowserViewModel: ObservableObject {
     func runWorkflow(_ id: UUID) -> UUID? {
         guard let index = copilotWorkflows.firstIndex(where: { $0.id == id }) else { return nil }
         guard copilotWorkflows[index].isEnabled else { return nil }
-        guard let runID = runCopilot(prompt: copilotWorkflows[index].promptTemplate) else { return nil }
+        guard activeCopilotRunCount == 0 else {
+            recordScheduledWorkflowState(
+                workflow: copilotWorkflows[index],
+                phase: .waitingForUser,
+                message: "The workflow is waiting for Copilot to become idle."
+            )
+            return nil
+        }
+        guard let activeTab, isCopilotContextEligible(activeTab),
+              copilotWorkflows[index].targetMatches(activeTab.urlString) else {
+            recordScheduledWorkflowState(
+                workflow: copilotWorkflows[index],
+                phase: .waitingForUser,
+                message: "Open a tab matching the workflow target before running it."
+            )
+            return nil
+        }
+        guard let runID = sendLLMMessageWithFreshContext(copilotWorkflows[index].promptTemplate) else {
+            recordScheduledWorkflowState(
+                workflow: copilotWorkflows[index],
+                phase: .waitingForUser,
+                message: "The workflow is waiting for a visible, fully loaded page and an idle Copilot."
+            )
+            return nil
+        }
         copilotWorkflows[index].lastRunAt = Date()
+        if copilotWorkflows[index].schedule.kind == .everyLaunch {
+            everyLaunchWorkflowIDsRunThisSession.insert(id)
+        }
+        workflowByCopilotRunID[runID] = id
+        recordScheduledWorkflowState(
+            workflow: copilotWorkflows[index],
+            phase: .queued,
+            message: "Workflow queued with the normal fresh-context and approval boundaries.",
+            runID: runID
+        )
         persistWorkflows()
         return runID
+    }
+
+    func startWorkflowScheduler() {
+        guard workflowMonitorTask == nil else { return }
+        evaluateScheduledWorkflows()
+        workflowMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 60_000_000_000)
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                self.evaluateScheduledWorkflows()
+            }
+        }
+    }
+
+    func stopWorkflowScheduler() {
+        workflowMonitorTask?.cancel()
+        workflowMonitorTask = nil
+    }
+
+    func evaluateScheduledWorkflows(now: Date = Date()) {
+        for workflow in copilotWorkflows where workflow.isDue(
+            now: now,
+            hasRunThisLaunch: everyLaunchWorkflowIDsRunThisSession.contains(workflow.id)
+        ) {
+            if let current = scheduledWorkflowStates.first(where: { $0.workflowID == workflow.id }),
+               current.phase == .queued || current.phase == .running {
+                continue
+            }
+            guard let activeTab, isCopilotContextEligible(activeTab),
+                  workflow.targetMatches(activeTab.urlString) else {
+                recordScheduledWorkflowState(
+                    workflow: workflow,
+                    phase: .waitingForUser,
+                    message: "Due, but waiting for a visible tab matching \(workflow.targetURLPattern ?? "its target").",
+                    now: now
+                )
+                continue
+            }
+            guard activeTab.isLoading == false,
+                  pendingFreshCopilotContexts.isEmpty,
+                  automationRequest == nil,
+                  activeCopilotRunCount == 0 else {
+                recordScheduledWorkflowState(
+                    workflow: workflow,
+                    phase: .waitingForUser,
+                    message: "Due, but waiting for the visible page to finish loading and Copilot to become idle.",
+                    now: now
+                )
+                continue
+            }
+            guard let runID = sendLLMMessageWithFreshContext(workflow.promptTemplate),
+                  let index = copilotWorkflows.firstIndex(where: { $0.id == workflow.id }) else {
+                recordScheduledWorkflowState(
+                    workflow: workflow,
+                    phase: .waitingForUser,
+                    message: "Due, but could not establish a fresh approved context.",
+                    now: now
+                )
+                continue
+            }
+            copilotWorkflows[index].lastRunAt = now
+            if workflow.schedule.kind == .everyLaunch {
+                everyLaunchWorkflowIDsRunThisSession.insert(workflow.id)
+            }
+            workflowByCopilotRunID[runID] = workflow.id
+            recordScheduledWorkflowState(
+                workflow: copilotWorkflows[index],
+                phase: .queued,
+                message: "Scheduled workflow queued visibly with fresh context.",
+                now: now,
+                runID: runID
+            )
+            persistWorkflows()
+        }
+    }
+
+    private func recordScheduledWorkflowState(
+        workflow: SavedCopilotWorkflow,
+        phase: CopilotScheduledWorkflowPhase,
+        message: String,
+        now: Date = Date(),
+        runID: UUID? = nil
+    ) {
+        let state = CopilotScheduledWorkflowState(
+            workflowID: workflow.id,
+            title: workflow.title,
+            phase: phase,
+            message: message,
+            evaluatedAt: now,
+            runID: runID
+        )
+        if let index = scheduledWorkflowStates.firstIndex(where: { $0.workflowID == workflow.id }) {
+            scheduledWorkflowStates[index] = state
+        } else {
+            scheduledWorkflowStates.insert(state, at: 0)
+        }
     }
 
     func setWorkflow(_ id: UUID, isEnabled: Bool) {
@@ -1855,14 +2704,28 @@ final class BrowserViewModel: ObservableObject {
     @discardableResult
     private func issueAutomationRequest(_ command: BrowserAutomationCommand) -> BrowserAutomationRequest? {
         guard let tab = activeTab else { return nil }
+        return issueAutomationRequest(command, for: tab)
+    }
+
+    @discardableResult
+    private func issueAutomationRequest(
+        _ command: BrowserAutomationCommand,
+        for tab: BrowserTab,
+        approvalGrant: BrowserAutomationApprovalGrant? = nil
+    ) -> BrowserAutomationRequest? {
         guard pendingFreshCopilotContexts.isEmpty, automationRequest == nil else { return nil }
         let request = BrowserAutomationRequest(
             tabID: tab.id,
             command: command,
-            timeoutSeconds: automationRequestTimeoutSeconds
+            timeoutSeconds: automationRequestTimeoutSeconds,
+            navigationGeneration: pageNavigationGenerations[tab.id] ?? 0,
+            approvalGrant: approvalGrant
         )
-        if case .pageSnapshot = command {
+        switch command {
+        case .pageSnapshot, .textSelection:
             registerPageSnapshotCapture(request, for: tab)
+        case .domQuery, .action:
+            break
         }
         automationRequest = request
         scheduleAutomationTimeout(for: request)
@@ -2008,12 +2871,10 @@ final class BrowserViewModel: ObservableObject {
     }
 
     private func persistLLMConversation() {
-        llmConversationStore.save(
-            LLMConversationStorePayload(
-                conversation: llmConversation,
-                selectedModelID: selectedLLMModelID
-            )
-        )
+        llmConversationArchive.upsertConversation(llmConversation, select: true)
+        llmConversationArchive.selectedModelID = selectedLLMModelID
+        llmConversations = llmConversationArchive.conversations
+        llmConversationStore.save(llmConversationArchive)
     }
 
     private func normalizeSelectedLLMModelIfNeeded() {
@@ -2037,6 +2898,50 @@ final class BrowserViewModel: ObservableObject {
             shouldPersist = true
         }
         return (conversation, restoredModel.id, shouldPersist)
+    }
+
+    private static func reconcileRestoredToolProposals(
+        in payload: LLMConversationStorePayload
+    ) -> (payload: LLMConversationStorePayload, didChange: Bool) {
+        var didChange = false
+        let conversations = payload.conversations.map { archived -> LLMConversation in
+            var conversation = archived
+            for index in conversation.toolProposals.indices {
+                let eventKind: LLMConversationEventKind
+                switch conversation.toolProposals[index].status {
+                case .pendingApproval:
+                    conversation.toolProposals[index].status = .expired
+                    conversation.toolProposals[index].statusMessage = "The app relaunched without the proposal's original tab and page generation. Nothing executed."
+                    eventKind = .toolDenied
+                case .approved, .executing:
+                    conversation.toolProposals[index].status = .consumed
+                    conversation.toolProposals[index].statusMessage = "The app relaunched after this one-time approval began. Its outcome is unconfirmed and it will not be retried."
+                    eventKind = .toolExecuted
+                case .denied, .completed, .failed, .expired, .consumed:
+                    continue
+                }
+                didChange = true
+                let proposal = conversation.toolProposals[index]
+                conversation.appendEvent(
+                    LLMConversationEvent(
+                        kind: eventKind,
+                        message: proposal.statusMessage,
+                        relatedRunID: proposal.sourceRunID,
+                        relatedToolProposalID: proposal.id
+                    )
+                )
+            }
+            return conversation
+        }
+        guard didChange else { return (payload, false) }
+        return (
+            LLMConversationStorePayload(
+                conversations: conversations,
+                selectedConversationID: payload.selectedConversationID,
+                selectedModelID: payload.selectedModelID
+            ),
+            true
+        )
     }
 
     private static func restoredLLMModel(for id: String, models: [LLMModelProfile]) -> LLMModelProfile {
@@ -2143,6 +3048,58 @@ final class BrowserViewModel: ObservableObject {
         )
     }
 
+    private func updateConversationToolProposal(
+        _ proposal: CopilotToolProposal,
+        eventKind: LLMConversationEventKind
+    ) {
+        llmConversation.upsertToolProposal(proposal)
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: eventKind,
+                message: proposal.statusMessage,
+                relatedRunID: proposal.sourceRunID,
+                relatedToolProposalID: proposal.id
+            )
+        )
+        persistLLMConversation()
+    }
+
+    private func resolveToolProposal(
+        with result: BrowserAutomationResult,
+        approvedOutcomeIsAmbiguous: Bool = false
+    ) {
+        guard let proposalID = toolProposalByAutomationRequestID.removeValue(forKey: result.requestID),
+              let index = copilotToolProposals.firstIndex(where: { $0.id == proposalID }) else {
+            return
+        }
+        if approvedOutcomeIsAmbiguous {
+            copilotToolProposals[index].status = .consumed
+            copilotToolProposals[index].statusMessage = "\(result.message) The approved one-time command may have executed; its outcome is unconfirmed and it will not be retried automatically."
+        } else {
+            copilotToolProposals[index].status = result.status == .success ? .completed : .failed
+            copilotToolProposals[index].statusMessage = result.message
+        }
+        let proposal = copilotToolProposals[index]
+        updateConversationToolProposal(proposal, eventKind: .toolExecuted)
+        appendCopilotEvent(
+            runID: proposal.sourceRunID,
+            kind: !approvedOutcomeIsAmbiguous && result.status == .success ? .actionCompleted : .failed,
+            message: proposal.statusMessage
+        )
+    }
+
+    private func resolveInactiveTabCapture(with result: BrowserAutomationResult) {
+        guard inactiveTabCaptureRequestID == result.requestID else { return }
+        inactiveTabCaptureRequestID = nil
+        if result.status == .success, result.pageSnapshot != nil {
+            inactiveTabCaptureState.phase = .captured
+            inactiveTabCaptureState.message = "Captured one bounded snapshot. Select the tab context explicitly to attach it."
+        } else {
+            inactiveTabCaptureState.phase = .failed
+            inactiveTabCaptureState.message = result.message
+        }
+    }
+
     private func appendCopilotEvent(runID: UUID, kind: CopilotRunEventKind, message: String) {
         guard let index = copilotRuns.firstIndex(where: { $0.id == runID }) else { return }
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
@@ -2157,15 +3114,169 @@ final class BrowserViewModel: ObservableObject {
         appendCopilotEvent(runID: runID, kind: kind, message: message)
     }
 
-    private func appendContextCompressionEvent(_ renderedContext: LLMRenderedConversationContext, model: LLMModelProfile) {
+    private func appendContextCompressionEvent(
+        _ renderedContext: LLMRenderedConversationContext,
+        model: LLMModelProfile,
+        runID: UUID? = nil
+    ) {
         llmConversation.appendEvent(
             LLMConversationEvent(
                 kind: .contextCompressed,
                 message: "Compressed \(renderedContext.compressedMessageIDs.count) prior message\(renderedContext.compressedMessageIDs.count == 1 ? "" : "s") for \(model.displayName).",
-                toModelID: model.id
+                toModelID: model.id,
+                relatedRunID: runID,
+                relatedArtifactID: renderedContext.contextSummaryArtifactID
             )
         )
         persistLLMConversation()
+    }
+
+    @discardableResult
+    private func ensureContextSummaryArtifact(
+        for sourceMessageIDs: [UUID],
+        model: LLMModelProfile,
+        in conversation: inout LLMConversation
+    ) -> LLMContextSummaryArtifact? {
+        guard !sourceMessageIDs.isEmpty else { return nil }
+        if let existing = conversation.contextSummaryArtifacts.last(where: {
+            $0.targetModelID == model.id && $0.sourceMessageIDs == sourceMessageIDs
+        }) {
+            return existing
+        }
+        let sourceIDSet = Set(sourceMessageIDs)
+        let summary = SmartHistoryIndexer.boundedText(
+            conversation.messages
+            .filter { sourceIDSet.contains($0.id) }
+            .map { "\($0.role.rawValue): \($0.text)" }
+            .joined(separator: "\n")
+                .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            limit: 1_200
+        )
+        let protectedKinds: Set<LLMConversationEventKind> = [
+            .toolProposed,
+            .toolApproved,
+            .toolDenied,
+            .toolExecuted,
+            .memoryContextAttached,
+            .providerFallback
+        ]
+        let protectedEventIDs = conversation.events
+            .filter { protectedKinds.contains($0.kind) }
+            .map(\.id)
+        let artifact = LLMContextSummaryArtifact(
+            summary: summary,
+            sourceMessageIDs: sourceMessageIDs,
+            protectedEventIDs: protectedEventIDs,
+            targetModelID: model.id,
+            providerProvenance: LLMMessageProviderProvenance(model: model)
+        )
+        guard conversation.appendContextSummaryArtifact(artifact) else { return nil }
+        conversation.appendEvent(
+            LLMConversationEvent(
+                kind: .summaryArtifactCreated,
+                message: "Created linked context summary \(String(artifact.commitment.prefix(18))) for \(sourceMessageIDs.count) source messages.",
+                toModelID: model.id,
+                relatedArtifactID: artifact.id
+            )
+        )
+        return artifact
+    }
+
+    private func renderContextWithCommittedSummaryArtifact(
+        startingWith initialContext: LLMRenderedConversationContext,
+        conversationAtBoundary: LLMConversation,
+        model: LLMModelProfile,
+        latestPageSnapshot: PageSnapshot?,
+        relatedPageSnapshots: [PageSnapshot],
+        memoryRecall: OpenMindMemoryRecallResult?
+    ) -> LLMRenderedConversationContext? {
+        let effectiveTokenBudget = LLMConversationContextRenderer.effectiveTokenBudget(for: model)
+        let maximumAttempts = min(
+            max(2, conversationAtBoundary.messages.count + 1),
+            LLMContextSummaryArtifactPolicy.maximumArtifactsPerConversation + 1
+        )
+        var attemptedSourceSets = Set<String>()
+        var candidate = initialContext
+        var boundaryConversation = conversationAtBoundary
+
+        for _ in 0..<maximumAttempts {
+            guard candidate.wasCompressed,
+                  candidate.estimatedPromptTokens <= effectiveTokenBudget else {
+                return nil
+            }
+            if let artifactID = candidate.contextSummaryArtifactID,
+               let artifactCommitment = candidate.contextSummaryArtifactCommitment,
+               let artifact = boundaryConversation.contextSummaryArtifact(withID: artifactID),
+               artifact.targetModelID == model.id,
+               artifact.sourceMessageIDs == candidate.compressedMessageIDs,
+               artifact.commitment == artifactCommitment {
+                guard commitContextSummaryArtifact(
+                    artifact,
+                    conversationID: conversationAtBoundary.id,
+                    model: model
+                ) else {
+                    return nil
+                }
+                return candidate
+            }
+
+            let sourceSetKey = candidate.compressedMessageIDs
+                .map(\.uuidString)
+                .joined(separator: ",")
+            guard attemptedSourceSets.insert(sourceSetKey).inserted,
+                  ensureContextSummaryArtifact(
+                      for: candidate.compressedMessageIDs,
+                      model: model,
+                      in: &boundaryConversation
+                  ) != nil else {
+                return nil
+            }
+            candidate = LLMConversationContextRenderer.render(
+                conversation: boundaryConversation,
+                model: model,
+                latestPageSnapshot: latestPageSnapshot,
+                relatedPageSnapshots: relatedPageSnapshots,
+                memoryRecall: memoryRecall
+            )
+        }
+        return nil
+    }
+
+    private func commitContextSummaryArtifact(
+        _ artifact: LLMContextSummaryArtifact,
+        conversationID: UUID,
+        model: LLMModelProfile
+    ) -> Bool {
+        guard llmConversation.id == conversationID else { return false }
+        let messageIDs = Set(llmConversation.messages.map(\.id))
+        let eventIDsBeforeCommit = Set(llmConversation.events.map(\.id))
+        guard artifact.sourceMessageIDs.allSatisfy(messageIDs.contains),
+              artifact.protectedEventIDs.allSatisfy(eventIDsBeforeCommit.contains) else {
+            return false
+        }
+        if let existing = llmConversation.contextSummaryArtifact(withID: artifact.id) {
+            return existing == artifact
+        }
+
+        let conversationBeforeCommit = llmConversation
+        guard llmConversation.appendContextSummaryArtifact(artifact) else { return false }
+        llmConversation.appendEvent(
+            LLMConversationEvent(
+                kind: .summaryArtifactCreated,
+                message: "Created linked context summary \(String(artifact.commitment.prefix(18))) for \(artifact.sourceMessageIDs.count) source messages.",
+                toModelID: model.id,
+                relatedArtifactID: artifact.id
+            )
+        )
+        let eventIDsAfterCommit = Set(llmConversation.events.map(\.id))
+        guard let committed = llmConversation.contextSummaryArtifact(withID: artifact.id),
+              committed == artifact,
+              artifact.protectedEventIDs.allSatisfy(eventIDsAfterCommit.contains) else {
+            llmConversation = conversationBeforeCommit
+            return false
+        }
+        return true
     }
 
     private func appendProviderFallback(runID: UUID, requestedModel: LLMModelProfile, actualMode: RuntimeBridgeMode) {
@@ -2188,9 +3299,26 @@ final class BrowserViewModel: ObservableObject {
         model: LLMModelProfile,
         targetURLString: String?,
         memoryCitations: [LLMMemoryCitation],
+        sourceCitations: [LLMSourceCitation] = [],
+        contextSummaryArtifactID: UUID?,
         usage: CopilotCreditUsage
     ) {
         let suggestions = result.suggestions.isEmpty ? "" : "\n\n" + result.suggestions.map { "- \($0)" }.joined(separator: "\n")
+        let actualModelID = result.llmRouterResponse?.modelID
+            ?? result.llmGatewayResponse?.modelID
+            ?? model.id
+        let boundarySummary = result.llmGatewayResponse?.boundarySummary
+            ?? model.contextMinimization.disclosureBoundary
+        let provenance = LLMMessageProviderProvenance(
+            requestedModelID: model.id,
+            actualModelID: actualModelID,
+            providerKind: model.providerKind,
+            trustBoundary: model.trustBoundary,
+            providerDisplayName: model.displayName,
+            boundarySummary: boundarySummary,
+            afMarketRunnerPackID: result.afmNodeTask?.packID,
+            routeID: result.llmRouterResponse?.route
+        )
         let assistantMessage = LLMConversationMessage(
             role: .assistant,
             text: result.summary + suggestions,
@@ -2198,7 +3326,12 @@ final class BrowserViewModel: ObservableObject {
             pageURLString: targetURLString,
             memoryCitations: memoryCitations,
             usage: usage,
-            sourceRunID: runID
+            sourceRunID: runID,
+            sourceCitations: sourceCitations,
+            providerProvenance: provenance,
+            sourceMessageID: sourceMessageByCopilotRunID[runID],
+            regeneratedFromMessageID: regeneratedAssistantByCopilotRunID[runID],
+            contextSummaryArtifactID: contextSummaryArtifactID
         )
         llmConversation.appendMessage(assistantMessage)
         llmConversation.appendEvent(
@@ -2210,7 +3343,69 @@ final class BrowserViewModel: ObservableObject {
                 relatedMessageID: assistantMessage.id
             )
         )
+        sourceMessageByCopilotRunID[runID] = nil
+        regeneratedAssistantByCopilotRunID[runID] = nil
         persistLLMConversation()
+    }
+
+    private func validatePendingResearchSynthesis(
+        runID: UUID,
+        responseText: String
+    ) throws -> BrowserResearchSynthesisResult? {
+        guard let pending = pendingResearchSynthesisByRunID.removeValue(forKey: runID) else {
+            return nil
+        }
+        do {
+            let envelope = try JSONDecoder().decode(
+                BrowserResearchSynthesisEnvelope.self,
+                from: Data(responseText.utf8)
+            )
+            let result = try BrowserResearchSynthesisValidator.validate(
+                envelope,
+                against: pending.request
+            )
+            researchSynthesisResultsBySessionID[pending.sessionID] = result
+            researchSynthesisErrorsBySessionID[pending.sessionID] = nil
+            var ledger = researchLedgers.first(where: {
+                $0.topic.caseInsensitiveCompare(pending.request.query) == .orderedSame
+            }) ?? BrowserResearchLedger(topic: pending.request.query, entries: [])
+            ledger.upsertValidatedSynthesis(result)
+            if let index = researchLedgers.firstIndex(where: {
+                $0.topic.caseInsensitiveCompare(pending.request.query) == .orderedSame
+            }) {
+                researchLedgers[index] = ledger
+            } else {
+                researchLedgers.insert(ledger, at: 0)
+            }
+            persistResearchLedgers()
+            llmConversation.appendEvent(
+                LLMConversationEvent(
+                    kind: .researchSourcesAttached,
+                    message: "Validated and persisted \(result.citations.count) cited research source\(result.citations.count == 1 ? "" : "s").",
+                    relatedRunID: runID
+                )
+            )
+            return result
+        } catch {
+            researchSynthesisErrorsBySessionID[pending.sessionID] =
+                "Source-only research synthesis failed validation; no provider output was retained."
+            throw error
+        }
+    }
+
+    private func sanitizedResearchResult(
+        from result: CopilotRunResult,
+        answer: String
+    ) -> CopilotRunResult {
+        CopilotRunResult(
+            id: result.id,
+            title: "Validated source-only research",
+            summary: answer,
+            suggestions: [],
+            ranAt: result.ranAt,
+            mode: result.mode,
+            transport: result.transport
+        )
     }
 
     private func appendAFMarketEvents(runID: UUID, result: CopilotRunResult) {
@@ -2260,12 +3455,52 @@ final class BrowserViewModel: ObservableObject {
             kind: .modelCompleted,
             message: "LLM router completed \(response.modelID) through \(response.provider.rawValue)."
         )
+        guard let run = copilotRuns.first(where: { $0.id == runID }),
+              let targetURLString = run.targetURLString,
+              let tab = tabs.first(where: { $0.id == run.activeTabID }),
+              let pageBinding = pageBindingByCopilotRunID[runID],
+              pageBinding.tabID == run.activeTabID,
+              pageBinding.navigationGeneration == (pageNavigationGenerations[run.activeTabID] ?? 0),
+              CopilotToolProposalFactory.pageCommitment(urlString: targetURLString)
+                  == pageBinding.targetPageCommitment,
+              CopilotToolProposalFactory.pageCommitment(urlString: tab.urlString)
+                  == pageBinding.targetPageCommitment else {
+            if !response.toolCalls.isEmpty {
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: .failed,
+                    message: "Discarded provider tool proposals because their captured page binding is no longer current."
+                )
+            }
+            return
+        }
+        let allowedActions: Set<BrowserDOMAction.Kind>? = workflowByCopilotRunID[runID]
+            .flatMap { workflowID in copilotWorkflows.first(where: { $0.id == workflowID }) }
+            .map { Set($0.allowedActions) }
         for toolCall in response.toolCalls {
-            appendCopilotEvent(
-                runID: runID,
-                kind: .actionRequested,
-                message: "LLM router proposed tool \(toolCall.name); approval is required before execution."
-            )
+            do {
+                let proposal = try CopilotToolProposalFactory.make(
+                    toolCall: toolCall,
+                    sourceRunID: runID,
+                    targetTabID: run.activeTabID,
+                    targetURLString: targetURLString,
+                    navigationGeneration: pageBinding.navigationGeneration,
+                    allowedActions: allowedActions
+                )
+                copilotToolProposals.insert(proposal, at: 0)
+                updateConversationToolProposal(proposal, eventKind: .toolProposed)
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: .approvalRequired,
+                    message: "LLM router proposed allowlisted tool \(toolCall.name); explicit approval is required."
+                )
+            } catch {
+                appendCopilotEvent(
+                    runID: runID,
+                    kind: .failed,
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 
@@ -2430,7 +3665,12 @@ final class BrowserViewModel: ObservableObject {
     }
 
     private func registerPageSnapshotCapture(_ request: BrowserAutomationRequest, for tab: BrowserTab) {
-        guard case .pageSnapshot = request.command else { return }
+        switch request.command {
+        case .pageSnapshot, .textSelection:
+            break
+        case .domQuery, .action:
+            return
+        }
         pageSnapshotCaptureContexts[request.id] = PageSnapshotCaptureContext(
             tabID: tab.id,
             targetURLString: tab.urlString,
@@ -2439,11 +3679,38 @@ final class BrowserViewModel: ObservableObject {
     }
 
     private func beginPageNavigation(for tabID: UUID, reason: String) {
+        searchTasksByTabID.removeValue(forKey: tabID)?.cancel()
         pageNavigationGenerations[tabID] = (pageNavigationGenerations[tabID] ?? 0) &+ 1
+        consumeApprovedNavigationAutomationIfNeeded(boundTo: tabID)
+        invalidateAutomationRequest(boundTo: tabID)
+        expireToolProposals(boundTo: tabID, reason: reason)
         cancelPendingFreshCopilotRuns(boundTo: tabID, reason: reason)
         invalidatePageSnapshotCaptures(boundTo: tabID)
-        invalidateAutomationRequest(boundTo: tabID)
         invalidatePageContext(for: tabID)
+    }
+
+    private func consumeApprovedNavigationAutomationIfNeeded(boundTo tabID: UUID) {
+        guard let request = automationRequest,
+              request.tabID == tabID,
+              request.approvalGrant != nil,
+              case .action(let action) = request.command,
+              [.click, .submit, .navigate].contains(action.kind),
+              let proposalID = toolProposalByAutomationRequestID.removeValue(forKey: request.id),
+              let proposalIndex = copilotToolProposals.firstIndex(where: { $0.id == proposalID }) else {
+            return
+        }
+        automationTimeoutTasks.removeValue(forKey: request.id)?.cancel()
+        markAutomationRequestTerminal(request.id)
+        automationRequest = nil
+        copilotToolProposals[proposalIndex].status = .consumed
+        copilotToolProposals[proposalIndex].statusMessage = "The approved one-time action initiated or coincided with navigation. Its grant was consumed and will not be retried automatically."
+        let proposal = copilotToolProposals[proposalIndex]
+        updateConversationToolProposal(proposal, eventKind: .toolExecuted)
+        appendCopilotEvent(
+            runID: proposal.sourceRunID,
+            kind: .actionCompleted,
+            message: proposal.statusMessage
+        )
     }
 
     private func invalidatePageSnapshotCaptures(boundTo tabID: UUID) {
@@ -2460,6 +3727,27 @@ final class BrowserViewModel: ObservableObject {
         automationTimeoutTasks.removeValue(forKey: request.id)?.cancel()
         markAutomationRequestTerminal(request.id)
         automationRequest = nil
+        let result = BrowserAutomationResult(
+            requestID: request.id,
+            tabID: request.tabID,
+            status: .failed,
+            message: "The page changed before the bound browser operation completed."
+        )
+        resolveInactiveTabCapture(with: result)
+        resolveToolProposal(
+            with: result,
+            approvedOutcomeIsAmbiguous: request.approvalGrant != nil
+        )
+    }
+
+    private func expireToolProposals(boundTo tabID: UUID, reason: String) {
+        for index in copilotToolProposals.indices where
+            copilotToolProposals[index].targetTabID == tabID
+                && !copilotToolProposals[index].status.isTerminal {
+            copilotToolProposals[index].status = .expired
+            copilotToolProposals[index].statusMessage = reason
+            updateConversationToolProposal(copilotToolProposals[index], eventKind: .toolDenied)
+        }
     }
 
     private func scheduleAutomationTimeout(for request: BrowserAutomationRequest) {
@@ -2475,23 +3763,27 @@ final class BrowserViewModel: ObservableObject {
             markAutomationRequestTerminal(request.id)
             automationRequest = nil
             automationTimeoutTasks[request.id] = nil
-            automationResults.insert(
-                BrowserAutomationResult(
-                    requestID: request.id,
-                    tabID: request.tabID,
-                    status: .timedOut,
-                    message: "Automation request timed out before the browser returned a result."
-                ),
-                at: 0
+            let result = BrowserAutomationResult(
+                requestID: request.id,
+                tabID: request.tabID,
+                status: .timedOut,
+                message: "Automation request timed out before the browser returned a result."
             )
+            automationResults.insert(result, at: 0)
             if automationResults.count > 100 {
                 automationResults.removeLast(automationResults.count - 100)
             }
+            resolveInactiveTabCapture(with: result)
+            resolveToolProposal(
+                with: result,
+                approvedOutcomeIsAmbiguous: request.approvalGrant != nil
+            )
         }
     }
 
     private func markAutomationRequestTerminal(_ requestID: UUID) {
         pageSnapshotCaptureContexts[requestID] = nil
+        approvedAutomationDispatchOwners[requestID] = nil
         guard terminalAutomationRequestIDs.insert(requestID).inserted else { return }
         terminalAutomationRequestOrder.append(requestID)
         if terminalAutomationRequestOrder.count > Self.maximumTerminalAutomationRequestIDs {
@@ -2510,6 +3802,7 @@ final class BrowserViewModel: ObservableObject {
         if tabID == activeTabID {
             latestPageSnapshot = nil
             latestDOMQueryResult = nil
+            latestTextSelection = nil
         }
     }
 
@@ -2579,6 +3872,7 @@ final class BrowserViewModel: ObservableObject {
     ) {
         removePendingFreshCopilotContext(for: id)
         guard let index = copilotRuns.firstIndex(where: { $0.id == id }) else { return }
+        guard copilotRuns[index].status == .queued || copilotRuns[index].status == .running else { return }
         copilotRuns[index].status = status
         copilotRuns[index].finishedAt = Date()
         copilotRuns[index].result = result
@@ -2594,6 +3888,50 @@ final class BrowserViewModel: ObservableObject {
             }
         }()
         copilotRuns[index].events.append(CopilotRunEvent(kind: kind, message: message))
+        pageBindingByCopilotRunID[id] = nil
+        if var presentation = copilotRunPresentations[id] {
+            presentation.phase = {
+                switch status {
+                case .completed: .completed
+                case .cancelled: .cancelled
+                case .failed: .failed
+                case .queued: .waitingForContext
+                case .running: .invokingModel
+                }
+            }()
+            presentation.statusMessage = message
+            if presentation.partialText.isEmpty, let result {
+                presentation.partialText = result.summary
+            }
+            copilotRunPresentations[id] = presentation
+        }
+        if let workflowID = workflowByCopilotRunID[id],
+           let workflow = copilotWorkflows.first(where: { $0.id == workflowID }) {
+            let scheduledPhase: CopilotScheduledWorkflowPhase = {
+                switch status {
+                case .queued: .queued
+                case .running: .running
+                case .completed: .completed
+                case .cancelled, .failed: .failed
+                }
+            }()
+            recordScheduledWorkflowState(
+                workflow: workflow,
+                phase: scheduledPhase,
+                message: message,
+                runID: id
+            )
+            if status == .completed || status == .cancelled || status == .failed {
+                workflowByCopilotRunID[id] = nil
+            }
+        }
+        if status != .completed {
+            sourceMessageByCopilotRunID[id] = nil
+            regeneratedAssistantByCopilotRunID[id] = nil
+            if let pending = pendingResearchSynthesisByRunID.removeValue(forKey: id) {
+                researchSynthesisErrorsBySessionID[pending.sessionID] = message
+            }
+        }
         copilotTasks[id] = nil
         syncDeveloperWorkflowRun(copilotRunID: id, status: status, result: result, message: message)
     }

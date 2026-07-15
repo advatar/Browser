@@ -846,9 +846,67 @@ struct BrowserResearchSourceEntry: Equatable, Identifiable, Codable {
     }()
 }
 
+struct BrowserResearchSynthesisCitationEntry: Equatable, Identifiable, Codable {
+    var sourceID: String
+    var sourceCommitment: String
+    var sourceTitle: String
+    var sourceURLString: String
+    var sourceEvidence: String
+    var sourceRetrievedAt: Date
+    var sourceConfidence: BrowserResearchSourceConfidence
+    var claim: String
+
+    var id: String { sourceID }
+}
+
+struct BrowserResearchSynthesisEntry: Equatable, Identifiable, Codable {
+    var id: String
+    var schemaVersion: String
+    var requestID: UUID
+    var query: String
+    var answer: String
+    var citations: [BrowserResearchSynthesisCitationEntry]
+    var requestCommitment: String
+    var resultCommitment: String
+    var completedAt: Date
+}
+
 struct BrowserResearchLedger: Equatable, Codable {
     var topic: String
     var entries: [BrowserResearchSourceEntry]
+    var syntheses: [BrowserResearchSynthesisEntry]
+
+    private enum CodingKeys: String, CodingKey {
+        case topic
+        case entries
+        case syntheses
+    }
+
+    init(
+        topic: String,
+        entries: [BrowserResearchSourceEntry],
+        syntheses: [BrowserResearchSynthesisEntry] = []
+    ) {
+        self.topic = topic
+        self.entries = entries
+        self.syntheses = syntheses
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            topic: try container.decode(String.self, forKey: .topic),
+            entries: try container.decodeIfPresent([BrowserResearchSourceEntry].self, forKey: .entries) ?? [],
+            syntheses: try container.decodeIfPresent([BrowserResearchSynthesisEntry].self, forKey: .syntheses) ?? []
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(topic, forKey: .topic)
+        try container.encode(entries, forKey: .entries)
+        try container.encode(syntheses, forKey: .syntheses)
+    }
 
     var datedCitations: [String] {
         entries.map(\.citation)
@@ -860,6 +918,23 @@ struct BrowserResearchLedger: Equatable, Codable {
             lines.append("- \(entry.citation)")
             lines.append("  - Confidence: \(entry.confidence.rawValue)")
             lines.append("  - Evidence: \(entry.evidence)")
+        }
+        for synthesis in syntheses {
+            lines.append("")
+            lines.append("## Validated synthesis · \(Self.synthesisDateFormatter.string(from: synthesis.completedAt))")
+            lines.append("")
+            lines.append(synthesis.answer)
+            lines.append("")
+            lines.append("Request commitment: `\(synthesis.requestCommitment)`")
+            lines.append("Result commitment: `\(synthesis.resultCommitment)`")
+            for citation in synthesis.citations {
+                lines.append("- \(citation.sourceTitle): \(citation.claim)")
+                lines.append("  - URL: \(citation.sourceURLString)")
+                lines.append("  - Evidence: \(citation.sourceEvidence)")
+                lines.append("  - Retrieved: \(Self.synthesisDateFormatter.string(from: citation.sourceRetrievedAt))")
+                lines.append("  - Confidence: \(citation.sourceConfidence.rawValue)")
+                lines.append("  - Source commitment: `\(citation.sourceCommitment)`")
+            }
         }
         return lines.joined(separator: "\n")
     }
@@ -882,6 +957,12 @@ struct BrowserResearchLedger: Equatable, Codable {
         let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
         return "\"\(escaped)\""
     }
+
+    private static let synthesisDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 }
 
 enum BrowserWorkflowAutomationTriggerKind: String, Equatable {
@@ -3073,6 +3154,7 @@ enum MobileRuntimeFeature: String, CaseIterable, Identifiable {
 
 enum BrowserAddressResolution: Equatable {
     case home
+    case search(String)
     case web(URL)
     case privateOverlay(raw: String, network: PrivateOverlayNetwork, message: String)
     case unsupported(raw: String, message: String)
@@ -3080,7 +3162,6 @@ enum BrowserAddressResolution: Equatable {
 
 enum BrowserURLResolver {
     static let homeURLString = "about:home"
-    static let defaultSearchEndpoint = "https://duckduckgo.com/"
 
     static func resolve(_ rawInput: String) -> BrowserAddressResolution {
         let input = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3149,7 +3230,12 @@ enum BrowserURLResolver {
             return .web(url)
         }
 
-        return .web(searchURL(for: input))
+        return .search(
+            BrowserResearchSearchPolicy.boundedText(
+                input,
+                limit: BrowserResearchSearchPolicy.maximumQueryCharacters
+            )
+        )
     }
 
     private static func looksLikeHost(_ input: String) -> Bool {
@@ -3165,9 +3251,4 @@ enum BrowserURLResolver {
         return [".eth", ".crypto", ".blockchain"].contains { name.hasSuffix($0) }
     }
 
-    private static func searchURL(for query: String) -> URL {
-        var components = URLComponents(string: defaultSearchEndpoint)!
-        components.queryItems = [URLQueryItem(name: "q", value: query)]
-        return components.url!
-    }
 }

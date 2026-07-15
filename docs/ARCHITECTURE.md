@@ -184,23 +184,22 @@ The current Swift app already has a usable shell:
 
 Current limitations:
 
-- The Copilot sidecar now keeps the browser visible, waits for a fresh active-tab
-  snapshot before inference on normal web pages, and accepts at most four
-  explicitly selected cached related tabs. Comet-style AI search, connectors,
-  voice input, inline page assistance, autonomous tool execution, and live
-  capture of inactive tabs remain future work.
-- Saved and developer workflows remain compatibility entry points: they use
-  cached or no page context and do not yet make the composer's fresh-capture
-  guarantee. Scheduled workflow capture needs a separate lifecycle design.
+- Comet-style search and Google connectors require user-supplied service
+  configuration and credentials. They do not bundle a hosted search index,
+  Google OAuth client, account, or access token, and they fail visibly when that
+  external configuration is absent.
+- Saved and scheduled workflows share the composer's fresh-context gate and
+  approval boundaries, but schedules are evaluated only while dBrowser is open;
+  the app does not register an OS background task or wake itself after quit.
 - Typed `WKWebView` automation, DOM snapshots, page actions, Copilot run state,
   model switching, saved workflows, Smart History, wallet/explorer state, and
   the Strawberry parity scorecard are implemented in Swift, but still need
   deeper production UX, deterministic UI coverage, and public benchmark
   artifacts.
-- Browser import/switcher, companion onboarding, research source ledger,
-  recurring workflow automation, and benchmark proof currently exist as tested
-  Swift models; first-run UI, scheduler execution, and exported benchmark lanes
-  remain product work.
+- Browser import/switcher, companion onboarding, and benchmark proof still need
+  deeper first-run UX and exported benchmark lanes. Research source retention,
+  recurring workflow execution, and their production control surfaces are now
+  implemented with the bounds documented below.
 - Decentralized storage protocols use direct gateways where safe, then localhost
   native adapter handlers. Arbitrary bytes for heavy protocols still require the
   corresponding local daemon or backend to be configured behind
@@ -433,9 +432,14 @@ Bitcoin note:
 
 Adopt it only if dBrowser needs production attestation-gated signing, identity-gated authorization, threshold signing, JWKS receipt verification, or an external signing policy system. The integration point should be `WalletPolicyKit` or gateway authorization, not browser rendering.
 
-## LLM Conversation And Page Automation Plan
+## LLM Conversation And Page Automation
 
-The Swift app has a first-class conversation ledger, model switching, typed page snapshots, and a browser-adjacent Copilot surface. The remaining gap is production-grade streamed inference and approved tool execution across every supported provider.
+The Swift app ships the bounded Comet-style browser-assistant capabilities tracked
+by #169 and #172: persistent conversations, fresh page grounding, native research,
+connector proposals, voice transcription, inline selection assistance, approved
+browser tools, and observable schedules. This is product-capability parity for the
+contracts below, not a claim that dBrowser reproduces Perplexity's proprietary
+models, hosted search index, or cloud services.
 
 ### Current Copilot context boundary
 
@@ -456,8 +460,12 @@ The Swift app has a first-class conversation ledger, model switching, typed page
   registered capture context; unknown callbacks are discarded before they can
   enter automation history or a page-context cache.
 - A user may explicitly attach up to four inactive tabs whose URL-matched
-  snapshots already exist. dBrowser never captures an inactive tab merely
-  because it appears in the tab strip.
+  snapshots already exist. If a normal inactive web tab needs a new snapshot,
+  the UI names that tab and requires a second confirmation before capturing
+  exactly one bounded snapshot. Capture has visible awaiting, capturing,
+  captured, and failed states, and does not attach the result automatically.
+  dBrowser never captures an inactive tab merely because it appears in the tab
+  strip, and trace-minimized/private-overlay tabs are not retained for this flow.
 - Provider-neutral prompt rendering labels the active page separately from each
   selected related page, treats page fields as untrusted data, strips URL
   credentials/query/fragment, bounds titles and excerpts, and uses SHA-256
@@ -481,11 +489,13 @@ The Swift app has a first-class conversation ledger, model switching, typed page
   mismatched, failed, timed-out, cancelled, or late captures fail closed without
   adding the user turn to the conversation or invoking a model.
 - Explicit Local MLX, LLM Router, LLM Gateway, and AFMarket choices do not silently
-  fall through to another provider. AFMarket pack selection is shown only for the
-  AFMarket model. A selected router, gateway, or AFMarket execution failure
-  terminates the run as failed and retains diagnostic state without creating a
-  synthetic assistant message. Remote OpenMind HTTP recall is blocked for the
-  strict on-device model boundary; loopback/disabled memory remains supported.
+  fall through to another provider. Local MLX remains visibly unavailable until
+  real bundled inference is wired; it cannot manufacture a successful assistant
+  answer. AFMarket pack selection is shown only for the AFMarket model. A selected
+  router, gateway, or AFMarket execution failure terminates the run as failed and
+  retains diagnostic state without creating a synthetic assistant message. Remote
+  OpenMind HTTP recall is blocked for the strict on-device model boundary;
+  loopback/disabled memory remains supported.
 - Approved memory citations persist locally for audit and correction, but their
   identifiers do not re-enter later prompts unless the current OpenMind recall
   approves them again. Empty identifiers and collisions after bounding are
@@ -493,49 +503,143 @@ The Swift app has a first-class conversation ledger, model switching, typed page
   The remote gateway aliases only structured current-memory citation fields and
   rechecks the exact aliased prompt budget before inference; ordinary page and
   user text is never globally rewritten by an untrusted ID.
-- Saved and developer workflows still call the compatibility run path and do not
-  promise a fresh capture or mutate the canonical conversation. They share the
-  same pre-memory prompt-budget guard and bounded memory-ID envelope. This first
-  slice's freshness claim covers the Copilot composer and App Intent prompt
-  handoff only.
+- Manual saved workflows and due schedules enter the same fresh-context path as
+  the composer: the target URL must match, the visible page must finish loading,
+  and Copilot must be idle before a new snapshot can be requested. Due work has
+  visible waiting, queued, running, completed, and failed states. The scheduler
+  evaluates persisted schedules while dBrowser is running; it is not an OS
+  background-task or wake-from-quit service. Tool and mutation approvals remain
+  unchanged for scheduled runs.
 
-This is the first Comet-parity slice, not a claim of full Comet parity. Remaining
-work includes AI-native search/result pages, citations and research synthesis,
-Gmail/Calendar-style connectors, voice input, inline page assistance, approved
-autonomous tools, task scheduling, and an explicit inactive-tab live-capture
-flow if that can be offered with an equally clear privacy boundary.
+### Shipped conversation and run surface
 
-The target UI should feel like a native desktop chat app:
+- The versioned local archive stores up to 200 conversations, migrates the
+  legacy single-conversation payload without changing its ledger, and supports
+  selection and creation while exposing bounded archive removal to the view
+  model. The transcript, selected model, model-switch events, messages, tool
+  proposals, context summaries, and message links survive relaunch.
+- The composer supports the model picker, explicit page context, stop,
+  regenerate, and up to four user-selected text attachments. Each attachment is
+  reduced to a path-free text value of at most 12,000 characters and 48,000 UTF-8
+  bytes, with a recomputed SHA-256 commitment; filesystem URLs and security
+  bookmarks never enter the conversation archive or provider envelope.
+- Regeneration uses a new fresh page capture and records both the source user
+  message and the assistant message being regenerated. Assistant messages retain
+  immutable requested/actual model provenance, provider and trust-boundary
+  labels, optional AFMarket pack/route identity, source citations, memory
+  citations, and usage captured at completion.
+- `CopilotRunPresentation` exposes waiting-for-context, memory, model,
+  streaming/buffered, completed, failed, and cancelled phases. The LLM Router
+  client consumes real bounded SSE or NDJSON deltas and a terminal response when
+  its configured service supports streaming. A successful buffered JSON response
+  from the stream endpoint is decoded as that request's single terminal result;
+  it is not converted to fake deltas or sent to a second inference endpoint. The
+  client tries the compatibility completion endpoint only for an explicit
+  unsupported-endpoint HTTP status before any delta arrives; malformed successful
+  responses and transport failures are not retried as a second inference. Local
+  LLM Gateway and AFMarket remain buffered, and dBrowser does not manufacture
+  chunks for those providers. Local MLX fails as unavailable until real inference
+  is integrated.
+- Run activity remains visible for memory access, provider execution, tool
+  proposals and approvals, AFMarket dispatch/attestation/settlement, chain-trust
+  updates, compression, cancellation, and failures. Credit usage is attached
+  only after model work starts and completes, not while fresh context is pending.
 
-- Persistent conversation list.
-- Main message timeline with streamed assistant output.
-- Composer with model picker, page-context attachment, file/context attachments, and stop/regenerate controls.
-- Visible run activity for tool calls, memory access, AFMarket dispatch, chain verification, and approvals.
-- Per-message model identity and boundary labels: local MLX, ZeroK/LLM Gateway, AFMarket runner pack, or other provider.
-- Clear empty, loading, offline, provider-failed, and context-compressed states.
+### Native research, connectors, and page assistance
 
-Context continuity rule:
+- Address-bar terms resolve to an in-app structured search session rather than a
+  public search-engine navigation. The native result page shows bounded titles,
+  canonical HTTP(S) URLs, snippets, source commitments, loading/error/configuration
+  states, and an explicit research-synthesis action. Source canonicalization keeps
+  semantic query fields while removing credentials, fragments, and recognized
+  tracking fields. A synthesis run renders only the exact disclosed source IDs,
+  URLs, titles, and excerpts: current/prior pages, prior conversation messages,
+  attachments, OpenMind memory, and stable local conversation/run correlation IDs
+  are excluded from that provider request.
+  Synthesis must return the `dbrowser.research-synthesis.v1` JSON contract; an
+  incompatible schema or unknown/missing source ID fails the run instead of
+  becoming a citation. Validation happens before provider activity metadata or
+  output is published. Invalid answers, schema/source identifiers, model/route
+  metadata, and nested provider responses are quarantined behind a generic local
+  failure. A valid run retains only its bounded validated answer and citations;
+  the raw JSON envelope, provider tool metadata, and nested router/gateway text
+  are not copied into the run or conversation ledger. Validated sources and
+  synthesis evidence are persisted in the research ledger.
+- Gmail and Google Calendar connectors use Google's native-app OAuth
+  authorization-code flow with PKCE, one-time state consumption, exact recognized
+  scopes, bounded official REST requests, and Keychain-only token storage.
+  Persisted connector profiles contain metadata but no tokens. Gmail search/read
+  and Calendar event listing are read operations; Gmail draft creation and
+  Calendar event creation start as exact, expiring, payload-committed proposals
+  whose complete material fields are shown without truncation before approval.
+  Approval transitions the proposal to executing before network I/O. Completed,
+  denied, expired, and outcome-ambiguous proposals remain in a bounded persistent
+  audit ledger, and a mutation is never automatically replayed. Approved or
+  executing proposals restored after interruption become outcome-ambiguous before
+  any connector work can resume. Expired tokens refresh through a
+  per-profile coalesced operation that preserves/rotates the refresh token in the
+  Keychain; read operations may refresh and retry once after a 401, while mutation
+  operations never retry after dispatch.
+- Voice input requests Speech and microphone permission only after a user action,
+  requires on-device recognition by default, and presents bounded partial/final
+  text for editing. The user must explicitly copy the transcript into the
+  composer and then send it; recognition never auto-submits a prompt. Unsupported,
+  denied, and failed recognition states stay visible.
+- Inline assistance captures only the current page's explicitly selected text.
+  The capture is bounded and committed, must match the issued tab, sanitized URL,
+  and navigation generation. Both range endpoints must be outside forms, inputs,
+  textareas, selects, and content-editable regions, and any such descendant is
+  removed from the cloned selection before extraction. The result is previewed
+  before the user chooses to add it to the composer.
+- LLM Router tool calls are converted only through a browser-tool allowlist into
+  typed DOM query, snapshot, click, type, submit, focus, scroll, HTTP(S) navigate,
+  wait, or stop proposals. A provider cannot waive approval. The review shows the
+  full command and current page. Each proposal commits the exact command and
+  arguments and binds them together with the source run, target tab, exact page
+  commitment, source navigation generation, and expiry. WebKit revalidates the
+  combined one-time grant for every provider read or action, rejects it while a
+  page is loading, and rejects any page, generation, command, binding, or expiry
+  mismatch. Same-URL reloads invalidate old proposals; a navigation-capable grant
+  is consumed as navigation begins so it cannot be retried after an ambiguous
+  outcome. Workflow action allowlists can further reduce the accepted tool set.
+
+### External configuration and operational limits
+
+- Native search has no bundled provider or API key. Set
+  `DBROWSER_SEARCH_ENDPOINT` to an HTTPS endpoint (loopback HTTP is accepted for
+  local development) that returns `dbrowser.search.v1` JSON. The optional
+  `DBROWSER_SEARCH_TIMEOUT_SECONDS` value is clamped to the client policy.
+- Google access has no bundled OAuth client, client secret, account, or token.
+  Set `DBROWSER_GOOGLE_OAUTH_CLIENT_ID` and register the app callback exactly as
+  `dbrowser://oauth/google` with the Google OAuth client. That is the only callback
+  scheme registered by the shipped app; arbitrary redirect overrides are rejected.
+- Scheduling runs only while dBrowser is open, and only against a visible,
+  fully-loaded matching tab. Streaming presentation is real only for a configured
+  LLM Router SSE/NDJSON transport; every other provider is truthfully labeled as
+  buffered. No connector or search capability silently falls back to bundled
+  credentials, an unrelated provider, or a public web search page.
+
+### Context continuity rule
 
 - Conversation history is stored as a provider-neutral ledger.
-- The ledger records user messages, assistant messages, tool calls, page snapshots, memory citations, approvals, run events, model choices, and model-switch events.
+- The ledger records user messages, assistant messages, tool proposals, page
+  snapshots, file commitments, source and memory citations, approvals, run
+  events, model choices, and model-switch events.
 - Switching models appends an event; it does not rewrite canonical history.
 - Each model adapter renders prompts from the same canonical ledger.
-- When a target model has a smaller context window, the app creates an explicit summary artifact that remains linked to the source messages.
-- Context compression is visible in run activity and must not silently discard approvals, memory denials, wallet decisions, or page-action history.
+- When a target model has a smaller context window, the app creates a bounded,
+  committed summary artifact linked to its canonical source-message IDs and the
+  protected ledger-event IDs that remain visible. Subsequent rendering reuses
+  only an artifact whose model and exact source-message set match. Initial
+  compression iterates until the artifact header itself fits with that exact set,
+  or rolls the turn back before memory/provider access. If approved memory changes
+  the compressed source-message set, the app performs the same transaction from
+  the run's frozen pre-await conversation—not the mutable live ledger—and commits
+  the exact resulting artifact before provider execution.
+- Context compression is visible in run activity and does not rewrite source
+  messages or silently discard tool approvals/denials, memory decisions,
+  provider-boundary events, wallet decisions, or page-action history.
 - Tool permissions and approval gates do not change just because the user changes models.
-
-P0 implementation sequence:
-
-1. Add `LLMConversationKit` with persistent conversations, messages, runs, model registry, and model-switch events.
-2. Add provider-neutral context ledger and adapter-specific prompt rendering.
-3. Add context-window accounting and explicit summary artifacts for smaller model windows.
-4. Add `BrowserAutomationKit` with typed tab-scoped command/results.
-5. Add DOM query extraction with strict payload caps and redaction.
-6. Add typed page actions: click, type, focus, submit, scroll, navigate, wait, stop.
-7. Add page snapshots for conversation context.
-8. Replace single-result Copilot execution with streamed `CopilotRun` state.
-9. Add cancellation and user takeover.
-10. Meter credits only when model work happens.
 
 Approval gates:
 
@@ -545,10 +649,12 @@ Approval gates:
 - Cross-origin navigation.
 - Destructive or purchase-like clicks.
 - Credential or password fields.
+- Provider-proposed browser tools.
+- Gmail draft and Google Calendar event creation.
 - Memory writeback.
 - AFMarket settlement.
 
-Issues: #50 through #58 and #72.
+Issues: #50 through #58, #72, #169, and #172.
 
 ## Swift Recreation Of Rust-Only Functionality
 
@@ -606,7 +712,7 @@ LLM conversation:
 5. Only an exact request, tab, current URL, and navigation-generation result adds the message and selected context to the provider-neutral ledger; any mismatch fails closed.
 6. BrIAn/OpenMind gates personal memory.
 7. AFMarket routes to a runner pack only when the user selected the AFMarket model; other selected providers fail closed inside their own boundary.
-8. The selected Local MLX, router, or gateway model executes the approved, minimized prompt.
+8. A selected, configured router, gateway, or AFMarket model executes the approved, minimized prompt. Local MLX fails visibly as unavailable until real bundled inference is wired.
 9. User may switch models at any point; the next turn is rendered from the same ledger.
 10. Page actions, memory writes, downloads, wallet operations, and settlement require approval.
 11. Run activity shows model, context attachment events, usage, trust state, and final output.

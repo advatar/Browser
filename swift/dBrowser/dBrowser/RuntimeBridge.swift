@@ -191,6 +191,13 @@ struct CopilotRunRequest: Equatable {
     }
 }
 
+enum CopilotRunTransport: String, Equatable, Sendable {
+    case buffered
+    case streaming
+}
+
+typealias CopilotTextDeltaHandler = @MainActor @Sendable (String) -> Void
+
 struct CopilotRunResult: Equatable, Identifiable {
     let id: UUID
     let title: String
@@ -205,6 +212,7 @@ struct CopilotRunResult: Equatable, Identifiable {
     let chainTrustUpdate: ChainTrustStatus?
     let usageProviderKey: String?
     let executionFailureMessage: String?
+    let transport: CopilotRunTransport
 
     init(
         id: UUID = UUID(),
@@ -219,7 +227,8 @@ struct CopilotRunResult: Equatable, Identifiable {
         llmGatewayResponse: LLMGatewayCompletionResponse? = nil,
         chainTrustUpdate: ChainTrustStatus? = nil,
         usageProviderKey: String? = nil,
-        executionFailureMessage: String? = nil
+        executionFailureMessage: String? = nil,
+        transport: CopilotRunTransport = .buffered
     ) {
         self.id = id
         self.title = title
@@ -234,6 +243,7 @@ struct CopilotRunResult: Equatable, Identifiable {
         self.chainTrustUpdate = chainTrustUpdate
         self.usageProviderKey = usageProviderKey
         self.executionFailureMessage = executionFailureMessage
+        self.transport = transport
     }
 }
 
@@ -328,6 +338,10 @@ protocol RuntimeBridge: AnyObject {
     func launchPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus
     func stopPrivateOverlayRuntime(_ network: PrivateOverlayNetwork) async -> PrivateOverlayManagedRuntimeStatus
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult
+    func runCopilot(
+        _ request: CopilotRunRequest,
+        onTextDelta: @escaping CopilotTextDeltaHandler
+    ) async -> CopilotRunResult
     func refreshLLMGatewayTokenPackages() async -> LLMGatewayServiceSnapshot
     func purchaseLLMGatewayTokens(
         package: LLMGatewayTokenPackage,
@@ -356,6 +370,17 @@ protocol RuntimeBridge: AnyObject {
     func disconnectMCPServer(_ id: String) async -> MCPServerConfiguration?
     func startDownload(_ url: URL, autoStart: Bool) async -> DownloadBridgeItem
     func cancelDownload(_ id: UUID) async -> DownloadBridgeItem?
+}
+
+extension RuntimeBridge {
+    /// Compatibility implementation for buffered bridges. It deliberately
+    /// emits no synthetic deltas; callers receive the original completed run.
+    func runCopilot(
+        _ request: CopilotRunRequest,
+        onTextDelta: @escaping CopilotTextDeltaHandler
+    ) async -> CopilotRunResult {
+        await runCopilot(request)
+    }
 }
 
 @MainActor
@@ -748,6 +773,13 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
     }
 
     func runCopilot(_ request: CopilotRunRequest) async -> CopilotRunResult {
+        await runCopilot(request, onTextDelta: { _ in })
+    }
+
+    func runCopilot(
+        _ request: CopilotRunRequest,
+        onTextDelta: @escaping CopilotTextDeltaHandler
+    ) async -> CopilotRunResult {
         let prompt = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let target = request.pageURLString?.trimmingCharacters(in: .whitespacesAndNewlines)
         let page = target?.isEmpty == false ? target! : "the active page"
@@ -827,7 +859,34 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     > LLMConversationContextRenderer.effectiveTokenBudget(for: routerModel) {
                     throw LLMRouterServiceClientError.invalidResponse
                 }
-                let response = try await llmRouterServiceClient.complete(completionRequest)
+                var didReceiveTextDelta = false
+                let response: LLMRouterCompletionResponse
+                let transport: CopilotRunTransport
+                do {
+                    var terminalResponse: LLMRouterCompletionResponse?
+                    var terminalTransport: CopilotRunTransport = .streaming
+                    for try await event in llmRouterServiceClient.streamCompletion(completionRequest) {
+                        switch event {
+                        case .textDelta(let delta):
+                            didReceiveTextDelta = true
+                            onTextDelta(delta)
+                        case .completed(let completedResponse):
+                            terminalResponse = completedResponse
+                            terminalTransport = .streaming
+                        case .bufferedCompleted(let completedResponse):
+                            terminalResponse = completedResponse
+                            terminalTransport = .buffered
+                        }
+                    }
+                    guard let terminalResponse else {
+                        throw LLMRouterServiceClientError.missingTerminalResponse
+                    }
+                    response = terminalResponse
+                    transport = terminalTransport
+                } catch LLMRouterServiceClientError.unsupportedStreaming where !didReceiveTextDelta {
+                    response = try await llmRouterServiceClient.complete(completionRequest)
+                    transport = .buffered
+                }
                 var suggestions = [
                     "LLM router completed with \(response.provider.rawValue) for \(page).",
                     "Router policy stayed local-first with no-egress enabled.",
@@ -852,7 +911,8 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                     suggestions: suggestions,
                     mode: .service,
                     llmRouterResponse: response,
-                    usageProviderKey: "llm_router"
+                    usageProviderKey: "llm_router",
+                    transport: transport
                 )
             } catch {
                 llmRouterFailureMessage = "LLM router unavailable for selected model: \(error.localizedDescription)."
@@ -922,6 +982,22 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
             } catch {
                 llmGatewayFailureMessage = "LLM Gateway unavailable for selected model: \(error.localizedDescription)."
             }
+        }
+
+        if request.preferredModelID == LLMModelRegistry.localGemmaID {
+            let failureMessage = LLMModelRegistry.localMLXUnavailableReason
+            return CopilotRunResult(
+                title: "Local MLX unavailable",
+                summary: "",
+                suggestions: [
+                    failureMessage,
+                    contextBoundaryMessage ?? "The request stayed inside the selected on-device model boundary.",
+                    "No assistant response was produced.",
+                    "No alternate model provider received this request."
+                ],
+                mode: .local,
+                executionFailureMessage: failureMessage
+            )
         }
 
         if let contextBoundaryMessage {

@@ -17,6 +17,8 @@ struct BrowserWebView: BrowserViewRepresentable {
     let command: BrowserWebCommandRequest?
     let adBlockingMode: BrowserAdBlockingMode
     let automationRequest: BrowserAutomationRequest?
+    let navigationGeneration: UInt64
+    let onApprovedAutomationDispatch: (UUID, UUID) -> Bool
     let onNavigationUpdate: (BrowserNavigationUpdate) -> Void
     let onAutomationResult: (BrowserAutomationResult) -> Void
 
@@ -58,7 +60,7 @@ struct BrowserWebView: BrowserViewRepresentable {
     }
 
     private func update(_ webView: WKWebView, context: Context) {
-        context.coordinator.parent = self
+        context.coordinator.updateParent(self)
         context.coordinator.applyAdBlockingIfNeeded(adBlockingMode, webView: webView)
         guard context.coordinator.isAdBlockingReady else { return }
         context.coordinator.processPendingWork(webView: webView)
@@ -73,11 +75,22 @@ struct BrowserWebView: BrowserViewRepresentable {
         var lastHandledAutomationID: UUID?
         var pendingAutomationIDs = Set<UUID>()
         var pendingTimeouts: [UUID: DispatchWorkItem] = [:]
+        var ownedApprovedAutomationRequestIDs = Set<UUID>()
+        var navigationGenerationAwaitingModelUpdate: UInt64?
+        let automationDispatchOwnerID = UUID()
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
 
         init(_ parent: BrowserWebView) {
             self.parent = parent
+        }
+
+        func updateParent(_ updatedParent: BrowserWebView) {
+            parent = updatedParent
+            if let generationAtNavigationStart = navigationGenerationAwaitingModelUpdate,
+               updatedParent.navigationGeneration != generationAtNavigationStart {
+                navigationGenerationAwaitingModelUpdate = nil
+            }
         }
 
         func applyAdBlockingIfNeeded(_ mode: BrowserAdBlockingMode, webView: WKWebView) {
@@ -139,6 +152,39 @@ struct BrowserWebView: BrowserViewRepresentable {
             guard lastHandledAutomationID != request.id else { return }
             lastHandledAutomationID = request.id
 
+            if request.approvalGrant != nil {
+                guard parent.onApprovedAutomationDispatch(
+                    request.id,
+                    automationDispatchOwnerID
+                ) else {
+                    // Another coordinator already owns this one-time grant and
+                    // its callback (or the view-model timeout) owns the only
+                    // terminal outcome that may be accepted.
+                    return
+                }
+                ownedApprovedAutomationRequestIDs.insert(request.id)
+            }
+
+            if let grant = request.approvalGrant,
+               (navigationGenerationAwaitingModelUpdate != nil
+                || webView.isLoading
+                || !BrowserAutomationGrantPolicy.matches(
+                    grant,
+                    request: request,
+                    currentURLString: webView.url?.absoluteString,
+                    currentNavigationGeneration: parent.navigationGeneration
+                )) {
+                publishAutomation(
+                    BrowserAutomationResult(
+                        requestID: request.id,
+                        tabID: request.tabID,
+                        status: .failed,
+                        message: "The approved command no longer matches the exact page that is loaded."
+                    )
+                )
+                return
+            }
+
             if case .action(let action) = request.command {
                 if action.kind == .stop {
                     webView.stopLoading()
@@ -161,7 +207,8 @@ struct BrowserWebView: BrowserViewRepresentable {
                     return
                 }
 
-                if let approval = BrowserAutomationApprovalPolicy.evaluate(
+                if request.approvalGrant == nil,
+                   let approval = BrowserAutomationApprovalPolicy.evaluate(
                     action: action,
                     currentURLString: webView.url?.absoluteString
                 ) {
@@ -248,6 +295,11 @@ struct BrowserWebView: BrowserViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            // Record the document transition synchronously. The view model's
+            // generation increments through an async delegate publication, so
+            // URL/isLoading alone cannot safely authorize a same-URL reload in
+            // the interval before SwiftUI propagates the new generation back.
+            navigationGenerationAwaitingModelUpdate = parent.navigationGeneration
             publish(webView: webView, isLoading: true)
         }
 
@@ -304,8 +356,13 @@ struct BrowserWebView: BrowserViewRepresentable {
         }
 
         private func publishAutomation(_ result: BrowserAutomationResult) {
+            var ownedResult = result
+            if ownedApprovedAutomationRequestIDs.remove(result.requestID) != nil {
+                ownedResult.approvedAutomationDispatchOwnerID = automationDispatchOwnerID
+            }
+            let publishedResult = ownedResult
             DispatchQueue.main.async {
-                self.parent.onAutomationResult(result)
+                self.parent.onAutomationResult(publishedResult)
             }
         }
 
@@ -332,6 +389,17 @@ struct BrowserWebView: BrowserViewRepresentable {
                     status: .success,
                     message: "Page snapshot captured \(snapshot.visibleText.count) text characters.",
                     pageSnapshot: snapshot
+                )
+            case .textSelection:
+                let selection = try decode(BrowserTextSelection.self, from: value)
+                return BrowserAutomationResult(
+                    requestID: request.id,
+                    tabID: request.tabID,
+                    status: selection.text.isEmpty ? .failed : .success,
+                    message: selection.text.isEmpty
+                        ? "No eligible page text selection was available."
+                        : "Captured \(selection.text.count) selected text characters.",
+                    textSelection: selection
                 )
             case .action:
                 let actionResult = try decode(BrowserActionResult.self, from: value)
@@ -362,6 +430,8 @@ struct BrowserWebView: BrowserViewRepresentable {
                 return try domQueryScript(request: domQuery)
             case .pageSnapshot(let snapshot):
                 return try pageSnapshotScript(request: snapshot)
+            case .textSelection(let request):
+                return try textSelectionScript(request: request)
             case .action(let action):
                 return try actionScript(action: action)
             }
@@ -480,13 +550,13 @@ struct BrowserWebView: BrowserViewRepresentable {
               const metadata = {};
               if (request.includeMetadata) {
                 Array.from(document.querySelectorAll('meta[name],meta[property]')).slice(0, 30).forEach(meta => {
-                  const key = meta.getAttribute('name') || meta.getAttribute('property');
+                  const key = compact(meta.getAttribute('name') || meta.getAttribute('property'), 120);
                   const value = meta.getAttribute('content');
                   if (key && value) metadata[key] = compact(value, 240);
                 });
               }
               return JSON.stringify({
-                urlString: String(location.href),
+                urlString: compact(String(location.href), 2048) || '',
                 title: compact(document.title || '', 200) || '',
                 visibleText,
                 headings,
@@ -496,6 +566,53 @@ struct BrowserWebView: BrowserViewRepresentable {
                 metadata,
                 truncated: Boolean(document.body && document.body.innerText && document.body.innerText.length > request.maxTextCharacters),
                 redactionCount
+              });
+            })();
+            """
+        }
+
+        private func textSelectionScript(request: BrowserTextSelectionRequest) throws -> String {
+            let requestJSON = try jsonLiteral(request)
+            return """
+            (() => {
+              const request = \(requestJSON);
+              const selection = window.getSelection();
+              const elementForNode = (node) => node
+                ? (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)
+                : null;
+              const anchor = elementForNode(selection && selection.anchorNode);
+              const focus = elementForNode(selection && selection.focusNode);
+              const sensitiveOwner = (element) => element && element.closest
+                ? element.closest('input,textarea,select,form,[contenteditable]')
+                : null;
+              const sensitiveContainer = sensitiveOwner(anchor) || sensitiveOwner(focus);
+              if (sensitiveContainer) {
+                return JSON.stringify({
+                  text: '',
+                  urlString: String(location.href),
+                  elementTagName: String(sensitiveContainer.tagName || '').toLowerCase(),
+                  truncated: false
+                });
+              }
+              let rawText = selection ? String(selection.toString()) : '';
+              if (selection && selection.rangeCount > 0) {
+                try {
+                  const fragment = selection.getRangeAt(0).cloneContents();
+                  if (fragment.querySelectorAll) {
+                    fragment.querySelectorAll('input,textarea,select,form,[contenteditable]').forEach(node => node.remove());
+                    rawText = String(fragment.textContent || '');
+                  }
+                } catch (_) {
+                  rawText = '';
+                }
+              }
+              const normalized = rawText.replace(/\\s+/g, ' ').trim();
+              const text = normalized.slice(0, request.maximumCharacters);
+              return JSON.stringify({
+                text,
+                urlString: String(location.href),
+                elementTagName: anchor && anchor.tagName ? String(anchor.tagName).toLowerCase() : null,
+                truncated: normalized.length > text.length
               });
             })();
             """
@@ -565,8 +682,14 @@ struct BrowserWebView: BrowserViewRepresentable {
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                     return result(true, 'Typed text into element.', el);
                   }
-                  el.textContent = action.text || '';
-                  return result(true, 'Set element text content.', el);
+                  if (el.isContentEditable) {
+                    el.textContent = action.clearExistingText
+                      ? (action.text || '')
+                      : String(el.textContent || '') + (action.text || '');
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    return result(true, 'Typed text into editable content.', el);
+                  }
+                  return result(false, 'Type target is not editable.', el);
                 case 'submit':
                   if (!el) return result(false, 'Submit target was not found.', null);
                   const form = el.tagName && el.tagName.toLowerCase() === 'form' ? el : el.closest('form');
