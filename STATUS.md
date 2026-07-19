@@ -21,6 +21,27 @@
 
 ## Active Task
 
+## ActiveChain Phase 1: Semantic Sandbox (#174)
+
+Begin the first maturity-approved ActiveChain integration as a network-disabled
+semantic compatibility boundary. This slice must preserve explicit provenance
+and must not imply finality, signing, settlement, or node operation.
+
+- [x] Reassess ActiveChain schemas, vectors, implementation status, and recent PQ transport/consensus work.
+- [x] Confirm Phase 1 is appropriate while consensus, light-client, and production economics specifications remain incomplete.
+- [x] Create the scoped GitHub issue with scope, non-goals, and acceptance criteria (#174).
+- [x] Pin the exact ActiveChain revision and protocol version used by the sandbox.
+- [x] Add network-disabled Swift semantic compatibility models and capability boundaries.
+- [x] Add representative pinned vector metadata and fail-closed unsupported-version handling.
+- [x] Add unit tests for pinning, provenance, denied side effects, and representative vectors.
+- [x] Verify focused Swift tests, macOS build, and scoped diff hygiene.
+- [x] Commit and push only the scoped Phase 1 changes.
+
+Validation notes:
+
+- Focused `ActiveChainSemanticSandboxTests` passed 4/4.
+- The test build passed with only existing MLX umbrella-header/dependency warnings.
+
 ## ActiveChain Integration Roadmap (#173)
 
 Preserve a maturity-gated path for making ActiveChain dBrowser's native
