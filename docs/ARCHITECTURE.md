@@ -732,6 +732,190 @@ AFMarket task:
 4. Node dispatches and executes.
 5. Attestation/proof/settlement states feed back to Copilot activity and wallet UI.
 
+## ActiveChain Integration Roadmap
+
+Status: **tracked; implementation intentionally maturity-gated**. The work is
+tracked in [GitHub issue #173](https://github.com/advatar/Browser/issues/173).
+At the time of assessment, ActiveChain is a protocol-design and semantic-devnet
+project, not a production distributed chain or public testnet.
+
+### Purpose and product fit
+
+ActiveChain can become dBrowser's native verifiable trust layer. The protocol's
+primitives map directly to existing browser responsibilities:
+
+| dBrowser responsibility | ActiveChain primitive |
+| --- | --- |
+| Human, browser, site, and agent identities | Principal |
+| EUDI and service attestations | Credential |
+| Delegated agent permissions | Capability |
+| Spend, disclosure, automation, and tool rules | Policy |
+| Workflows, mandates, manifests, content, and artifacts | Object |
+| AFMarket and other external computation requests | Job |
+| Approval, execution, publication, and payment evidence | Proof or Receipt |
+
+The integration is not intended to make dBrowser a conventional cryptocurrency
+wallet. It should make consequential browser and AI-agent actions explicitly
+authorized, narrowly delegated, revocable, and independently verifiable.
+
+Mature integration can support attenuated agent grants; approvals bound to
+page, cart, model, tool, principal, policy, object versions, and receipt;
+rotatable and recoverable principals; verifiable application manifests and
+content provenance; AFMarket jobs with committed inputs and outputs; selective
+cross-device object synchronization; typed application capability requests;
+and locally verified state and execution evidence.
+
+### Trust and node modes
+
+The UI term `node` must not collapse materially different security models:
+
+| Mode | Role | Phase |
+| --- | --- | --- |
+| Disabled | No ActiveChain runtime or network activity | Always |
+| Semantic sandbox | Local fixtures, simulation, vectors, and draft semantics | 1 |
+| Local verifier | Verify canonical values, policies, witnesses, and receipts | 2 |
+| Remote development network | Query configured endpoints with explicit trust labels | 3 |
+| Embedded light client | Verify finality and proof-backed state locally | 4 |
+| Local full-node companion | Manage a separately running full-node process | 5 |
+
+Validator mode is not a normal dBrowser feature. Validator keys, continuous
+uptime, peer exposure, upgrades, and any future slashing or governance duties
+belong in a separately operated application. A full node must also run outside
+the browser UI process. dBrowser may supervise an opt-in companion with explicit
+storage, bandwidth, battery, port, retention, peer, and update controls, but it
+must never silently turn an installation into a public peer.
+
+Every result must distinguish development fixture, local simulation, trusted
+remote response, multi-endpoint observation, locally verified unfinalized
+state, locally verified finalized state, failed evidence, and unsupported
+protocol version. These distinctions must not rely on color alone.
+
+The target package boundary is:
+
+```text
+dBrowser Swift UI
+    |
+    +-- ActiveChainKit
+    |     +-- canonical types, codec, commitments, and identifiers
+    |     +-- capability attenuation and APL verification
+    |     +-- object, state-witness, action, job, proof, and receipt models
+    |
+    +-- ActiveChainLightClient
+    |     +-- finalized headers and validator-set transitions
+    |     +-- checkpoints, weak subjectivity, sync, and proof-backed queries
+    |
+    +-- ActiveChainNodeController
+          +-- optional external full-node lifecycle and resource controls
+```
+
+Initial verification may use a narrow, auditable C ABI around ActiveChain's
+safe `no_std` Rust reference kernel. An independent Swift verifier should follow
+for client diversity, with both implementations continuously differential-
+tested against normative positive and negative vectors.
+
+### Maturity and specification gates
+
+ActiveChain currently has draft semantic-kernel implementations for canonical
+encoding and commitments, principals, capabilities, APL, objects, a sparse
+state tree, ObjectVM, public development action envelopes, and deterministic
+single-node block application. Its blueprint's planned specification catalog
+is comprehensive, but a planned identifier is not a completed normative spec.
+
+Production claims require actual versioned specifications, canonical and
+adversarial vectors, bounded behavior, compatibility rules, usable downstream
+interfaces, and evidence that an independent implementation agrees. Required
+gates include:
+
+| Normative area | Required before |
+| --- | --- |
+| Types, encoding, commitments, and strict decoding | Accepting any ActiveChain value |
+| Principal authentication, rotation, freeze, and recovery | User or agent principals |
+| Credentials, presentation, status, and revocation | Credential-backed authorization |
+| Capabilities, revocation, attenuation, and APL | Delegated browser or agent authority |
+| Objects, state tree, witnesses, snapshots, and transitions | Proof-backed application state |
+| Action authentication, nonces, fees, failures, and refunds | Signing, submission, or settlement |
+| Protected envelopes and canonical ordering | Privacy or protected-ordering claims |
+| Consensus, finality, validator lifecycle, and reconfiguration | Light-client finality claims |
+| Randomness, data availability, retention, and reconstruction | Randomness or availability claims |
+| Execution-proof and shielded-object statements | Proof-carrying execution or private state |
+| Economics, jobs, artifacts, evidence, and AI profiles | AFMarket/AI settlement |
+| Light clients, state sync, checkpoints, and weak subjectivity | Embedded light-client release |
+| Upgrades, historical verification, networking, and conformance | Managed production operation |
+
+### Phased delivery
+
+Phase 0 continuously reassesses ActiveChain. Each review pins exact dBrowser and
+ActiveChain commits and records schema, vector, crypto-suite, protocol, genesis,
+network, implementation, and unresolved-assumption versions. Phase 1 begins
+only when the canonical schemas and vectors needed by a downstream semantic
+sandbox are declared stable enough to pin.
+
+Phase 1 adds a network-disabled semantic sandbox. It imports canonical and
+malformed vectors, models principals, attenuated capabilities, policies,
+objects, actions, jobs, and receipts, and simulates browser approvals and
+AFMarket result commitments. Canonical encoding, commitments, attenuation, APL,
+object transitions, witnesses, and receipts must pass positive and fail-closed
+negative tests. The sandbox cannot sign, spend, disclose, broadcast, or access
+the network and always states that it provides no network finality.
+
+Phase 2 introduces `ActiveChainKit` and local verification. It binds exact page
+and navigation context, object versions, intent, model, tool, connector,
+identity, user gesture, policy, and expiry into approval evidence. Rust and
+independent Swift implementations must agree on accepted and rejected inputs;
+fuzz and property coverage must exercise decoders, bounds, attenuation, and
+proofs. Verification failure cannot degrade into implicit remote trust.
+
+Phase 3 adds configurable development-network endpoints. Discovery records
+chain identity, genesis commitment, protocol version, supported proofs, health,
+staleness, and disagreement. Proof-bearing responses are preferred; independent
+endpoints are compared when proofs are unavailable. Wrong-chain, stale, replay,
+downgrade, disagreement, timeout, malformed, and offline cases must be tested.
+Remote observations never render as locally verified, and all consequential
+actions still pass through dBrowser's typed approval boundaries.
+
+Phase 4 adds an embedded light client only after consensus, validator
+reconfiguration, data availability, state sync, checkpoints, weak subjectivity,
+and upgrades are normative and interoperably tested. It tracks finalized
+headers, verifies validator changes and relevant state/action/receipt proofs,
+and defines rollback, conflicting-finality, stale-checkpoint, offline, and
+upgrade behavior. Adversarial finality, sync, corruption, eclipse, downgrade,
+and resource-exhaustion suites must pass. dBrowser never silently replaces a
+user's trust checkpoint.
+
+Phase 5 adds an optional external full-node companion. Clean installation,
+upgrade, downgrade rejection, migration, shutdown, crash recovery, pruning,
+removal, retained-data handling, and resource controls must be verified. No
+inbound service or background launch is enabled without explicit consent.
+
+Phase 6 delivers independently scoped ecosystem features: agent principals and
+capability chains, verifiable manifests and provenance, selected-object sync,
+AFMarket job settlement, private credential/policy profiles, proof-backed
+payments, and typed application capability requests. Each requires its own
+issue, threat model, acceptance tests, and product-copy review.
+
+### Permanent safety invariants
+
+- Models, pages, agents, tools, connectors, builders, provers, AI workers,
+  storage providers, credential issuers, RPC services, and node operators gain
+  no implicit authority from the work or evidence they provide.
+- No such actor can directly spend, sign, broadcast, disclose credentials,
+  change trust settings, or expand capabilities.
+- Delegation is deny-by-default, purpose-bound, attenuated, bounded, expiring,
+  revocable, and visible.
+- Approval binds to the exact principal/account, chain and protocol version,
+  navigation context, object versions, payload, model, tool, connector, policy,
+  expiry, and expected consequence. Mutation invalidates it.
+- Fixture, simulated, remote, observed, verified, finalized, failed, revoked,
+  expired, and unsupported states remain distinct in models and UI.
+- Secrets remain within approved platform or wallet boundaries; chain support
+  never grants a page, model, or remote node raw key access.
+- No product claim exceeds the normative specs, vectors, independent clients,
+  audits, and adversarial testing actually available.
+
+When work resumes, update this section and issue #173 before implementation,
+create a scoped phase/feature issue, add unit and normative-vector tests, and
+complete one independently releasable phase at a time.
+
 ## Implementation Roadmap
 
 P0: Swift shell and automation

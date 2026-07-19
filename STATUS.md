@@ -21,6 +21,28 @@
 
 ## Active Task
 
+## ActiveChain Integration Roadmap (#173)
+
+Preserve a maturity-gated path for making ActiveChain dBrowser's native
+verifiable trust layer without presenting the current semantic devnet as a
+production distributed chain.
+
+- [x] Assess the alignment between ActiveChain primitives and dBrowser's agent, wallet, approval, receipt, AFMarket, and local-verification boundaries.
+- [x] Create the GitHub issue with architecture direction, phases, maturity gates, safety invariants, validation requirements, and non-goals (#173).
+- [x] Document the phased semantic-sandbox, verifier, remote-devnet, light-client, local-full-node, and ecosystem integration roadmap.
+- [x] Define the ActiveChain normative-specification and implementation gates required before each dBrowser trust claim.
+- [x] Keep validator operation outside the normal browser feature set and full-node operation in an optional separate process.
+- [ ] Begin Phase 1 only when ActiveChain canonical schemas and vectors required by the semantic sandbox are declared stable enough for downstream integration.
+- [ ] Begin production light-client work only after consensus, finality, validator reconfiguration, data availability, state sync, checkpoints, upgrades, and network conformance are normative and interoperably tested.
+
+Roadmap: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#activechain-integration-roadmap)
+
+Validation notes:
+
+- `git diff --check` passed for the scoped documentation changes.
+- The documented ASCII scan reported only pre-existing non-ASCII punctuation elsewhere in the canonical docs/status files; the new roadmap uses ASCII text.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-activechain-roadmap-build CODE_SIGNING_ALLOWED=NO` passed.
+
 ## Complete Documented Comet Parity Gaps (#172)
 
 Close every remaining gap listed in the Copilot architecture section while preserving the fresh-context, privacy, prompt-budget, and explicit-provider boundaries from #169.
