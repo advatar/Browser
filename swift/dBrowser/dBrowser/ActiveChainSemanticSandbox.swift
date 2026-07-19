@@ -83,6 +83,11 @@ enum ActiveChainSandboxError: Error, Equatable {
 }
 
 struct ActiveChainSemanticSandbox {
+    static var runtimeSummary: String {
+        let configuration = ActiveChainSandboxConfiguration.current
+        return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); development fixture; no network finality"
+    }
+
     let configuration: ActiveChainSandboxConfiguration
 
     init(

@@ -48,4 +48,11 @@ struct ActiveChainSemanticSandboxTests {
             }
         }
     }
+
+    @Test
+    func runtimeSummaryExposesPinnedDevelopmentProvenanceWithoutFinality() {
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("development-1"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("cdb8478"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("no network finality"))
+    }
 }

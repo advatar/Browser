@@ -21,6 +21,22 @@
 
 ## Active Task
 
+## ActiveChain Phase 1: Runtime Trust Status (#175)
+
+Expose the network-disabled semantic sandbox through the existing chain-trust
+runtime status without changing wallet, signing, broadcast, or finality behavior.
+
+- [x] Create the scoped GitHub issue with scope, non-goals, and acceptance criteria (#175).
+- [x] Add the pinned ActiveChain development summary to runtime chain-trust status.
+- [x] Add focused runtime-status coverage for revision, protocol, and no-finality labeling.
+- [x] Verify the focused test lane and macOS build.
+- [x] Commit and push only the scoped changes.
+
+Validation notes:
+
+- Focused `ActiveChainSemanticSandboxTests` passed 5/5.
+- Existing chain-trust state behavior was unchanged; only the status text gained the sandbox summary.
+
 ## ActiveChain Phase 1: Semantic Sandbox (#174)
 
 Begin the first maturity-approved ActiveChain integration as a network-disabled
