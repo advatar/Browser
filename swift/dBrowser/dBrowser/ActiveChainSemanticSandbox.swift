@@ -56,6 +56,19 @@ enum ActiveChainVectorError: Error, Equatable {
     case hashMismatch
 }
 
+extension ActiveChainVectorError {
+    var statusMessage: String {
+        switch self {
+        case .missingField(let field): "missing \(field)"
+        case .invalidHex: "invalid hex"
+        case .invalidEnvelope: "invalid envelope"
+        case .unsupportedVersion: "unsupported version"
+        case .trailingBytes: "trailing bytes"
+        case .hashMismatch: "hash mismatch"
+        }
+    }
+}
+
 struct ActiveChainCanonicalVectorVerifier {
     let configuration: ActiveChainSandboxConfiguration
 
@@ -150,6 +163,10 @@ struct ActiveChainSemanticSandbox {
     static var runtimeSummary: String {
         let configuration = ActiveChainSandboxConfiguration.current
         return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); development fixture; no network finality"
+    }
+
+    static var verifierStatus: String {
+        "local canonical verifier ready; strict version/length/hash checks; failures are fail-closed"
     }
 
     let configuration: ActiveChainSandboxConfiguration

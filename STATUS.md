@@ -45,7 +45,7 @@ claim production finality or node readiness.
 - [x] Create an immutable fixture manifest pinned to ActiveChain revision and hashes.
 - [x] Verify canonical vector envelopes locally with strict version and trailing-byte rejection.
 - [x] Add malformed, tampered, wrong-version, and trailing-byte regression tests.
-- [ ] Surface verification provenance and failure reasons through the existing runtime status boundary.
+- [x] Surface verification provenance and failure reasons through the existing runtime status boundary.
 - [x] Focused test invocation completed; full runtime-status wiring remains the next slice.
 - Existing chain-trust state behavior was unchanged; only the status text gained the sandbox summary.
 

@@ -1700,7 +1700,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
                 feature: .chainTrust,
                 mode: chainTrustMode,
                 isAvailable: chainTrustAvailable,
-                status: "\(chainTrustSnapshot.runtimeStatusText); \(ActiveChainSemanticSandbox.runtimeSummary)"
+                status: "\(chainTrustSnapshot.runtimeStatusText); \(ActiveChainSemanticSandbox.runtimeSummary); \(ActiveChainSemanticSandbox.verifierStatus)"
             ),
             RuntimeFeatureState(
                 feature: .mcpServers,
