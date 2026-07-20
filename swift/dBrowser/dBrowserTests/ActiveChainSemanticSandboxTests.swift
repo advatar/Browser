@@ -8,7 +8,7 @@ struct ActiveChainSemanticSandboxTests {
     vector=principal-v1
     type_tag=0x0001
     schema_version=1
-    envelope_hex=0001000100000004aabbccdd
+    envelope_hex=0001000104aabbccdd
     """
     @Test
     func currentConfigurationIsPinnedToTheReviewedActiveChainRevision() throws {
@@ -67,7 +67,7 @@ struct ActiveChainSemanticSandboxTests {
     func canonicalVectorVerifierAcceptsExactEnvelope() throws {
         let verifier = ActiveChainCanonicalVectorVerifier(configuration: .current)
         let vector = try verifier.verify(vectorText, expectedVectorID: "principal-v1")
-        #expect(vector.envelope.count == 12)
+        #expect(vector.envelope.count == 9)
     }
 
     @Test

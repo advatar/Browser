@@ -48,12 +48,26 @@ struct ActiveChainCanonicalVector: Equatable {
 }
 
 enum ActiveChainVectorError: Error, Equatable {
+    case tooLarge
+    case typeMismatch
     case missingField(String)
     case invalidHex
     case invalidEnvelope
     case unsupportedVersion
     case trailingBytes
     case hashMismatch
+
+    var code: UInt32 {
+        switch self {
+        case .tooLarge: "envelope too large"
+        case .typeMismatch: "type mismatch"
+        case .tooLarge: 1
+        case .invalidHex, .invalidEnvelope, .trailingBytes: 2
+        case .typeMismatch: 3
+        case .unsupportedVersion: 4
+        case .hashMismatch: 5
+        }
+    }
 }
 
 extension ActiveChainVectorError {
@@ -83,15 +97,26 @@ struct ActiveChainCanonicalVectorVerifier {
               let envelopeHex = fields["envelope_hex"] else { throw ActiveChainVectorError.missingField("envelope") }
         guard let typeTag = UInt16(type.dropFirst(2), radix: 16), let schemaVersion = UInt16(version),
               let envelope = Data(hexString: envelopeHex) else { throw ActiveChainVectorError.invalidHex }
-        guard envelope.count >= 8 else { throw ActiveChainVectorError.invalidEnvelope }
+        guard envelope.count <= 256 * 1024 else { throw ActiveChainVectorError.tooLarge }
+        guard envelope.count >= 5 else { throw ActiveChainVectorError.invalidEnvelope }
         guard envelope[0] == UInt8(typeTag >> 8), envelope[1] == UInt8(typeTag & 0xff),
               envelope[2] == UInt8(schemaVersion >> 8), envelope[3] == UInt8(schemaVersion & 0xff) else {
             throw ActiveChainVectorError.unsupportedVersion
         }
-        if let expectedTypeTag, expectedTypeTag != typeTag { throw ActiveChainVectorError.unsupportedVersion }
+        if let expectedTypeTag, expectedTypeTag != typeTag { throw ActiveChainVectorError.typeMismatch }
         if let expectedSchemaVersion, expectedSchemaVersion != schemaVersion { throw ActiveChainVectorError.unsupportedVersion }
-        let bodyLength = Int(envelope[4]) << 24 | Int(envelope[5]) << 16 | Int(envelope[6]) << 8 | Int(envelope[7])
-        guard envelope.count == bodyLength + 8 else { throw ActiveChainVectorError.trailingBytes }
+        var bodyLength = 0
+        var shift = 0
+        var cursor = 4
+        while cursor < envelope.count {
+            let byte = envelope[cursor]
+            bodyLength |= Int(byte & 0x7f) << shift
+            cursor += 1
+            if byte & 0x80 == 0 { break }
+            shift += 7
+            if shift > 28 { throw ActiveChainVectorError.invalidEnvelope }
+        }
+        guard cursor + bodyLength == envelope.count else { throw ActiveChainVectorError.trailingBytes }
         if let expectedHash = configuration.vectorSHA256[expectedVectorID],
            SHA256.hash(data: envelope).hexString != expectedHash { throw ActiveChainVectorError.hashMismatch }
         return ActiveChainCanonicalVector(id: expectedVectorID, typeTag: typeTag, schemaVersion: schemaVersion, envelope: envelope)
