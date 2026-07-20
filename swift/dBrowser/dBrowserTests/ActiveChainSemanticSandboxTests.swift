@@ -8,13 +8,13 @@ struct ActiveChainSemanticSandboxTests {
     vector=principal-v1
     type_tag=0x0001
     schema_version=1
-    envelope_hex=000100010004aabbccdd
+    envelope_hex=0001000100000004aabbccdd
     """
     @Test
     func currentConfigurationIsPinnedToTheReviewedActiveChainRevision() throws {
         let sandbox = try ActiveChainSemanticSandbox()
-        #expect(sandbox.configuration.sourceRevision == "cdb8478")
-        #expect(sandbox.configuration.protocolVersion == "development-1")
+        #expect(sandbox.configuration.sourceRevision == "aacea4a")
+        #expect(sandbox.configuration.protocolVersion == "activechain-v1-dev")
         #expect(sandbox.configuration.vectors.contains("credential-v1"))
     }
 
@@ -23,7 +23,7 @@ struct ActiveChainSemanticSandboxTests {
         let result = try ActiveChainSemanticSandbox().simulate(vectorID: "state-tree-v1")
         #expect(result.provenance == .developmentFixture)
         #expect(result.finalityClaim == "No network finality")
-        #expect(result.sourceRevision == "cdb8478")
+        #expect(result.sourceRevision == "aacea4a")
     }
 
     @Test
@@ -33,7 +33,7 @@ struct ActiveChainSemanticSandboxTests {
         }
 
         let changed = ActiveChainSandboxConfiguration(
-            protocolVersion: "development-1",
+            protocolVersion: "activechain-v1-dev",
             sourceRevision: "different-revision",
             vectors: ["principal-v1"]
         )
@@ -57,8 +57,8 @@ struct ActiveChainSemanticSandboxTests {
 
     @Test
     func runtimeSummaryExposesPinnedDevelopmentProvenanceWithoutFinality() {
-        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("development-1"))
-        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("cdb8478"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("activechain-v1-dev"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("aacea4a"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("no network finality"))
         #expect(ActiveChainSemanticSandbox.verifierStatus.contains("fail-closed"))
     }
@@ -67,7 +67,7 @@ struct ActiveChainSemanticSandboxTests {
     func canonicalVectorVerifierAcceptsExactEnvelope() throws {
         let verifier = ActiveChainCanonicalVectorVerifier(configuration: .current)
         let vector = try verifier.verify(vectorText, expectedVectorID: "principal-v1")
-        #expect(vector.envelope.count == 10)
+        #expect(vector.envelope.count == 12)
     }
 
     @Test
@@ -84,7 +84,7 @@ struct ActiveChainSemanticSandboxTests {
         #expect(throws: ActiveChainVectorError.trailingBytes) {
             try verifier.verify(trailing, expectedVectorID: "principal-v1")
         }
-        let hashed = ActiveChainSandboxConfiguration(protocolVersion: "development-1", sourceRevision: "cdb8478", vectors: ["principal-v1"], vectorSHA256: ["principal-v1": String(repeating: "0", count: 64)])
+        let hashed = ActiveChainSandboxConfiguration(protocolVersion: "activechain-v1-dev", sourceRevision: "aacea4a", vectors: ["principal-v1"], vectorSHA256: ["principal-v1": String(repeating: "0", count: 64)])
         #expect(throws: ActiveChainVectorError.hashMismatch) {
             try ActiveChainCanonicalVectorVerifier(configuration: hashed).verify(vectorText, expectedVectorID: "principal-v1")
         }

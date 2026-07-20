@@ -7,8 +7,8 @@ import CryptoKit
 /// start a node, sign, broadcast, spend, or claim network finality.
 struct ActiveChainSandboxConfiguration: Codable, Equatable {
     static let current = ActiveChainSandboxConfiguration(
-        protocolVersion: "development-1",
-        sourceRevision: "cdb8478",
+        protocolVersion: "activechain-v1-dev",
+        sourceRevision: "aacea4a",
         vectors: [
             "principal-v1",
             "credential-v1",
@@ -72,7 +72,7 @@ extension ActiveChainVectorError {
 struct ActiveChainCanonicalVectorVerifier {
     let configuration: ActiveChainSandboxConfiguration
 
-    func verify(_ text: String, expectedVectorID: String) throws -> ActiveChainCanonicalVector {
+    func verify(_ text: String, expectedVectorID: String, expectedTypeTag: UInt16? = nil, expectedSchemaVersion: UInt16? = nil) throws -> ActiveChainCanonicalVector {
         let fields = text.split(whereSeparator: \.isNewline).reduce(into: [String: String]()) { result, line in
             let line = line.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, !line.hasPrefix("#"), let separator = line.firstIndex(of: "=") else { return }
@@ -83,13 +83,15 @@ struct ActiveChainCanonicalVectorVerifier {
               let envelopeHex = fields["envelope_hex"] else { throw ActiveChainVectorError.missingField("envelope") }
         guard let typeTag = UInt16(type.dropFirst(2), radix: 16), let schemaVersion = UInt16(version),
               let envelope = Data(hexString: envelopeHex) else { throw ActiveChainVectorError.invalidHex }
-        guard envelope.count >= 6 else { throw ActiveChainVectorError.invalidEnvelope }
+        guard envelope.count >= 8 else { throw ActiveChainVectorError.invalidEnvelope }
         guard envelope[0] == UInt8(typeTag >> 8), envelope[1] == UInt8(typeTag & 0xff),
               envelope[2] == UInt8(schemaVersion >> 8), envelope[3] == UInt8(schemaVersion & 0xff) else {
             throw ActiveChainVectorError.unsupportedVersion
         }
-        let bodyLength = Int(envelope[4]) << 8 | Int(envelope[5])
-        guard envelope.count == bodyLength + 6 else { throw ActiveChainVectorError.trailingBytes }
+        if let expectedTypeTag, expectedTypeTag != typeTag { throw ActiveChainVectorError.unsupportedVersion }
+        if let expectedSchemaVersion, expectedSchemaVersion != schemaVersion { throw ActiveChainVectorError.unsupportedVersion }
+        let bodyLength = Int(envelope[4]) << 24 | Int(envelope[5]) << 16 | Int(envelope[6]) << 8 | Int(envelope[7])
+        guard envelope.count == bodyLength + 8 else { throw ActiveChainVectorError.trailingBytes }
         if let expectedHash = configuration.vectorSHA256[expectedVectorID],
            SHA256.hash(data: envelope).hexString != expectedHash { throw ActiveChainVectorError.hashMismatch }
         return ActiveChainCanonicalVector(id: expectedVectorID, typeTag: typeTag, schemaVersion: schemaVersion, envelope: envelope)
