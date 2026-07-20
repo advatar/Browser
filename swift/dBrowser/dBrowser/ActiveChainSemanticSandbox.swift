@@ -8,7 +8,7 @@ import CryptoKit
 struct ActiveChainSandboxConfiguration: Codable, Equatable {
     static let current = ActiveChainSandboxConfiguration(
         protocolVersion: "activechain-v1-dev",
-        sourceRevision: "aacea4a",
+        sourceRevision: "61922bf",
         vectors: [
             "principal-v1",
             "credential-v1",

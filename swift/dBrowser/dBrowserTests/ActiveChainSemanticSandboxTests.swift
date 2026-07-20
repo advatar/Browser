@@ -13,7 +13,7 @@ struct ActiveChainSemanticSandboxTests {
     @Test
     func currentConfigurationIsPinnedToTheReviewedActiveChainRevision() throws {
         let sandbox = try ActiveChainSemanticSandbox()
-        #expect(sandbox.configuration.sourceRevision == "aacea4a")
+        #expect(sandbox.configuration.sourceRevision == "61922bf")
         #expect(sandbox.configuration.protocolVersion == "activechain-v1-dev")
         #expect(sandbox.configuration.vectors.contains("credential-v1"))
     }
@@ -23,7 +23,7 @@ struct ActiveChainSemanticSandboxTests {
         let result = try ActiveChainSemanticSandbox().simulate(vectorID: "state-tree-v1")
         #expect(result.provenance == .developmentFixture)
         #expect(result.finalityClaim == "No network finality")
-        #expect(result.sourceRevision == "aacea4a")
+        #expect(result.sourceRevision == "61922bf")
     }
 
     @Test
@@ -58,7 +58,7 @@ struct ActiveChainSemanticSandboxTests {
     @Test
     func runtimeSummaryExposesPinnedDevelopmentProvenanceWithoutFinality() {
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("activechain-v1-dev"))
-        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("aacea4a"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("61922bf"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("no network finality"))
         #expect(ActiveChainSemanticSandbox.verifierStatus.contains("fail-closed"))
     }
@@ -84,7 +84,7 @@ struct ActiveChainSemanticSandboxTests {
         #expect(throws: ActiveChainVectorError.trailingBytes) {
             try verifier.verify(trailing, expectedVectorID: "principal-v1")
         }
-        let hashed = ActiveChainSandboxConfiguration(protocolVersion: "activechain-v1-dev", sourceRevision: "aacea4a", vectors: ["principal-v1"], vectorSHA256: ["principal-v1": String(repeating: "0", count: 64)])
+        let hashed = ActiveChainSandboxConfiguration(protocolVersion: "activechain-v1-dev", sourceRevision: "61922bf", vectors: ["principal-v1"], vectorSHA256: ["principal-v1": String(repeating: "0", count: 64)])
         #expect(throws: ActiveChainVectorError.hashMismatch) {
             try ActiveChainCanonicalVectorVerifier(configuration: hashed).verify(vectorText, expectedVectorID: "principal-v1")
         }
