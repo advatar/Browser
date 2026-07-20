@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// The pinned, network-disabled ActiveChain Phase 1 compatibility boundary.
 ///
@@ -22,15 +23,78 @@ struct ActiveChainSandboxConfiguration: Codable, Equatable {
     let sourceRevision: String
     let vectors: [String]
 
-    init(protocolVersion: String, sourceRevision: String, vectors: [String]) {
+    /// Hashes cover the canonical `envelope_hex` bytes from the pinned fixture
+    /// snapshot. They are intentionally data-only until ActiveChain exposes a
+    /// stable packaged verifier API.
+    let vectorSHA256: [String: String]
+
+    init(protocolVersion: String, sourceRevision: String, vectors: [String], vectorSHA256: [String: String] = [:]) {
         self.protocolVersion = protocolVersion
         self.sourceRevision = sourceRevision
         self.vectors = vectors
+        self.vectorSHA256 = vectorSHA256
     }
 
     func validates(expectedRevision: String) -> Bool {
         sourceRevision == expectedRevision && !protocolVersion.isEmpty && !vectors.isEmpty
     }
+}
+
+struct ActiveChainCanonicalVector: Equatable {
+    let id: String
+    let typeTag: UInt16
+    let schemaVersion: UInt16
+    let envelope: Data
+}
+
+enum ActiveChainVectorError: Error, Equatable {
+    case missingField(String)
+    case invalidHex
+    case invalidEnvelope
+    case unsupportedVersion
+    case trailingBytes
+    case hashMismatch
+}
+
+struct ActiveChainCanonicalVectorVerifier {
+    let configuration: ActiveChainSandboxConfiguration
+
+    func verify(_ text: String, expectedVectorID: String) throws -> ActiveChainCanonicalVector {
+        let fields = text.split(whereSeparator: \.isNewline).reduce(into: [String: String]()) { result, line in
+            let line = line.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#"), let separator = line.firstIndex(of: "=") else { return }
+            result[String(line[..<separator])] = String(line[line.index(after: separator)...])
+        }
+        guard fields["vector"] == expectedVectorID else { throw ActiveChainVectorError.missingField("vector") }
+        guard let type = fields["type_tag"], let version = fields["schema_version"],
+              let envelopeHex = fields["envelope_hex"] else { throw ActiveChainVectorError.missingField("envelope") }
+        guard let typeTag = UInt16(type.dropFirst(2), radix: 16), let schemaVersion = UInt16(version),
+              let envelope = Data(hexString: envelopeHex) else { throw ActiveChainVectorError.invalidHex }
+        guard envelope.count >= 6 else { throw ActiveChainVectorError.invalidEnvelope }
+        guard envelope[0] == UInt8(typeTag >> 8), envelope[1] == UInt8(typeTag & 0xff),
+              envelope[2] == UInt8(schemaVersion >> 8), envelope[3] == UInt8(schemaVersion & 0xff) else {
+            throw ActiveChainVectorError.unsupportedVersion
+        }
+        let bodyLength = Int(envelope[4]) << 8 | Int(envelope[5])
+        guard envelope.count == bodyLength + 6 else { throw ActiveChainVectorError.trailingBytes }
+        if let expectedHash = configuration.vectorSHA256[expectedVectorID],
+           SHA256.hash(data: envelope).hexString != expectedHash { throw ActiveChainVectorError.hashMismatch }
+        return ActiveChainCanonicalVector(id: expectedVectorID, typeTag: typeTag, schemaVersion: schemaVersion, envelope: envelope)
+    }
+}
+
+private extension Data {
+    init?(hexString: String) {
+        guard hexString.count % 2 == 0 else { return nil }
+        self.init((0..<hexString.count / 2).compactMap { index in
+            let start = hexString.index(hexString.startIndex, offsetBy: index * 2)
+            return UInt8(hexString[start..<hexString.index(start, offsetBy: 2)], radix: 16)
+        })
+    }
+}
+
+private extension Digest {
+    var hexString: String { map { String(format: "%02x", $0) }.joined() }
 }
 
 enum ActiveChainSandboxProvenance: String, Codable, Equatable {

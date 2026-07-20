@@ -4,6 +4,12 @@ import Testing
 
 @MainActor
 struct ActiveChainSemanticSandboxTests {
+    private let vectorText = """
+    vector=principal-v1
+    type_tag=0x0001
+    schema_version=1
+    envelope_hex=000100010004aabbccdd
+    """
     @Test
     func currentConfigurationIsPinnedToTheReviewedActiveChainRevision() throws {
         let sandbox = try ActiveChainSemanticSandbox()
@@ -54,5 +60,32 @@ struct ActiveChainSemanticSandboxTests {
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("development-1"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("cdb8478"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("no network finality"))
+    }
+
+    @Test
+    func canonicalVectorVerifierAcceptsExactEnvelope() throws {
+        let verifier = ActiveChainCanonicalVectorVerifier(configuration: .current)
+        let vector = try verifier.verify(vectorText, expectedVectorID: "principal-v1")
+        #expect(vector.envelope.count == 10)
+    }
+
+    @Test
+    func canonicalVectorVerifierRejectsMalformedTamperedVersionAndTrailingBytes() {
+        let verifier = ActiveChainCanonicalVectorVerifier(configuration: .current)
+        #expect(throws: ActiveChainVectorError.invalidHex) {
+            try verifier.verify(vectorText.replacing("aabbccdd", with: "aabbc"), expectedVectorID: "principal-v1")
+        }
+        let wrongVersion = vectorText.replacing("00010001", with: "00010002")
+        #expect(throws: ActiveChainVectorError.unsupportedVersion) {
+            try verifier.verify(wrongVersion, expectedVectorID: "principal-v1")
+        }
+        let trailing = vectorText.replacing("aabbccdd", with: "aabbccddee")
+        #expect(throws: ActiveChainVectorError.trailingBytes) {
+            try verifier.verify(trailing, expectedVectorID: "principal-v1")
+        }
+        let hashed = ActiveChainSandboxConfiguration(protocolVersion: "development-1", sourceRevision: "cdb8478", vectors: ["principal-v1"], vectorSHA256: ["principal-v1": String(repeating: "0", count: 64)])
+        #expect(throws: ActiveChainVectorError.hashMismatch) {
+            try ActiveChainCanonicalVectorVerifier(configuration: hashed).verify(vectorText, expectedVectorID: "principal-v1")
+        }
     }
 }
