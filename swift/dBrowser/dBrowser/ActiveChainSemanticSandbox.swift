@@ -8,7 +8,7 @@ import CryptoKit
 struct ActiveChainSandboxConfiguration: Codable, Equatable {
     static let current = ActiveChainSandboxConfiguration(
         protocolVersion: "activechain-v1-dev",
-        sourceRevision: "61922bf",
+        sourceRevision: "4d34b78",
         vectors: [
             "principal-v1",
             "credential-v1",
@@ -22,17 +22,21 @@ struct ActiveChainSandboxConfiguration: Codable, Equatable {
     let protocolVersion: String
     let sourceRevision: String
     let vectors: [String]
+    let walletABIRevision: UInt32
+    let productionCertified: Bool
 
     /// Hashes cover the canonical `envelope_hex` bytes from the pinned fixture
     /// snapshot. They are intentionally data-only until ActiveChain exposes a
     /// stable packaged verifier API.
     let vectorSHA256: [String: String]
 
-    init(protocolVersion: String, sourceRevision: String, vectors: [String], vectorSHA256: [String: String] = [:]) {
+    init(protocolVersion: String, sourceRevision: String, vectors: [String], vectorSHA256: [String: String] = [:], walletABIRevision: UInt32 = 1, productionCertified: Bool = false) {
         self.protocolVersion = protocolVersion
         self.sourceRevision = sourceRevision
         self.vectors = vectors
         self.vectorSHA256 = vectorSHA256
+        self.walletABIRevision = walletABIRevision
+        self.productionCertified = productionCertified
     }
 
     func validates(expectedRevision: String) -> Bool {
@@ -189,7 +193,7 @@ enum ActiveChainSandboxError: Error, Equatable {
 struct ActiveChainSemanticSandbox {
     static var runtimeSummary: String {
         let configuration = ActiveChainSandboxConfiguration.current
-        return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); development fixture; no network finality"
+        return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); wallet ABI v\(configuration.walletABIRevision); development fixture; production certified: \(configuration.productionCertified); no network finality"
     }
 
     static var verifierStatus: String {
