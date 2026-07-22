@@ -21,6 +21,24 @@
 
 ## Active Task
 
+## ActiveChain Wallet ABI Compatibility Reassessment (#177)
+
+Reassess the pinned ActiveChain wallet ABI revision 1 metadata and keep the
+integration explicitly development-only, network-disabled, and non-finalizing.
+
+- [x] Create the scoped GitHub issue with findings, plan, non-goals, and acceptance criteria.
+- [x] Fail closed on unsupported wallet ABI revisions and production-certified configurations.
+- [x] Make runtime status explicitly say development-only and no finality.
+- [x] Add focused coverage proving wallet signing, node operation, and network ingress remain disabled.
+- [x] Verify focused Swift tests and the macOS build.
+- [x] Commit and push only the scoped changes.
+
+Verification:
+
+- Focused `ActiveChainSemanticSandboxTests` passed 9/9.
+- `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-activechain-wallet-abi-tests CODE_SIGNING_ALLOWED=NO` passed.
+- The test lane emitted only the existing MLX `Cmlx` umbrella-header warning.
+
 ## ActiveChain Phase 1: Runtime Trust Status (#175)
 
 Expose the network-disabled semantic sandbox through the existing chain-trust

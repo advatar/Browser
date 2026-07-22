@@ -6,6 +6,8 @@ import CryptoKit
 /// This is deliberately a semantic fixture surface. It does not open sockets,
 /// start a node, sign, broadcast, spend, or claim network finality.
 struct ActiveChainSandboxConfiguration: Codable, Equatable {
+    static let supportedWalletABIRevision: UInt32 = 1
+
     static let current = ActiveChainSandboxConfiguration(
         protocolVersion: "activechain-v1-dev",
         sourceRevision: "4d34b78",
@@ -30,7 +32,7 @@ struct ActiveChainSandboxConfiguration: Codable, Equatable {
     /// stable packaged verifier API.
     let vectorSHA256: [String: String]
 
-    init(protocolVersion: String, sourceRevision: String, vectors: [String], vectorSHA256: [String: String] = [:], walletABIRevision: UInt32 = 1, productionCertified: Bool = false) {
+    init(protocolVersion: String, sourceRevision: String, vectors: [String], vectorSHA256: [String: String] = [:], walletABIRevision: UInt32 = ActiveChainSandboxConfiguration.supportedWalletABIRevision, productionCertified: Bool = false) {
         self.protocolVersion = protocolVersion
         self.sourceRevision = sourceRevision
         self.vectors = vectors
@@ -63,10 +65,8 @@ enum ActiveChainVectorError: Error, Equatable {
 
     var code: UInt32 {
         switch self {
-        case .tooLarge: "envelope too large"
-        case .typeMismatch: "type mismatch"
         case .tooLarge: 1
-        case .invalidHex, .invalidEnvelope, .trailingBytes: 2
+        case .missingField, .invalidHex, .invalidEnvelope, .trailingBytes: 2
         case .typeMismatch: 3
         case .unsupportedVersion: 4
         case .hashMismatch: 5
@@ -77,6 +77,8 @@ enum ActiveChainVectorError: Error, Equatable {
 extension ActiveChainVectorError {
     var statusMessage: String {
         switch self {
+        case .tooLarge: "envelope too large"
+        case .typeMismatch: "type mismatch"
         case .missingField(let field): "missing \(field)"
         case .invalidHex: "invalid hex"
         case .invalidEnvelope: "invalid envelope"
@@ -154,6 +156,7 @@ enum ActiveChainSandboxCapability: String, Codable, Equatable, CaseIterable {
     case spend
     case discloseCredential
     case broadcast
+    case networkIngress
     case peerService
     case nodeStartup
 
@@ -186,6 +189,8 @@ struct ActiveChainSandboxResult: Codable, Equatable {
 enum ActiveChainSandboxError: Error, Equatable {
     case unsupportedRevision
     case unsupportedProtocolVersion
+    case unsupportedWalletABIRevision(UInt32)
+    case productionCertificationUnsupported
     case capabilityDenied(ActiveChainSandboxCapability)
     case unknownVector(String)
 }
@@ -193,7 +198,7 @@ enum ActiveChainSandboxError: Error, Equatable {
 struct ActiveChainSemanticSandbox {
     static var runtimeSummary: String {
         let configuration = ActiveChainSandboxConfiguration.current
-        return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); wallet ABI v\(configuration.walletABIRevision); development fixture; production certified: \(configuration.productionCertified); no network finality"
+        return "ActiveChain sandbox \(configuration.protocolVersion) @ \(configuration.sourceRevision); wallet ABI v\(configuration.walletABIRevision); development-only; production certified: \(configuration.productionCertified); no network finality"
     }
 
     static var verifierStatus: String {
@@ -211,6 +216,12 @@ struct ActiveChainSemanticSandbox {
         }
         guard configuration.protocolVersion == ActiveChainSandboxConfiguration.current.protocolVersion else {
             throw ActiveChainSandboxError.unsupportedProtocolVersion
+        }
+        guard configuration.walletABIRevision == ActiveChainSandboxConfiguration.supportedWalletABIRevision else {
+            throw ActiveChainSandboxError.unsupportedWalletABIRevision(configuration.walletABIRevision)
+        }
+        guard !configuration.productionCertified else {
+            throw ActiveChainSandboxError.productionCertificationUnsupported
         }
         self.configuration = configuration
     }

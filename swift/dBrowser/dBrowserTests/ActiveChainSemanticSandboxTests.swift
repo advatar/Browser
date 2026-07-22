@@ -45,6 +45,29 @@ struct ActiveChainSemanticSandboxTests {
     }
 
     @Test
+    func unsupportedWalletABIAndProductionCertificationFailClosed() {
+        let unsupportedABI = ActiveChainSandboxConfiguration(
+            protocolVersion: "activechain-v1-dev",
+            sourceRevision: "4d34b78",
+            vectors: ["principal-v1"],
+            walletABIRevision: 2
+        )
+        #expect(throws: ActiveChainSandboxError.unsupportedWalletABIRevision(2)) {
+            try ActiveChainSemanticSandbox(configuration: unsupportedABI)
+        }
+
+        let productionCertified = ActiveChainSandboxConfiguration(
+            protocolVersion: "activechain-v1-dev",
+            sourceRevision: "4d34b78",
+            vectors: ["principal-v1"],
+            productionCertified: true
+        )
+        #expect(throws: ActiveChainSandboxError.productionCertificationUnsupported) {
+            try ActiveChainSemanticSandbox(configuration: productionCertified)
+        }
+    }
+
+    @Test
     func onlyVerificationAndSimulationCapabilitiesAreAllowed() throws {
         let sandbox = try ActiveChainSemanticSandbox()
         try sandbox.request(.canonicalVerification)
@@ -58,9 +81,29 @@ struct ActiveChainSemanticSandboxTests {
     }
 
     @Test
+    func walletSigningNodeOperationAndNetworkIngressRemainDenied() throws {
+        let sandbox = try ActiveChainSemanticSandbox()
+        let deniedCapabilities: [ActiveChainSandboxCapability] = [
+            .sign,
+            .spend,
+            .broadcast,
+            .nodeStartup,
+            .peerService,
+            .networkIngress
+        ]
+
+        for capability in deniedCapabilities {
+            #expect(throws: ActiveChainSandboxError.capabilityDenied(capability)) {
+                try sandbox.request(capability)
+            }
+        }
+    }
+
+    @Test
     func runtimeSummaryExposesPinnedDevelopmentProvenanceWithoutFinality() {
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("activechain-v1-dev"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("4d34b78"))
+        #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("development-only"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("production certified: false"))
         #expect(ActiveChainSemanticSandbox.runtimeSummary.contains("no network finality"))
         #expect(ActiveChainSemanticSandbox.verifierStatus.contains("fail-closed"))
