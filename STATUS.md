@@ -30,8 +30,9 @@ out of source control.
 - [x] Confirm `main` has no unique commits and the completed branch is a strict fast-forward.
 - [x] Audit every dirty path and confirm none contains implementation work.
 - [x] Create the scoped GitHub issue with the promotion plan and safety boundaries.
-- [ ] Preserve the three generated Xcode changes outside mainline history.
-- [ ] Commit and push this status record on the completed branch.
+- [x] Preserve the generated Xcode changes outside mainline history.
+- [x] Commit and push the initial status record on the completed branch.
+- [x] Stop tracking Xcode per-user state and ignore future `xcuserdata` changes.
 - [ ] Fast-forward local and remote `main` without force-pushing or creating a merge commit.
 - [ ] Verify the primary checkout is clean on `main` and reconcile PR #171 plus issue #185.
 

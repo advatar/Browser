@@ -17,6 +17,10 @@
 *.swp
 *.swo
 
+# Xcode per-user workspace, window, and scheme state
+**/xcuserdata/
+*.xcuserstate
+
 # OS generated files
 .DS_Store
 .DS_Store?
