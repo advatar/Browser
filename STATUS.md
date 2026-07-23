@@ -35,7 +35,17 @@ out of source control.
 - [x] Stop tracking Xcode per-user state and ignore future `xcuserdata` changes.
 - [x] Normalize Xcode's stable, serialization-only project object ordering.
 - [x] Fast-forward local and remote `main` without force-pushing or creating a merge commit.
-- [ ] Verify the primary checkout is clean on `main` and reconcile PR #171 plus issue #185.
+- [x] Verify the primary checkout is clean on `main` and reconcile PR #171 plus issue #185.
+
+Validation notes:
+
+- The exact `main` commit `4b3facb` passed the macOS arm64 `dBrowser` build with
+  automatic package resolution disabled and code signing disabled.
+- Local `HEAD`, local `main`, and `origin/main` matched at `4b3facb`; the
+  primary checkout remained clean after the build and ref verification.
+- GitHub records PR #171 as merged, with its head `032d035` contained in
+  `main`. The pre-cleanup generated Xcode state remains recoverable in
+  `stash@{0}`, while the corresponding personal files remain local and ignored.
 
 ## Deep Reliability Review
 
