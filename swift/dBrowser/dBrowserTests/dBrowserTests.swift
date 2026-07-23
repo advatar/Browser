@@ -1574,6 +1574,19 @@ struct dBrowserTests {
         #expect(clientText.contains("func fetchChatCompletion(_ payload: OpenAIChatCompletionRequest)"))
     }
 
+    @Test func macOSAppAllowsLoopbackSwiftLMServer() throws {
+        let entitlementsURL = Self.repositoryRootURL
+            .appendingPathComponent("swift/dBrowser/dBrowser/dBrowser-macOS.entitlements")
+        let data = try Data(contentsOf: entitlementsURL)
+        let propertyList = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+
+        #expect(propertyList["com.apple.security.app-sandbox"] as? Bool == true)
+        #expect(propertyList["com.apple.security.network.client"] as? Bool == true)
+        #expect(propertyList["com.apple.security.network.server"] as? Bool == true)
+    }
+
     @MainActor
     @Test func browserViewModelRefreshesLocalLLMManagementThroughInjectedSwiftLMManager() async {
         let expectedState = Self.localLLMConnectedFixture(statusLine: "Connected from unit test.")

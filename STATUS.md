@@ -21,6 +21,18 @@
 
 ## Active Task
 
+## Embedded SwiftLM Control Plane Startup
+
+Restore the Local LLM panel's embedded SwiftLM control plane under the macOS
+app sandbox so hardware discovery and model import can reach the local service.
+
+- [x] Create the scoped GitHub issue with diagnosis, plan, and acceptance criteria.
+- [x] Allow the sandboxed macOS app to host the loopback SwiftLM listener.
+- [x] Add focused regression coverage for the required entitlement and action flow.
+- [x] Verify the SwiftLM loopback test and macOS build. The focused dBrowser
+  test runner remains blocked in Xcode while waiting for workers to materialize.
+- [x] Commit and push only the scoped files.
+
 ## ActiveChain Wallet ABI Compatibility Reassessment (#177)
 
 Reassess the pinned ActiveChain wallet ABI revision 1 metadata and keep the

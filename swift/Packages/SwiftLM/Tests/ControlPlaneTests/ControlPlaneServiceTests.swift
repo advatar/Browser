@@ -1,10 +1,16 @@
 import Contracts
 import LoggingKit
+import Network
 import RuntimeAdapters
 import Storage
 import Testing
 import Foundation
 @testable import ControlPlane
+
+@Test
+func embeddedHTTPServerIsRestrictedToIPv4Loopback() {
+    #expect(LocalHTTPServer.loopbackHost == NWEndpoint.Host("127.0.0.1"))
+}
 
 @Test
 func controlPlaneBootstrapPersistsStateAndDeveloperAPIKeyMetadata() async throws {

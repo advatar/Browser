@@ -121,6 +121,8 @@ private final class ListenerStartState: @unchecked Sendable {
 }
 
 public final class LocalHTTPServer: @unchecked Sendable {
+    static let loopbackHost = NWEndpoint.Host("127.0.0.1")
+
     private let listener: NWListener
     private let queue = DispatchQueue(label: "swiftlm.http.server", qos: .userInitiated)
     private let parser = HTTPRequestParser()
@@ -130,7 +132,9 @@ public final class LocalHTTPServer: @unchecked Sendable {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw NSError(domain: "SwiftLM.LocalHTTPServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid port \(port)"])
         }
-        self.listener = try NWListener(using: .tcp, on: nwPort)
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: Self.loopbackHost, port: nwPort)
+        self.listener = try NWListener(using: parameters)
         self.handler = handler
     }
 
