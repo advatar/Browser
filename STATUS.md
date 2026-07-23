@@ -21,6 +21,33 @@
 
 ## Active Task
 
+## ActiveChain Landing Site Refresh (#186)
+
+Update the public web experience to describe the shipped ActiveChain
+compatibility boundary without presenting the development sandbox as a
+production blockchain integration.
+
+- [x] Create the scoped GitHub issue with copy boundaries, plan, and acceptance criteria.
+- [x] Add a concise ActiveChain compatibility signal to the homepage.
+- [x] Add a dedicated ActiveChain trust-boundary section to the wallet page.
+- [x] Show the development sandbox and denied production capabilities in the architecture view.
+- [x] Add focused content assertions for the required development-only qualifiers.
+- [x] Run the web test, lint, and production build.
+- [x] Commit and push only the scoped changes, then close issue #186 with verification.
+
+Validation notes:
+
+- `npm test` passed the landing-site content assertions, including the required
+  ActiveChain development-only, network-disabled, non-finalizing, ABI revision
+  1, and denied-capability language.
+- `npm run lint` completed with zero errors and seven existing Fast Refresh
+  warnings in shared UI primitives.
+- `npm run build` produced the Vite production bundle successfully. The browser
+  preview connection was unavailable, so responsive layout was source-reviewed
+  rather than claimed as an interactive visual verification.
+- Landing repository commit `1ac4360` is pushed to
+  `advatar/trustless-web-explorer` `main`; this repository pins that revision.
+
 ## Mainline Promotion and Worktree Cleanup (#185)
 
 Move the completed dBrowser history from `agent/comet-context-parity` onto the
