@@ -21,6 +21,18 @@
 
 ## Active Task
 
+## Preserve WebKit Form Navigations
+
+Prevent WebKit-owned form submissions and redirects from being replayed as
+fresh GET requests when their destination is mirrored into the tab model.
+
+- [x] Create the scoped GitHub issue with diagnosis, plan, and acceptance criteria.
+- [x] Mark allowed HTTP(S) navigation destinations as WebKit-owned before model publication.
+- [x] Add regression coverage for POST navigation tracking and external URL loads.
+- [x] Verify the macOS build. The Xcode test build was attempted but remained
+  blocked in the local build service without materializing test work.
+- [x] Commit and push only the scoped files.
+
 ## Embedded SwiftLM Control Plane Startup
 
 Restore the Local LLM panel's embedded SwiftLM control plane under the macOS

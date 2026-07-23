@@ -12,6 +12,20 @@ import UIKit
 typealias BrowserViewRepresentable = UIViewRepresentable
 #endif
 
+struct BrowserNavigationOwnershipTracker {
+    private(set) var lastRequestedURL: URL?
+
+    mutating func shouldLoadModelURL(_ url: URL) -> Bool {
+        guard lastRequestedURL != url else { return false }
+        lastRequestedURL = url
+        return true
+    }
+
+    mutating func recordWebKitNavigation(to url: URL) {
+        lastRequestedURL = url
+    }
+}
+
 struct BrowserWebView: BrowserViewRepresentable {
     @Binding var tab: BrowserTab
     let command: BrowserWebCommandRequest?
@@ -68,7 +82,7 @@ struct BrowserWebView: BrowserViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var parent: BrowserWebView
-        var lastRequestedURL: URL?
+        var navigationOwnership = BrowserNavigationOwnershipTracker()
         var lastHandledCommandID: UUID?
         var lastAppliedAdBlockingMode: BrowserAdBlockingMode?
         var isAdBlockingReady = false
@@ -141,8 +155,7 @@ struct BrowserWebView: BrowserViewRepresentable {
 
         private func loadTabIfNeeded(_ webView: WKWebView) {
             guard let url = parent.tab.loadableURL else { return }
-            guard lastRequestedURL != url else { return }
-            lastRequestedURL = url
+            guard navigationOwnership.shouldLoadModelURL(url) else { return }
             webView.load(URLRequest(url: url))
         }
 
@@ -335,6 +348,10 @@ struct BrowserWebView: BrowserViewRepresentable {
 
             let scheme = url.scheme?.lowercased()
             if scheme == "http" || scheme == "https" {
+                // WebKit owns this request, including its method and body. Track
+                // the destination before publishing it into BrowserTab so the
+                // SwiftUI reconciliation pass does not replay it as a GET.
+                navigationOwnership.recordWebKitNavigation(to: url)
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)

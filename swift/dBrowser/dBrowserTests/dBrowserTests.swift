@@ -92,6 +92,22 @@ private struct StubPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
 
 @MainActor
 struct dBrowserTests {
+    @Test func navigationOwnershipPreservesWebKitPostAndLoadsExternalURLs() throws {
+        let initialURL = try #require(URL(string: "https://www.google.com/"))
+        let consentSaveURL = try #require(URL(string: "https://consent.google.com/save"))
+        let externalURL = try #require(URL(string: "https://example.com/"))
+        var tracker = BrowserNavigationOwnershipTracker()
+
+        #expect(tracker.shouldLoadModelURL(initialURL))
+        tracker.recordWebKitNavigation(to: consentSaveURL)
+
+        // Mirroring WebKit's POST destination into BrowserTab must not cause a
+        // second, body-less URLRequest to be loaded as GET.
+        #expect(!tracker.shouldLoadModelURL(consentSaveURL))
+        #expect(tracker.shouldLoadModelURL(externalURL))
+        #expect(!tracker.shouldLoadModelURL(externalURL))
+    }
+
 
     private func torArtiManagedStatus(
         lifecycle: PrivateOverlayManagedRuntimeLifecycle,
