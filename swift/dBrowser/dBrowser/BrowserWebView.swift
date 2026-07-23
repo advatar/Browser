@@ -12,17 +12,13 @@ import UIKit
 typealias BrowserViewRepresentable = UIViewRepresentable
 #endif
 
-struct BrowserNavigationOwnershipTracker {
-    private(set) var lastRequestedURL: URL?
+struct BrowserModelLoadRevisionTracker {
+    private(set) var lastHandledRevision: UInt64?
 
-    mutating func shouldLoadModelURL(_ url: URL) -> Bool {
-        guard lastRequestedURL != url else { return false }
-        lastRequestedURL = url
+    mutating func shouldHandle(_ revision: UInt64) -> Bool {
+        guard lastHandledRevision != revision else { return false }
+        lastHandledRevision = revision
         return true
-    }
-
-    mutating func recordWebKitNavigation(to url: URL) {
-        lastRequestedURL = url
     }
 }
 
@@ -82,7 +78,7 @@ struct BrowserWebView: BrowserViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate {
         var parent: BrowserWebView
-        var navigationOwnership = BrowserNavigationOwnershipTracker()
+        var modelLoadTracker = BrowserModelLoadRevisionTracker()
         var lastHandledCommandID: UUID?
         var lastAppliedAdBlockingMode: BrowserAdBlockingMode?
         var isAdBlockingReady = false
@@ -155,7 +151,7 @@ struct BrowserWebView: BrowserViewRepresentable {
 
         private func loadTabIfNeeded(_ webView: WKWebView) {
             guard let url = parent.tab.loadableURL else { return }
-            guard navigationOwnership.shouldLoadModelURL(url) else { return }
+            guard modelLoadTracker.shouldHandle(parent.tab.modelLoadRevision) else { return }
             webView.load(URLRequest(url: url))
         }
 
@@ -321,18 +317,22 @@ struct BrowserWebView: BrowserViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            navigationGenerationAwaitingModelUpdate = nil
             publish(webView: webView, isLoading: false)
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            navigationGenerationAwaitingModelUpdate = nil
             publish(webView: webView, isLoading: false)
         }
 
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            navigationGenerationAwaitingModelUpdate = nil
             publish(webView: webView, isLoading: false)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            navigationGenerationAwaitingModelUpdate = nil
             publish(webView: webView, isLoading: false)
         }
 
@@ -348,10 +348,9 @@ struct BrowserWebView: BrowserViewRepresentable {
 
             let scheme = url.scheme?.lowercased()
             if scheme == "http" || scheme == "https" {
-                // WebKit owns this request, including its method and body. Track
-                // the destination before publishing it into BrowserTab so the
-                // SwiftUI reconciliation pass does not replay it as a GET.
-                navigationOwnership.recordWebKitNavigation(to: url)
+                // WebKit owns this request, including its method and body.
+                // Mirroring its destination into BrowserTab does not advance the
+                // model load revision, so reconciliation cannot replay it.
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)

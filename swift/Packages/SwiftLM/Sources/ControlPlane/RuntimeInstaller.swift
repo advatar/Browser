@@ -123,8 +123,12 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
                 "source": "system-python-managed"
             ]
         )
-        try finalizeInstallation(manifest: manifest, backendID: BackendKind.vllmMetal.rawValue, runtimeRoot: session.runtimeRoot)
-        return manifest
+        return try finalizeInstallation(
+            manifest: manifest,
+            backendID: BackendKind.vllmMetal.rawValue,
+            runtimeRoot: session.runtimeRoot,
+            repairEntrypointShebangs: true
+        )
     }
 
     private func installMLXNative() async throws -> RuntimeManifest {
@@ -183,8 +187,11 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
                 "sitePackagesPath": sitePackagesPath
             ]
         )
-        try finalizeInstallation(manifest: manifest, backendID: BackendKind.mlxNative.rawValue, runtimeRoot: session.runtimeRoot)
-        return manifest
+        return try finalizeInstallation(
+            manifest: manifest,
+            backendID: BackendKind.mlxNative.rawValue,
+            runtimeRoot: session.runtimeRoot
+        )
     }
 
     private func resolvePythonRuntime(
@@ -308,18 +315,10 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
             )
         }
 
-        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        let assets = payload?["assets"] as? [[String: Any]] ?? []
-        for asset in assets {
-            guard
-                let name = asset["name"] as? String,
-                name.contains("cp312"),
-                name.hasSuffix(".whl"),
-                let value = asset["browser_download_url"] as? String,
-                let url = URL(string: value)
-            else {
-                continue
-            }
+        if let url = Self.selectVLLMMetalWheelURL(
+            from: data,
+            architecture: ManagedPythonLocator.hostArchitecture
+        ) {
             return url
         }
 
@@ -328,6 +327,42 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
             message: "The latest vLLM Metal release does not expose a Python 3.12 wheel.",
             details: ["backendId": BackendKind.vllmMetal.rawValue]
         )
+    }
+
+    static func selectVLLMMetalWheelURL(
+        from data: Data,
+        architecture: ManagedPythonLocator.Architecture
+    ) -> URL? {
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let architectureTokens: [String]
+        switch architecture {
+        case .aarch64AppleDarwin:
+            architectureTokens = ["arm64", "aarch64", "universal2"]
+        case .x8664AppleDarwin:
+            architectureTokens = ["x86_64", "universal2"]
+        }
+        let assets = payload["assets"] as? [[String: Any]] ?? []
+        for asset in assets {
+            guard
+                let name = asset["name"] as? String,
+                let value = asset["browser_download_url"] as? String,
+                let url = URL(string: value)
+            else {
+                continue
+            }
+            let lowered = name.lowercased()
+            guard lowered.contains("cp312"),
+                  lowered.contains("macosx"),
+                  lowered.hasSuffix(".whl"),
+                  architectureTokens.contains(where: lowered.contains)
+            else {
+                continue
+            }
+            return url
+        }
+        return nil
     }
 
     private func download(from remoteURL: URL, to destinationURL: URL, category: String) async throws {
@@ -372,7 +407,12 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
         return ManagedPythonStagingSession(stagingRoot: stagingRoot, extractedRoot: extractedRoot)
     }
 
-    private func finalizeInstallation(manifest: RuntimeManifest, backendID: String, runtimeRoot: URL) throws {
+    private func finalizeInstallation(
+        manifest: RuntimeManifest,
+        backendID: String,
+        runtimeRoot: URL,
+        repairEntrypointShebangs: Bool = false
+    ) throws -> RuntimeManifest {
         let fileManager = FileManager.default
         let versionDirectoryName = "\(backendID)-\(sanitize(manifest.version))-py\(manifest.pythonVersion.replacingOccurrences(of: ".", with: ""))"
         let finalRuntimeRoot = paths.runtimesDirectory.appending(path: versionDirectoryName)
@@ -386,9 +426,17 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
             finalRuntimeRoot: finalRuntimeRoot,
             originalRuntimeRoot: runtimeRoot
         )
+        if repairEntrypointShebangs {
+            try Self.rewriteRelocatedEntrypointShebangs(
+                in: finalRuntimeRoot.appending(path: "venv/bin"),
+                originalRuntimeRoot: runtimeRoot,
+                finalRuntimeRoot: finalRuntimeRoot
+            )
+        }
         let manifestData = try JSONEncoder().encode(finalizedManifest)
         try manifestData.write(to: finalRuntimeRoot.appending(path: "manifest.json"))
         try switchCurrentSymlink(backendID: backendID, target: finalRuntimeRoot)
+        return finalizedManifest
     }
 
     static func finalizedManifest(
@@ -415,6 +463,39 @@ struct RuntimeInstaller: BackendRuntimeInstalling, Sendable {
                 relocatedPath($0, originalRoot: originalRuntimeRoot, finalRoot: finalRuntimeRoot)
             }
         )
+    }
+
+    static func rewriteRelocatedEntrypointShebangs(
+        in binDirectory: URL,
+        originalRuntimeRoot: URL,
+        finalRuntimeRoot: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        let entries = try fileManager.contentsOfDirectory(
+            at: binDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        for entry in entries {
+            let values = try entry.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true,
+                  let data = try? Data(contentsOf: entry),
+                  data.starts(with: Data("#!".utf8)),
+                  var text = String(data: data, encoding: .utf8)
+            else {
+                continue
+            }
+            guard let newline = text.firstIndex(of: "\n") else { continue }
+            let firstLine = String(text[..<newline])
+            guard firstLine.contains(originalRuntimeRoot.path) else { continue }
+            let rewritten = firstLine.replacingOccurrences(
+                of: originalRuntimeRoot.path,
+                with: finalRuntimeRoot.path
+            )
+            text.replaceSubrange(text.startIndex..<newline, with: rewritten)
+            try Data(text.utf8).write(to: entry, options: .atomic)
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: entry.path)
+        }
     }
 
     private func switchCurrentSymlink(backendID: String, target: URL) throws {

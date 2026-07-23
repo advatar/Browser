@@ -59,6 +59,10 @@ let package = Package(
                 "ModelInspection",
                 "RuntimeAdapters",
                 "Storage"
+            ],
+            linkerSettings: [
+                .linkedFramework("IOKit"),
+                .linkedFramework("Metal")
             ]
         ),
         .target(

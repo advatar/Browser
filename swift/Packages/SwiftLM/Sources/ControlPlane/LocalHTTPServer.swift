@@ -54,6 +54,7 @@ public struct HTTPResponse: Sendable {
         case 401: return "Unauthorized"
         case 404: return "Not Found"
         case 409: return "Conflict"
+        case 413: return "Payload Too Large"
         case 422: return "Unprocessable Entity"
         case 500: return "Internal Server Error"
         default: return "HTTP Status"
@@ -61,47 +62,123 @@ public struct HTTPResponse: Sendable {
     }
 }
 
+enum HTTPRequestParseFailure: Equatable {
+    case badRequest(String)
+    case payloadTooLarge(String)
+
+    var response: HTTPResponse {
+        switch self {
+        case let .badRequest(message):
+            return .text(statusCode: 400, body: message)
+        case let .payloadTooLarge(message):
+            return .text(statusCode: 413, body: message)
+        }
+    }
+}
+
+enum HTTPRequestParseResult {
+    case incomplete
+    case request(HTTPRequest)
+    case failure(HTTPRequestParseFailure)
+}
+
 final class HTTPRequestParser {
-    func parse(_ data: Data) -> HTTPRequest? {
+    static let defaultMaximumHeaderBytes = 32 * 1_024
+    static let defaultMaximumBodyBytes = 8 * 1_024 * 1_024
+
+    private let maximumHeaderBytes: Int
+    private let maximumBodyBytes: Int
+
+    init(
+        maximumHeaderBytes: Int = HTTPRequestParser.defaultMaximumHeaderBytes,
+        maximumBodyBytes: Int = HTTPRequestParser.defaultMaximumBodyBytes
+    ) {
+        self.maximumHeaderBytes = max(maximumHeaderBytes, 1)
+        self.maximumBodyBytes = max(maximumBodyBytes, 0)
+    }
+
+    func parse(_ data: Data) -> HTTPRequestParseResult {
         guard let boundary = data.range(of: Data("\r\n\r\n".utf8)) else {
-            return nil
+            return data.count > maximumHeaderBytes
+                ? .failure(.payloadTooLarge("HTTP request headers exceed the configured limit."))
+                : .incomplete
         }
         let headerData = data[..<boundary.lowerBound]
+        guard headerData.count <= maximumHeaderBytes else {
+            return .failure(.payloadTooLarge("HTTP request headers exceed the configured limit."))
+        }
         let bodyStartIndex = boundary.upperBound
         guard let headerString = String(data: headerData, encoding: .utf8) else {
-            return nil
+            return .failure(.badRequest("HTTP request headers must be valid UTF-8."))
         }
 
         let lines = headerString.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else {
-            return nil
+            return .failure(.badRequest("HTTP request line is missing."))
         }
 
         let requestParts = requestLine.split(separator: " ", omittingEmptySubsequences: true)
-        guard requestParts.count >= 2 else {
-            return nil
+        guard requestParts.count == 3, requestParts[2].hasPrefix("HTTP/") else {
+            return .failure(.badRequest("HTTP request line is malformed."))
         }
 
         let method = String(requestParts[0])
         let rawPath = String(requestParts[1])
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
+            guard line.isEmpty == false else { continue }
+            guard let colon = line.firstIndex(of: ":") else {
+                return .failure(.badRequest("HTTP request header is malformed."))
+            }
             let key = line[..<colon].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard key.isEmpty == false else {
+                return .failure(.badRequest("HTTP request header name is missing."))
+            }
+            if key == "content-length", let existing = headers[key], existing != value {
+                return .failure(.badRequest("HTTP request has conflicting Content-Length headers."))
+            }
             headers[key] = value
         }
 
-        let contentLength = headers["content-length"].flatMap(Int.init) ?? 0
-        guard data.count >= bodyStartIndex + contentLength else {
-            return nil
+        let contentLength: Int
+        if let rawContentLength = headers["content-length"] {
+            guard let parsedContentLength = Int(rawContentLength), parsedContentLength >= 0 else {
+                return .failure(.badRequest("Content-Length must be a non-negative integer."))
+            }
+            contentLength = parsedContentLength
+        } else {
+            contentLength = 0
+        }
+        guard contentLength <= maximumBodyBytes else {
+            return .failure(.payloadTooLarge("HTTP request body exceeds the configured limit."))
+        }
+        guard headers["transfer-encoding"] == nil else {
+            return .failure(.badRequest("Transfer-Encoding is not supported by this local server."))
+        }
+        guard let bodyEndIndex = data.index(
+            bodyStartIndex,
+            offsetBy: contentLength,
+            limitedBy: data.endIndex
+        ) else {
+            return .incomplete
         }
 
-        let body = Data(data[bodyStartIndex..<bodyStartIndex + contentLength])
-        let components = URLComponents(string: rawPath)
-        let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        let path = components?.path ?? rawPath
-        return HTTPRequest(method: method, path: path, query: query, headers: headers, body: body)
+        let body = Data(data[bodyStartIndex..<bodyEndIndex])
+        guard let components = URLComponents(string: rawPath), components.path.isEmpty == false else {
+            return .failure(.badRequest("HTTP request target is malformed."))
+        }
+        var query: [String: String] = [:]
+        for item in components.queryItems ?? [] where query[item.name] == nil {
+            query[item.name] = item.value ?? ""
+        }
+        return .request(HTTPRequest(
+            method: method,
+            path: components.path,
+            query: query,
+            headers: headers,
+            body: body
+        ))
     }
 }
 
@@ -190,7 +267,8 @@ public final class LocalHTTPServer: @unchecked Sendable {
                 updatedBuffer.append(data)
             }
 
-            if let request = self.parser.parse(updatedBuffer) {
+            switch self.parser.parse(updatedBuffer) {
+            case let .request(request):
                 Task {
                     let response = await self.handler(request)
                     self.queue.async {
@@ -198,10 +276,18 @@ public final class LocalHTTPServer: @unchecked Sendable {
                     }
                 }
                 return
+            case let .failure(failure):
+                self.send(failure.response, on: connection)
+                return
+            case .incomplete:
+                break
             }
 
             if isComplete {
-                connection.cancel()
+                self.send(
+                    HTTPRequestParseFailure.badRequest("HTTP request ended before it was complete.").response,
+                    on: connection
+                )
                 return
             }
 

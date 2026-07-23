@@ -2,7 +2,9 @@ import BenchmarkKit
 import Contracts
 import CryptoKit
 import Foundation
+import IOKit
 import LoggingKit
+import Metal
 import ModelInspection
 import RuntimeAdapters
 import Storage
@@ -53,7 +55,21 @@ private struct PersistedControlPlaneState: Codable {
 }
 
 public struct HardwareProbe: Sendable {
-    public init() {}
+    private let gpuCoreCountProvider: @Sendable () -> Int?
+    private let metalAvailabilityProvider: @Sendable () -> Bool
+
+    public init() {
+        self.gpuCoreCountProvider = Self.ioRegistryGPUCoreCount
+        self.metalAvailabilityProvider = Self.systemMetalAvailable
+    }
+
+    init(
+        gpuCoreCountProvider: @escaping @Sendable () -> Int?,
+        metalAvailabilityProvider: @escaping @Sendable () -> Bool
+    ) {
+        self.gpuCoreCountProvider = gpuCoreCountProvider
+        self.metalAvailabilityProvider = metalAvailabilityProvider
+    }
 
     public func collect() -> HardwareSnapshot {
         let processInfo = ProcessInfo.processInfo
@@ -61,7 +77,7 @@ public struct HardwareProbe: Sendable {
         let processorCount = processInfo.processorCount
         let performanceCores = sysctlInt(named: "hw.perflevel0.physicalcpu") ?? max(processorCount / 2, 1)
         let efficiencyCores = sysctlInt(named: "hw.perflevel1.physicalcpu") ?? max(processorCount - performanceCores, 0)
-        let gpuCores = sysctlInt(named: "hw.nperflevels") ?? 16
+        let gpuCores = max(gpuCoreCountProvider() ?? 0, 0)
         let freeDisk = freeDiskBytes()
         let chipFamily = sysctlString(named: "machdep.cpu.brand_string") ?? sysctlString(named: "hw.model") ?? "Apple Silicon"
         let osVersion = "\(processInfo.operatingSystemVersionString)"
@@ -73,11 +89,52 @@ public struct HardwareProbe: Sendable {
             totalMemoryBytes: totalMemory,
             freeDiskBytes: freeDisk,
             osVersion: osVersion,
-            metalAvailable: true,
+            metalAvailable: metalAvailabilityProvider(),
             notes: [
+                "gpuCoreCountSource": gpuCores > 0 ? "IOKit gpu-core-count" : "unavailable",
                 "unifiedMemory": "true"
             ]
         )
+    }
+
+    static func gpuCoreCount(from registryProperty: Any?) -> Int? {
+        guard let number = registryProperty as? NSNumber else {
+            return nil
+        }
+        let value = number.intValue
+        return value > 0 ? value : nil
+    }
+
+    private static func ioRegistryGPUCoreCount() -> Int? {
+        guard let matching = IOServiceMatching("IOAccelerator") else {
+            return nil
+        }
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else {
+            return nil
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var service = IOIteratorNext(iterator)
+        while service != IO_OBJECT_NULL {
+            if let property = IORegistryEntryCreateCFProperty(
+                service,
+                "gpu-core-count" as CFString,
+                kCFAllocatorDefault,
+                0
+            )?.takeRetainedValue(),
+               let count = gpuCoreCount(from: property) {
+                IOObjectRelease(service)
+                return count
+            }
+            IOObjectRelease(service)
+            service = IOIteratorNext(iterator)
+        }
+        return nil
+    }
+
+    private static func systemMetalAvailable() -> Bool {
+        MTLCreateSystemDefaultDevice() != nil
     }
 
     private func freeDiskBytes() -> Int64 {
@@ -187,7 +244,8 @@ public final class ControlPlaneHost: @unchecked Sendable {
         try await server.start()
     }
 
-    public func stop() {
+    public func stop() async {
+        await service.shutdown()
         server.stop()
     }
 }
@@ -321,10 +379,13 @@ public actor ControlPlaneService {
     }
 
     public func health() -> AppHealth {
-        AppHealth(
+        reconcileDeadEngines()
+        return AppHealth(
             status: "ok",
             uptimeSeconds: Int(Date().timeIntervalSince(startedAt)),
-            activeEngineCount: instances.values.filter { $0.status == .ready || $0.status == .busy }.count,
+            activeEngineCount: managedEngines.values.filter {
+                $0.isRunning && ($0.instance.status == .ready || $0.instance.status == .busy)
+            }.count,
             readyModelCount: models.values.filter { $0.status == .ready || $0.status == .warmable }.count
         )
     }
@@ -479,6 +540,9 @@ public actor ControlPlaneService {
     }
 
     public func importModel(_ request: ImportModelRequest) async throws -> ModelRecord {
+        if request.sourceKind == .local {
+            try Self.validateLocalModelSource(request.sourceRef)
+        }
         let id = Identifiers.model(from: request.sourceRef)
         if models[id] != nil {
             throw APIErrorEnvelope(code: "MODEL_IMPORT_FAILED", message: "A model with this source already exists.", details: ["modelId": id])
@@ -503,6 +567,36 @@ public actor ControlPlaneService {
             "source": request.sourceRef
         ])
         return inspected
+    }
+
+    static func validateLocalModelSource(
+        _ sourceRef: String,
+        fileManager: FileManager = .default
+    ) throws {
+        let trimmed = sourceRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            throw APIErrorEnvelope(
+                code: "MODEL_IMPORT_FAILED",
+                message: "A local model directory is required.",
+                details: ["sourceRef": sourceRef]
+            )
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: trimmed, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw APIErrorEnvelope(
+                code: "MODEL_IMPORT_FAILED",
+                message: "The local model directory does not exist.",
+                details: ["sourceRef": sourceRef]
+            )
+        }
+        guard fileManager.isReadableFile(atPath: trimmed) else {
+            throw APIErrorEnvelope(
+                code: "MODEL_IMPORT_FAILED",
+                message: "The local model directory is not readable.",
+                details: ["sourceRef": sourceRef]
+            )
+        }
     }
 
     public func searchModelCatalog(query: String, limit: Int = 12) async throws -> ModelSearchResponse {
@@ -728,15 +822,15 @@ public actor ControlPlaneService {
     }
 
     public func activity() -> ActivitySnapshot {
-        let currentInstances = Array(managedEngines.values).map { managed in
-            let status: EngineStatus = managed.isRunning ? managed.instance.status : .stopped
+        reconcileDeadEngines()
+        let currentInstances = managedEngines.values.filter(\.isRunning).map { managed in
             return EngineInstanceRef(
                 id: managed.instance.id,
                 backendId: managed.instance.backendId,
                 modelId: managed.instance.modelId,
                 host: managed.instance.host,
                 port: managed.instance.port,
-                status: status,
+                status: managed.instance.status,
                 warnings: managed.instance.warnings,
                 pid: managed.instance.pid,
                 launchedAt: managed.instance.launchedAt,
@@ -750,8 +844,8 @@ public actor ControlPlaneService {
                 modelId: instance.modelId,
                 backendId: instance.backendId,
                 queueDepth: instance.status == .busy ? 1 : 0,
-                ttftMsP50: 420,
-                outputTokPerSecP50: instance.backendId == BackendKind.vllmMetal.rawValue ? 41.0 : 29.0,
+                ttftMsP50: nil,
+                outputTokPerSecP50: nil,
                 peakMemoryBytes: models[instance.modelId]?.lastValidation?.measured.peakMemoryBytes,
                 isWarm: instance.status == .ready
             )
@@ -777,6 +871,22 @@ public actor ControlPlaneService {
             memoryPressure: pressure,
             activeInstances: instancesActivity
         )
+    }
+
+    public func shutdown() async {
+        for (id, managed) in Array(managedEngines) {
+            await ProcessSupervisor.stop(managed)
+            instances[id] = managed.instance
+            managedEngines[id] = nil
+        }
+    }
+
+    private func reconcileDeadEngines() {
+        for (id, managed) in Array(managedEngines) where managed.isRunning == false {
+            managed.updateStatus(.stopped)
+            instances[id] = managed.instance
+            managedEngines[id] = nil
+        }
     }
 
     public func runBenchmark(_ request: BenchmarkRequest) async throws -> BenchmarkRecord {

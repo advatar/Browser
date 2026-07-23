@@ -164,6 +164,52 @@ func finalizedManifestRewritesPathsInsideManagedRuntimeRoot() async throws {
 }
 
 @Test
+func relocatedVLLMEntrypointShebangUsesFinalInterpreter() throws {
+    let sandbox = try TestExecutableSandbox()
+    defer { sandbox.cleanup() }
+    let originalRoot = sandbox.root.appending(path: "staging/runtime")
+    let finalRoot = sandbox.root.appending(path: "runtimes/vllm-metal")
+    let bin = finalRoot.appending(path: "venv/bin")
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let entrypoint = bin.appending(path: "vllm")
+    try Data("#!\(originalRoot.path)/venv/bin/python\nprint('vllm')\n".utf8).write(to: entrypoint)
+
+    try RuntimeInstaller.rewriteRelocatedEntrypointShebangs(
+        in: bin,
+        originalRuntimeRoot: originalRoot,
+        finalRuntimeRoot: finalRoot
+    )
+
+    let rewritten = try String(contentsOf: entrypoint, encoding: .utf8)
+    #expect(rewritten.hasPrefix("#!\(finalRoot.path)/venv/bin/python\n"))
+}
+
+@Test
+func vllmWheelSelectionRequiresMatchingMacArchitecture() {
+    let payload = """
+    {
+      "assets": [
+        {
+          "name": "vllm_metal-0.1-cp312-cp312-macosx_15_0_x86_64.whl",
+          "browser_download_url": "https://example.com/x86.whl"
+        },
+        {
+          "name": "vllm_metal-0.1-cp312-cp312-macosx_15_0_arm64.whl",
+          "browser_download_url": "https://example.com/arm.whl"
+        }
+      ]
+    }
+    """.data(using: .utf8)!
+
+    let selected = RuntimeInstaller.selectVLLMMetalWheelURL(
+        from: payload,
+        architecture: .aarch64AppleDarwin
+    )
+
+    #expect(selected?.absoluteString == "https://example.com/arm.whl")
+}
+
+@Test
 func managedPythonLocatorPrefersManagedRuntimeWhenVersionTiesSystem() async throws {
     let sandbox = try TestExecutableSandbox()
     defer { sandbox.cleanup() }

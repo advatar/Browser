@@ -641,6 +641,8 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].loadURLString = nil
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = false
+            tabs[index].canGoBack = false
+            tabs[index].canGoForward = false
             tabs[index].isPrivateOverlay = false
             tabs[index].privateOverlayNetworkID = nil
             tabs[index].isTorrentTransfer = false
@@ -654,6 +656,7 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].title = title
             tabs[index].urlString = url.absoluteString
             tabs[index].loadURLString = nil
+            tabs[index].modelLoadRevision &+= 1
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = true
             tabs[index].isPrivateOverlay = false
@@ -2762,20 +2765,30 @@ final class BrowserViewModel: ObservableObject {
             latestPageSnapshot = nil
         }
         addressText = raw
+        let expectedNavigationGeneration = pageNavigationGenerations[tabID] ?? 0
 
         Task { @MainActor [weak self] in
             guard let self else { return }
             let resolution = await runtimeBridge.resolve(raw)
-            applyRuntimeResolution(resolution, tabID: tabID, fallbackMessage: fallbackMessage)
+            applyRuntimeResolution(
+                resolution,
+                tabID: tabID,
+                expectedNavigationGeneration: expectedNavigationGeneration,
+                fallbackMessage: fallbackMessage
+            )
         }
     }
 
     private func applyRuntimeResolution(
         _ resolution: RuntimeBridgeResolution,
         tabID: UUID,
+        expectedNavigationGeneration: UInt64,
         fallbackMessage: String
     ) {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        guard pageNavigationGenerations[tabID] == expectedNavigationGeneration,
+              let index = tabs.firstIndex(where: { $0.id == tabID }) else {
+            return
+        }
         let privateOverlayNetwork = PrivateOverlayNetwork.profile(forInput: resolution.originalInput)
         let torrentTransferNetwork = DecentralizedStorageNetwork.privacyScopedTransferProfile(forInput: resolution.originalInput)
         let isPrivateOverlayResolution = resolution.source == .privateOverlayLocalAdapter
@@ -2806,6 +2819,7 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].title = privateOverlayNetwork?.title ?? "Private overlay"
             tabs[index].urlString = resolution.originalInput
             tabs[index].loadURLString = resolvedURLString
+            tabs[index].modelLoadRevision &+= 1
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = true
             tabs[index].isPrivateOverlay = true
@@ -2822,6 +2836,7 @@ final class BrowserViewModel: ObservableObject {
             tabs[index].title = torrentTransferNetwork?.title ?? "Torrent transfer"
             tabs[index].urlString = resolution.originalInput
             tabs[index].loadURLString = resolvedURLString
+            tabs[index].modelLoadRevision &+= 1
             tabs[index].mobileNotice = nil
             tabs[index].isLoading = true
             tabs[index].isPrivateOverlay = false
@@ -2838,6 +2853,7 @@ final class BrowserViewModel: ObservableObject {
         tabs[index].title = title
         tabs[index].urlString = resolvedURLString
         tabs[index].loadURLString = nil
+        tabs[index].modelLoadRevision &+= 1
         tabs[index].mobileNotice = nil
         tabs[index].isLoading = true
         tabs[index].isPrivateOverlay = false

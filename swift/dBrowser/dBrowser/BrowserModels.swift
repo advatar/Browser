@@ -1772,6 +1772,11 @@ struct BrowserTab: Identifiable, Equatable {
     var title: String
     var urlString: String
     var loadURLString: String?
+    /// Advances only when the model explicitly requests a new WKWebView load.
+    /// WebKit-owned redirects, form submissions, and history transitions update
+    /// the mirrored URL without advancing this revision, preventing SwiftUI
+    /// reconciliation from replaying those requests as body-less GETs.
+    var modelLoadRevision: UInt64
     var isLoading: Bool
     var canGoBack: Bool
     var canGoForward: Bool
@@ -1786,6 +1791,7 @@ struct BrowserTab: Identifiable, Equatable {
         title: String = "Home",
         urlString: String = "about:home",
         loadURLString: String? = nil,
+        modelLoadRevision: UInt64 = 0,
         isLoading: Bool = false,
         canGoBack: Bool = false,
         canGoForward: Bool = false,
@@ -1799,6 +1805,7 @@ struct BrowserTab: Identifiable, Equatable {
         self.title = title
         self.urlString = urlString
         self.loadURLString = loadURLString
+        self.modelLoadRevision = modelLoadRevision
         self.isLoading = isLoading
         self.canGoBack = canGoBack
         self.canGoForward = canGoForward
@@ -3173,6 +3180,13 @@ enum BrowserURLResolver {
             return .home
         }
 
+        // Foundation interprets bare host-and-port inputs such as
+        // `localhost:8400` as custom schemes. Resolve network addresses before
+        // generic scheme dispatch so local control planes remain reachable.
+        if let url = bareHostURL(for: input) {
+            return .web(url)
+        }
+
         if let url = URL(string: input), let scheme = url.scheme?.lowercased() {
             if let network = PrivateOverlayNetwork.profile(forInput: input) {
                 return .privateOverlay(
@@ -3236,6 +3250,38 @@ enum BrowserURLResolver {
                 limit: BrowserResearchSearchPolicy.maximumQueryCharacters
             )
         )
+    }
+
+    private static func bareHostURL(for input: String) -> URL? {
+        guard !input.contains("://"), !input.contains(where: \.isWhitespace) else {
+            return nil
+        }
+
+        let candidate: String
+        if input.caseInsensitiveCompare("::1") == .orderedSame {
+            candidate = "[::1]"
+        } else {
+            candidate = input
+        }
+
+        guard var components = URLComponents(string: "https://\(candidate)"),
+              let host = components.host?.lowercased(),
+              !host.isEmpty else {
+            return nil
+        }
+        let normalizedHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+
+        let isLocalHost = normalizedHost == "localhost"
+            || normalizedHost.hasSuffix(".localhost")
+            || normalizedHost == "::1"
+            || normalizedHost.hasPrefix("127.")
+            || normalizedHost.hasSuffix(".local")
+        guard isLocalHost || components.port != nil else {
+            return nil
+        }
+
+        components.scheme = isLocalHost ? "http" : "https"
+        return components.url
     }
 
     private static func looksLikeHost(_ input: String) -> Bool {

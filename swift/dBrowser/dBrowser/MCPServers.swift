@@ -171,8 +171,8 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         copy.blockchainAccess = copy.blockchainAccess.sanitized()
         if !copy.enabled {
             copy.status = .disabled
-        } else if copy.status.state == .disabled {
-            copy.status = MCPServerStatus(state: .disconnected, message: "Ready to connect.", checkedAt: nil, discoveredTools: [])
+        } else if copy.status.state == .disabled || copy.status.state == .connected {
+            copy.status = copy.configuredPreviewStatus()
         }
         return copy
     }
@@ -212,14 +212,12 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         return nil
     }
 
-    func connectedStatus(now: Date = Date()) -> MCPServerStatus {
-        let baseTools = defaultCapability.map { [$0] } ?? Self.defaultTools(for: transport)
-        let tools = Array(Set(baseTools + blockchainAccess.hostTools)).sorted()
+    func configuredPreviewStatus(now: Date? = nil) -> MCPServerStatus {
         return MCPServerStatus(
-            state: .connected,
-            message: "Connected to \(name) over \(transport.title). Capability negotiation is ready. \(blockchainAccess.installSummary)",
+            state: .disconnected,
+            message: "\(transport.title) configuration is valid, but dBrowser does not yet implement this MCP transport. No connection or capability discovery was attempted.",
             checkedAt: now,
-            discoveredTools: tools
+            discoveredTools: []
         )
     }
 
@@ -262,13 +260,6 @@ struct MCPServerConfiguration: Codable, Equatable, Identifiable {
         }
     }
 
-    private static func defaultTools(for transport: MCPServerTransport) -> [String] {
-        switch transport {
-        case .http: ["tools/list", "resources/list"]
-        case .websocket: ["tools/list", "prompts/list"]
-        case .stdio: ["tools/list", "stdio/session"]
-        }
-    }
 }
 
 struct MCPServerInventory: Equatable {

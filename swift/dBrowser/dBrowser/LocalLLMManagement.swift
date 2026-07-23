@@ -46,6 +46,10 @@ struct LocalLLMRecommendedImport: Equatable {
     var packageSummary: String
     var readinessSummary: String
 
+    var managementBoundarySummary: String {
+        "Importing registers this model with SwiftLM for inspection and runtime management. It does not connect a Copilot inference executor or make the model selectable by itself."
+    }
+
     static func current(fileManager: FileManager = .default) -> LocalLLMRecommendedImport {
         let selection = BundledLLMSelection.recommended
         let profile = selection.profile
@@ -70,12 +74,31 @@ struct LocalLLMRecommendedImport: Equatable {
     }
 }
 
+struct LocalLLMCopilotReadiness: Equatable {
+    var isRunnable: Bool
+    var reason: String
+
+    init(profile: LLMModelProfile?) {
+        guard let profile else {
+            self.isRunnable = false
+            self.reason = "The local Copilot model profile is not registered."
+            return
+        }
+        self.isRunnable = profile.availability.isRunnable
+        self.reason = profile.availability.message
+    }
+}
+
 struct LocalLLMHardwareSummary: Equatable {
     var chipFamily: String
     var unifiedMemory: String
     var freeDisk: String
     var gpuCores: String
     var osVersion: String
+
+    var isAvailable: Bool {
+        self != .empty
+    }
 
     static let empty = LocalLLMHardwareSummary(
         chipFamily: "Unknown",
@@ -243,7 +266,10 @@ final class LocalLLMManager: LocalLLMManaging {
 
     func connect() async -> LocalLLMManagementState {
 #if os(macOS)
-        host = nil
+        if let host {
+            await host.stop()
+            self.host = nil
+        }
         client = ControlPlaneClient()
         return await loadOverview(
             mode: .connected,
@@ -256,8 +282,14 @@ final class LocalLLMManager: LocalLLMManaging {
 
     func bootstrapEmbeddedControlPlane() async -> LocalLLMManagementState {
 #if os(macOS)
-        if host != nil {
-            return await refresh()
+        if let host {
+            let refreshedState = await refresh()
+            if refreshedState.mode == .embedded {
+                return refreshedState
+            }
+            await host.stop()
+            self.host = nil
+            self.client = ControlPlaneClient()
         }
 
         if let overview = try? await client.fetchOverview() {
@@ -269,16 +301,23 @@ final class LocalLLMManager: LocalLLMManaging {
         }
 
         do {
-            let host = try await ControlPlaneHost.bootstrap()
+            let candidateHost = try await ControlPlaneHost.bootstrap()
             do {
-                try await host.start()
-                self.host = host
-                self.client = ControlPlaneClient(apiKey: host.secrets.plaintextKey)
-                return await loadOverview(
+                try await candidateHost.start()
+                self.host = candidateHost
+                self.client = ControlPlaneClient(apiKey: candidateHost.secrets.plaintextKey)
+                let state = await loadOverview(
                     mode: .embedded,
                     successStatus: "Embedded SwiftLM control plane is running at \(Self.defaultBaseURLString)."
                 )
+                if state.mode == .disconnected {
+                    await candidateHost.stop()
+                    self.host = nil
+                    self.client = ControlPlaneClient()
+                }
+                return state
             } catch {
+                await candidateHost.stop()
                 if let overview = try? await ControlPlaneClient().fetchOverview() {
                     self.host = nil
                     self.client = ControlPlaneClient()
@@ -435,7 +474,7 @@ final class LocalLLMManager: LocalLLMManaging {
                 chipFamily: overview.hardware.chipFamily,
                 unifiedMemory: byteCount(overview.hardware.totalMemoryBytes, style: .memory),
                 freeDisk: byteCount(overview.hardware.freeDiskBytes, style: .file),
-                gpuCores: "\(overview.hardware.gpuCores)",
+                gpuCores: overview.hardware.gpuCores > 0 ? "\(overview.hardware.gpuCores)" : "Unavailable",
                 osVersion: overview.hardware.osVersion
             ),
             backends: overview.backends.map(backendSummary),

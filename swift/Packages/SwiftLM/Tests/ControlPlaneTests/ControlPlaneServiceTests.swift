@@ -13,6 +13,25 @@ func embeddedHTTPServerIsRestrictedToIPv4Loopback() {
 }
 
 @Test
+func embeddedHTTPServerStartsAndServesLoopbackRequests() async throws {
+    let port = try PortAllocator.nextAvailablePort()
+    let server = try LocalHTTPServer(port: UInt16(port)) { request in
+        #expect(request.method == "GET")
+        #expect(request.path == "/health")
+        return .text(body: "ok")
+    }
+    try await server.start()
+    defer { server.stop() }
+
+    let url = try #require(URL(string: "http://127.0.0.1:\(port)/health"))
+    let (data, response) = try await URLSession.shared.data(from: url)
+    let httpResponse = try #require(response as? HTTPURLResponse)
+
+    #expect(httpResponse.statusCode == 200)
+    #expect(String(decoding: data, as: UTF8.self) == "ok")
+}
+
+@Test
 func controlPlaneBootstrapPersistsStateAndDeveloperAPIKeyMetadata() async throws {
     let root = URL(fileURLWithPath: NSTemporaryDirectory())
         .appending(path: "swiftlm-tests-\(UUID().uuidString.lowercased())")
@@ -168,9 +187,12 @@ func controlPlaneAutoInstallsManagedBackendForConversationLaunch() async throws 
     #expect(installationState.isInstalled())
 
     let activity = await service.activity()
-    if let instanceID = activity.activeInstances.first?.instanceId {
-        _ = try? await service.stopEngine(id: instanceID)
-    }
+    #expect(activity.activeInstances.isEmpty == false)
+    await service.shutdown()
+    let stoppedActivity = await service.activity()
+    let stoppedHealth = await service.health()
+    #expect(stoppedActivity.activeInstances.isEmpty)
+    #expect(stoppedHealth.activeEngineCount == 0)
 }
 
 @Test

@@ -21,6 +21,36 @@
 
 ## Active Task
 
+## Deep Reliability Review
+
+Audit and repair high-confidence browser, SwiftLM, and UI-state defects found
+after the embedded-control-plane and Google navigation failures.
+
+- [x] Record the review findings, implementation batch, and structural follow-ups in GitHub.
+- [x] Replace URL-based WebKit load ownership with explicit load revisions and settle navigation state on terminal callbacks.
+- [x] Correct common local-address parsing, stale Home navigation flags, and tab-close action wiring.
+- [x] Prevent stale decentralized-resolution results from overwriting newer navigation.
+- [x] Harden SwiftLM HTTP parsing against malformed lengths, duplicate queries, and oversized requests.
+- [x] Reject missing local model paths instead of importing them as ready.
+- [x] Correct hardware capability probing and remove fabricated live engine telemetry.
+- [x] Repair relocated vLLM entrypoints and architecture-specific wheel selection.
+- [x] Make embedded-host shutdown stop managed engines and avoid stale active-engine reporting.
+- [x] Stop presenting unavailable local Copilot execution and unimplemented MCP transports as successful actions.
+- [x] Add focused regression coverage for every repaired boundary.
+- [x] Run the SwiftLM suite, focused dBrowser tests, and full macOS build.
+- [x] Commit and push only the scoped files, then update all review issues with verification.
+
+Validation notes:
+
+- SwiftLM passed 41/41 tests, including a live loopback listener request; its
+  hardware probe reported Apple M5 Max, 40 GPU cores, and 128 GiB memory.
+- The complete dBrowser test target passed 341/341 tests with no failures,
+  skips, or expected failures.
+- The macOS app build and coverage-enabled `build-for-testing` passed. The only
+  emitted diagnostic was the existing MLX `Cmlx` umbrella-header warning.
+- `git diff --check` passed, and unrelated Xcode project ordering plus
+  `xcuserdata` changes remain unstaged.
+
 ## Preserve WebKit Form Navigations
 
 Prevent WebKit-owned form submissions and redirects from being replayed as

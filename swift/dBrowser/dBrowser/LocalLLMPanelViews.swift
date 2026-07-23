@@ -26,7 +26,7 @@ struct LocalLLMPanelView: View {
                 PanelHeaderView(
                     title: "Local LLMs",
                     systemImage: BrowserPanel.localLLM.systemImage,
-                    subtitle: "Manage local models, runtimes, and the SwiftLM control plane used by Copilot."
+                    subtitle: "Import and manage local model artifacts and SwiftLM runtimes. Copilot requires a separately connected, runnable inference executor."
                 )
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -104,7 +104,6 @@ struct LocalLLMPanelView: View {
         .background(platformBackgroundColor)
         .accessibilityIdentifier("panel-content-local-llms")
         .task {
-            guard browser.localLLMState.mode == .disconnected else { return }
             await browser.refreshLocalLLMManagement()
         }
     }
@@ -170,10 +169,22 @@ struct LocalLLMRecommendedModelView: View {
     let recommended: LocalLLMRecommendedImport
     let isWorking: Bool
 
+    private var localCopilotProfile: LLMModelProfile? {
+        browser.llmModelOptions.first { $0.id == LLMModelRegistry.localGemmaID }
+    }
+
+    private var copilotReadiness: LocalLLMCopilotReadiness {
+        LocalLLMCopilotReadiness(profile: localCopilotProfile)
+    }
+
+    private var isSelectedForCopilot: Bool {
+        browser.selectedLLMModelID == LLMModelRegistry.localGemmaID
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Label("Recommended iPhone Model", systemImage: "sparkles")
+                Label("Recommended Local Model", systemImage: "sparkles")
                     .font(.headline)
                 Spacer()
                 Text(recommended.sourceKind.title)
@@ -183,7 +194,10 @@ struct LocalLLMRecommendedModelView: View {
 
             Text(recommended.displayName)
                 .font(.title3.weight(.semibold))
-            Text(recommended.readinessSummary)
+            Text("Package compatibility: \(recommended.readinessSummary)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(recommended.managementBoundarySummary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(recommended.sourceRef)
@@ -213,8 +227,21 @@ struct LocalLLMRecommendedModelView: View {
                     Label("Use for Copilot", systemImage: "checkmark.circle")
                 }
                 .buttonStyle(.bordered)
-                .disabled(browser.selectedLLMModelID == LLMModelRegistry.localGemmaID)
+                .disabled(isWorking || isSelectedForCopilot || !copilotReadiness.isRunnable)
+                .help(copilotReadiness.reason)
+                .accessibilityHint(copilotReadiness.reason)
             }
+
+            Label(
+                isSelectedForCopilot && copilotReadiness.isRunnable
+                    ? "Selected for Copilot."
+                    : copilotReadiness.reason,
+                systemImage: copilotReadiness.isRunnable ? "checkmark.circle" : "exclamationmark.triangle"
+            )
+            .font(.caption)
+            .foregroundStyle(copilotReadiness.isRunnable ? Color.secondary : Color.orange)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("local-llm-copilot-readiness")
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -231,17 +258,25 @@ struct LocalLLMHardwareView: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Hardware", systemImage: "desktopcomputer")
                 .font(.headline)
-            Text(hardware.chipFamily)
-                .font(.subheadline.weight(.semibold))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], alignment: .leading, spacing: 8) {
-                LocalLLMMetricTile(title: "Unified Memory", value: hardware.unifiedMemory, systemImage: "memorychip")
-                LocalLLMMetricTile(title: "Free Disk", value: hardware.freeDisk, systemImage: "internaldrive")
-                LocalLLMMetricTile(title: "GPU Cores", value: hardware.gpuCores, systemImage: "cpu")
-                LocalLLMMetricTile(title: "API Key", value: developerKeyPreview ?? "none", systemImage: "key")
+            if hardware.isAvailable {
+                Text(hardware.chipFamily)
+                    .font(.subheadline.weight(.semibold))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 8)], alignment: .leading, spacing: 8) {
+                    LocalLLMMetricTile(title: "Unified Memory", value: hardware.unifiedMemory, systemImage: "memorychip")
+                    LocalLLMMetricTile(title: "Free Disk", value: hardware.freeDisk, systemImage: "internaldrive")
+                    LocalLLMMetricTile(title: "GPU Cores", value: hardware.gpuCores, systemImage: "cpu")
+                    LocalLLMMetricTile(title: "API Key", value: developerKeyPreview ?? "none", systemImage: "key")
+                }
+                Text(hardware.osVersion)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                EmptyPanelView(
+                    title: "Hardware unavailable",
+                    message: "Start Embedded or connect to a running SwiftLM control plane to collect this Mac's hardware snapshot."
+                )
+                .accessibilityIdentifier("local-llm-hardware-unavailable")
             }
-            Text(hardware.osVersion)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -447,4 +482,3 @@ struct LocalLLMEnginesView: View {
         }
     }
 }
-

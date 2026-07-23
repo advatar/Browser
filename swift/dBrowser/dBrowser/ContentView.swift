@@ -128,28 +128,40 @@ struct ContentView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(browser.tabs) { tab in
-                    Button {
-                        browser.activateTab(tab.id)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: tab.isLoading ? "circle.dotted" : "globe")
-                            Text(tab.title)
-                                .lineLimit(1)
-                            if browser.tabs.count > 1 {
+                    HStack(spacing: 6) {
+                        Button {
+                            browser.activateTab(tab.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: tab.isLoading ? "circle.dotted" : "globe")
+                                Text(tab.title)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open \(tab.title) tab")
+
+                        if browser.tabs.count > 1 {
+                            Button {
+                                browser.closeTab(tab.id)
+                            } label: {
                                 Image(systemName: "xmark")
                                     .font(.caption2)
-                                    .onTapGesture {
-                                        browser.closeTab(tab.id)
-                                    }
+                                    .padding(4)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close \(tab.title) tab")
+                            .accessibilityIdentifier("close-tab-\(tab.id.uuidString)")
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .frame(maxWidth: 220, alignment: .leading)
-                        .background(tab.id == browser.activeTabID ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: 220, alignment: .leading)
+                    .background(tab.id == browser.activeTabID ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
             .padding(.horizontal, 12)

@@ -1559,7 +1559,7 @@ final class MobileRuntimeBridge: ObservableObject, RuntimeBridge {
         if let validationError = server.validationError() {
             server.status = MCPServerConfiguration.failedStatus(validationError)
         } else {
-            server.status = server.connectedStatus()
+            server.status = server.configuredPreviewStatus(now: Date())
         }
         mcpServers[index] = server
         refreshMCPFeatureState()

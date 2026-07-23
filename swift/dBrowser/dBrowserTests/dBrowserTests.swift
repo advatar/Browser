@@ -92,20 +92,21 @@ private struct StubPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
 
 @MainActor
 struct dBrowserTests {
-    @Test func navigationOwnershipPreservesWebKitPostAndLoadsExternalURLs() throws {
-        let initialURL = try #require(URL(string: "https://www.google.com/"))
-        let consentSaveURL = try #require(URL(string: "https://consent.google.com/save"))
-        let externalURL = try #require(URL(string: "https://example.com/"))
-        var tracker = BrowserNavigationOwnershipTracker()
+    @Test func modelLoadRevisionPreservesWebKitRequestsAndAllowsSameURLReloads() {
+        var tracker = BrowserModelLoadRevisionTracker()
 
-        #expect(tracker.shouldLoadModelURL(initialURL))
-        tracker.recordWebKitNavigation(to: consentSaveURL)
-
-        // Mirroring WebKit's POST destination into BrowserTab must not cause a
-        // second, body-less URLRequest to be loaded as GET.
-        #expect(!tracker.shouldLoadModelURL(consentSaveURL))
-        #expect(tracker.shouldLoadModelURL(externalURL))
-        #expect(!tracker.shouldLoadModelURL(externalURL))
+        let initialLoad = tracker.shouldHandle(0)
+        #expect(initialLoad)
+        // SwiftUI may reconcile the WebKit-owned POST or redirect URL many
+        // times, but it remains part of the already handled model load.
+        let repeatedReconciliation = tracker.shouldHandle(0)
+        #expect(!repeatedReconciliation)
+        // An explicit model navigation advances the revision, even when the
+        // requested URL string itself is unchanged.
+        let explicitReload = tracker.shouldHandle(1)
+        let repeatedReloadReconciliation = tracker.shouldHandle(1)
+        #expect(explicitReload)
+        #expect(!repeatedReloadReconciliation)
     }
 
 
@@ -164,6 +165,24 @@ struct dBrowserTests {
             return
         }
         #expect(url == URL(string: "https://example.com")!)
+    }
+
+    @Test func bareHostPortsAndLoopbackAddressesResolveAsWebURLs() {
+        let cases = [
+            ("localhost:8400", "http://localhost:8400"),
+            ("127.0.0.1:8400/status", "http://127.0.0.1:8400/status"),
+            ("[::1]:8400/status", "http://[::1]:8400/status"),
+            ("service.local:8080", "http://service.local:8080"),
+            ("example.com:8443/path", "https://example.com:8443/path")
+        ]
+
+        for (input, expectedURLString) in cases {
+            guard case .web(let url) = BrowserURLResolver.resolve(input) else {
+                Issue.record("Expected \(input) to resolve as a web URL")
+                continue
+            }
+            #expect(url.absoluteString == expectedURLString)
+        }
     }
 
     @Test func searchTermsResolveToNativeResearchQuery() {
@@ -1140,6 +1159,29 @@ struct dBrowserTests {
         #expect(stdio?.environmentText == "API_KEY=set-me")
     }
 
+    @Test func mcpConfigurationCannotRetainAnUnverifiedConnectedStatus() {
+        let server = MCPServerConfiguration(
+            id: "unverified-http",
+            name: "Unverified HTTP MCP",
+            transport: .http,
+            endpoint: "http://127.0.0.1:7410/mcp",
+            enabled: true,
+            status: MCPServerStatus(
+                state: .connected,
+                message: "Legacy unverified connection claim.",
+                checkedAt: Date(timeIntervalSince1970: 10),
+                discoveredTools: ["tools/list"]
+            )
+        )
+
+        let sanitized = server.sanitizedForSave
+
+        #expect(sanitized.status.state == .disconnected)
+        #expect(sanitized.status.discoveredTools.isEmpty)
+        #expect(sanitized.status.message.contains("does not yet implement"))
+        #expect(sanitized.status.message.contains("No connection or capability discovery was attempted"))
+    }
+
     @MainActor
     @Test func a2uiRendererParsesSampleTokensIntoSurface() async {
         let renderer = A2UITokenRenderer()
@@ -1548,6 +1590,39 @@ struct dBrowserTests {
         #expect(recommended.readinessSummary == bundledProfile.readinessSummary)
         #expect(recommended.packageSummary.contains("mlx-swift-lm"))
         #expect(recommended.sourceRef == bundledProfile.localWorkspacePath || recommended.sourceRef == bundledProfile.huggingFaceID)
+        #expect(recommended.managementBoundarySummary.contains("does not connect a Copilot inference executor"))
+        #expect(recommended.managementBoundarySummary.contains("make the model selectable") == true)
+    }
+
+    @Test func localLLMCopilotReadinessUsesTheRegisteredProfileAvailabilityReason() {
+        guard var localProfile = LLMModelRegistry.model(withID: LLMModelRegistry.localGemmaID) else {
+            Issue.record("Expected the local Gemma profile")
+            return
+        }
+
+        let unavailable = LocalLLMCopilotReadiness(profile: localProfile)
+        #expect(!unavailable.isRunnable)
+        #expect(unavailable.reason == LLMModelRegistry.localMLXUnavailableReason)
+
+        localProfile.availability = .degraded("Runnable with reduced throughput.")
+        let degraded = LocalLLMCopilotReadiness(profile: localProfile)
+        #expect(degraded.isRunnable)
+        #expect(degraded.reason == "Runnable with reduced throughput.")
+
+        let missing = LocalLLMCopilotReadiness(profile: nil)
+        #expect(!missing.isRunnable)
+        #expect(missing.reason.contains("not registered"))
+    }
+
+    @Test func localLLMHardwareSummaryDistinguishesDisconnectedPlaceholderState() {
+        #expect(!LocalLLMHardwareSummary.empty.isAvailable)
+        #expect(LocalLLMHardwareSummary(
+            chipFamily: "Apple M5 Max",
+            unifiedMemory: "64 GB",
+            freeDisk: "1 TB",
+            gpuCores: "40",
+            osVersion: "macOS"
+        ).isAvailable)
     }
 
     @Test func dBrowserUsesVendoredSwiftLMPackageForLocalLLMRuntime() throws {
@@ -4976,7 +5051,7 @@ struct dBrowserTests {
     }
 
     @MainActor
-    @Test func runtimeBridgeConnectsAndValidatesMCPServers() async {
+    @Test func runtimeBridgeValidatesMCPConfigurationWithoutClaimingTransportConnection() async {
         let bridge = MobileRuntimeBridge()
         var http = bridge.mcpServers.first { $0.id == "demo-weather" }!
         http.enabled = true
@@ -4985,10 +5060,12 @@ struct dBrowserTests {
         let connected = await bridge.connectMCPServer(http.id)
         let mcpFeature = bridge.featureStates.first { $0.feature == .mcpServers }
 
-        #expect(connected?.status.state == .connected)
-        #expect(connected?.status.discoveredTools.contains("tools/list") == true)
-        #expect(mcpFeature?.mode == .service)
-        #expect(mcpFeature?.status.contains("1 connected") == true)
+        #expect(connected?.status.state == .disconnected)
+        #expect(connected?.status.discoveredTools.isEmpty == true)
+        #expect(connected?.status.message.contains("does not yet implement this MCP transport") == true)
+        #expect(connected?.status.message.contains("No connection or capability discovery was attempted") == true)
+        #expect(mcpFeature?.mode == .local)
+        #expect(mcpFeature?.status.contains("0 connected") == true)
 
         let invalidWebSocket = MCPServerConfiguration(
             id: "bad-ws",
@@ -5024,21 +5101,22 @@ struct dBrowserTests {
     }
 
     @MainActor
-    @Test func mcpServerBlockchainGrantAddsInjectedHostTools() async {
+    @Test func mcpServerBlockchainGrantDoesNotFabricateDiscoveredTools() async {
         let bridge = MobileRuntimeBridge()
         var server = bridge.mcpServers.first { $0.id == "demo-weather" }!
         server.enabled = true
         server.blockchainAccess = .defaultForMCPServer()
 
         _ = await bridge.updateMCPServer(server)
-        let connected = await bridge.connectMCPServer(server.id)
+        let configured = await bridge.connectMCPServer(server.id)
 
-        #expect(connected?.status.state == .connected)
-        #expect(connected?.status.discoveredTools.contains("dbrowser.chain.get_status") == true)
-        #expect(connected?.status.discoveredTools.contains("dbrowser.wallet.get_portfolio") == true)
-        #expect(connected?.status.discoveredTools.contains("dbrowser.tx.prepare") == true)
-        #expect(connected?.status.discoveredTools.contains("dbrowser.tx.request_signature") == false)
-        #expect(connected?.status.message.contains("Read chain data") == true)
+        #expect(configured?.status.state == .disconnected)
+        #expect(configured?.status.discoveredTools.isEmpty == true)
+        #expect(configured?.status.message.contains("No connection or capability discovery was attempted") == true)
+        #expect(configured?.blockchainAccess.hostTools.contains("dbrowser.chain.get_status") == true)
+        #expect(configured?.blockchainAccess.hostTools.contains("dbrowser.wallet.get_portfolio") == true)
+        #expect(configured?.blockchainAccess.hostTools.contains("dbrowser.tx.prepare") == true)
+        #expect(configured?.blockchainAccess.hostTools.contains("dbrowser.tx.request_signature") == false)
     }
 
     @Test func blockchainExplorerCatalogBuildsChainSpecificURLs() {
@@ -8621,6 +8699,72 @@ struct dBrowserTests {
 
         model.addActivePageBookmark()
         #expect(model.bookmarks.contains { $0.urlString == "https://example.com" })
+    }
+
+    @MainActor
+    @Test func explicitSameURLNavigationAdvancesOnlyTheModelLoadRevision() {
+        let model = makeIsolatedBrowserViewModel()
+        let urlString = "https://example.com/reload"
+
+        model.navigate(urlString)
+        let firstRevision = model.activeTab?.modelLoadRevision
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: model.activeTabID,
+                urlString: "https://example.com/redirected",
+                title: "Redirected",
+                isLoading: false,
+                canGoBack: false,
+                canGoForward: false
+            )
+        )
+
+        #expect(firstRevision == 1)
+        #expect(model.activeTab?.modelLoadRevision == firstRevision)
+
+        model.navigate("https://example.com/redirected")
+
+        #expect(model.activeTab?.modelLoadRevision == 2)
+        #expect(model.activeTab?.isLoading == true)
+    }
+
+    @MainActor
+    @Test func navigatingHomeClearsStaleWebHistoryControls() {
+        let model = makeIsolatedBrowserViewModel()
+        model.navigate("https://example.com/page")
+        model.applyNavigationUpdate(
+            BrowserNavigationUpdate(
+                tabID: model.activeTabID,
+                urlString: "https://example.com/page",
+                title: "Example",
+                isLoading: false,
+                canGoBack: true,
+                canGoForward: true
+            )
+        )
+
+        model.navigate("about:home")
+
+        #expect(model.activeTab?.urlString == BrowserURLResolver.homeURLString)
+        #expect(model.canGoBack == false)
+        #expect(model.canGoForward == false)
+    }
+
+    @MainActor
+    @Test func staleRuntimeResolutionCannotReplaceNewerNavigation() async {
+        let model = makeIsolatedBrowserViewModel()
+        let runtimeAddress = "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/stale"
+        let currentURLString = "https://example.com/current"
+
+        model.navigate(runtimeAddress)
+        model.navigate(currentURLString)
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+
+        #expect(model.activeTab?.urlString == currentURLString)
+        #expect(model.activeTab?.loadURLString == nil)
+        #expect(model.activeTab?.modelLoadRevision == 1)
     }
 
     @MainActor
@@ -13114,7 +13258,7 @@ struct dBrowserTests {
     }
 
     @MainActor
-    @Test func browserViewModelSurfacesMCPPanelAndConnections() async {
+    @Test func browserViewModelSurfacesMCPPanelWithoutClaimingAnUnimplementedConnection() async {
         let model = BrowserViewModel()
 
         #expect(BrowserPanel.allCases.contains(.mcp))
@@ -13128,12 +13272,14 @@ struct dBrowserTests {
         var server = model.mcpServers.first { $0.id == "demo-weather" }!
         server.enabled = true
         await model.updateMCPServer(server)
-        let connected = await model.connectMCPServer(server.id)
+        let configured = await model.connectMCPServer(server.id)
 
-        #expect(connected?.status.state == .connected)
-        #expect(model.mcpServers.first { $0.id == server.id }?.status.state == .connected)
-        #expect(model.mcpServers.first { $0.id == server.id }?.status.discoveredTools.contains("dbrowser.wallet.get_portfolio") == true)
-        #expect(model.runtimeFeatureStates.first { $0.feature == .mcpServers }?.status.contains("1 connected") == true)
+        #expect(configured?.status.state == .disconnected)
+        #expect(configured?.status.discoveredTools.isEmpty == true)
+        #expect(configured?.status.message.contains("does not yet implement this MCP transport") == true)
+        #expect(model.mcpServers.first { $0.id == server.id }?.status.state == .disconnected)
+        #expect(model.mcpServers.first { $0.id == server.id }?.status.discoveredTools.isEmpty == true)
+        #expect(model.runtimeFeatureStates.first { $0.feature == .mcpServers }?.status.contains("0 connected") == true)
     }
 
     @MainActor
