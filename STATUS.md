@@ -33,7 +33,8 @@ out of source control.
 - [x] Preserve the generated Xcode changes outside mainline history.
 - [x] Commit and push the initial status record on the completed branch.
 - [x] Stop tracking Xcode per-user state and ignore future `xcuserdata` changes.
-- [ ] Fast-forward local and remote `main` without force-pushing or creating a merge commit.
+- [x] Normalize Xcode's stable, serialization-only project object ordering.
+- [x] Fast-forward local and remote `main` without force-pushing or creating a merge commit.
 - [ ] Verify the primary checkout is clean on `main` and reconcile PR #171 plus issue #185.
 
 ## Deep Reliability Review
