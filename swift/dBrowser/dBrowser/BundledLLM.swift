@@ -21,8 +21,17 @@ enum BundledLLMLoaderSupport: Equatable {
 /// environment overrides first, then the conventional Broom checkout in the user's home
 /// directory, then the app's Application Support directory.
 enum BundledLLMWorkspace {
+    nonisolated static var platformHomeDirectory: URL {
+#if os(macOS)
+        FileManager.default.homeDirectoryForCurrentUser
+#else
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+#endif
+    }
+
     /// Conventional developer checkout root: `~/dev/advatar/Broom`.
-    static func defaultDeveloperRoot(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+    static func defaultDeveloperRoot(homeDirectory: URL = platformHomeDirectory) -> URL {
         homeDirectory
             .appendingPathComponent("dev", isDirectory: true)
             .appendingPathComponent("advatar", isDirectory: true)
@@ -62,7 +71,7 @@ struct BundledLLMProfile: Equatable {
 
     /// Default resolved developer location for the model directory. This is derived from the
     /// current user's home directory at call time rather than stored as an absolute string.
-    func localWorkspacePath(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
+    func localWorkspacePath(homeDirectory: URL = BundledLLMWorkspace.platformHomeDirectory) -> String {
         BundledLLMWorkspace.defaultDeveloperRoot(homeDirectory: homeDirectory)
             .appendingPathComponent(localWorkspaceRelativePath)
             .path
@@ -116,7 +125,7 @@ struct BundledLLMSelection: Equatable {
     /// directory. No absolute machine path is hard-coded in source.
     func localWorkspaceCandidateURLs(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        homeDirectory: URL = BundledLLMWorkspace.platformHomeDirectory,
         fileManager: FileManager = .default
     ) -> [URL] {
         var candidates: [URL] = []
@@ -156,7 +165,7 @@ struct BundledLLMSelection: Equatable {
 
     func localWorkspaceModelURL(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        homeDirectory: URL = BundledLLMWorkspace.platformHomeDirectory,
         fileManager: FileManager = .default
     ) -> URL? {
         let requiredFiles = [

@@ -59,6 +59,14 @@ private struct StubPrivateOverlayRuntimeProcessController: PrivateOverlayRuntime
     func stop(_ handle: PrivateOverlayRuntimeProcessHandle) async {}
 }
 
+private struct StubDNSIDTXTResolver: DNSIDTXTResolving {
+    var namesWithTXTRecords: Set<String>
+
+    func hasTXTRecord(for name: String) async -> Bool {
+        namesWithTXTRecords.contains(name)
+    }
+}
+
 private struct StubPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
     var snapshotResult: PrivateOverlayManagedRuntimeSnapshot
     var startResult: PrivateOverlayManagedRuntimeStatus
@@ -92,6 +100,24 @@ private struct StubPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
 
 @MainActor
 struct dBrowserTests {
+    @Test func identityVerifierUsesInProcessDNSResolverAndFailClosedResult() async {
+        let verifier = DBrowserIdentityVerifier(
+            dnsResolver: StubDNSIDTXTResolver(namesWithTXTRecords: ["_agent.example.com"])
+        )
+
+        #expect(await verifier.verify(.dnsID("_agent.example.com")))
+        #expect(!(await verifier.verify(.dnsID("_missing.example.com"))))
+        #expect(await verifier.verify(.nodeKey("openmind:self")))
+        #expect(!(await verifier.verify(.nodeKey(""))))
+    }
+
+    @Test func systemDNSResolverRejectsInvalidNamesWithoutQuerying() async {
+        let resolver = SystemDNSIDTXTResolver()
+
+        #expect(!(await resolver.hasTXTRecord(for: "   ")))
+        #expect(!(await resolver.hasTXTRecord(for: String(repeating: "a", count: 254))))
+    }
+
     @Test func modelLoadRevisionPreservesWebKitRequestsAndAllowsSameURLReloads() {
         var tracker = BrowserModelLoadRevisionTracker()
 
@@ -510,6 +536,27 @@ struct dBrowserTests {
         #expect(unsupportedManagedRuntime.network == .hyphanet)
         #expect(unsupportedManagedRuntime.lifecycle == .disabled)
         #expect(unsupportedManagedRuntime.message.contains("No managed runtime profile") == true)
+    }
+
+    @Test func managedRuntimeManagerExplainsUnsupportedChildProcesses() async {
+        let manager = LocalPrivateOverlayRuntimeManager(
+            resolver: StaticPrivateOverlayRuntimeExecutableResolver(
+                executableURL: URL(fileURLWithPath: "/bundled/arti")
+            ),
+            processController: StubPrivateOverlayRuntimeProcessController(),
+            rootDirectory: URL(fileURLWithPath: "/tmp/dbrowser-ios-runtime-test", isDirectory: true),
+            supportsManagedProcesses: false
+        )
+
+        let snapshot = await manager.snapshot(configuration: .localDefaults)
+        let status = snapshot.status(for: .tor)
+        #expect(status?.lifecycle == .blocked)
+        #expect(status?.launchPlan == nil)
+        #expect(status?.message.contains("cannot launch child executables") == true)
+        #expect(status?.message.contains("Network Extension") == true)
+
+        let startResult = await manager.start(network: .tor, configuration: .localDefaults)
+        #expect(startResult == status)
     }
 
     @Test func privateOverlayRuntimeReadinessCombinesTorArtiManagerAndAdapterHealth() async {

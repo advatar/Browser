@@ -402,10 +402,32 @@ protocol PrivateOverlayRuntimeProcessControlling: Sendable {
     func stop(_ handle: PrivateOverlayRuntimeProcessHandle) async
 }
 
+enum PrivateOverlayRuntimeProcessError: LocalizedError, Equatable {
+    case unsupportedOnPlatform
+
+    nonisolated var errorDescription: String? {
+        switch self {
+        case .unsupportedOnPlatform:
+            "Managed private-overlay runtimes require an in-process iOS networking engine; iOS cannot launch child executables."
+        }
+    }
+}
+
 actor LocalPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessControlling {
+#if os(macOS)
     private var processes: [String: Process] = [:]
+#endif
+
+    nonisolated static var isSupportedOnCurrentPlatform: Bool {
+#if os(macOS)
+        true
+#else
+        false
+#endif
+    }
 
     func launch(_ plan: PrivateOverlayRuntimeLaunchPlan) async throws -> PrivateOverlayRuntimeProcessHandle {
+#if os(macOS)
         let process = Process()
         process.executableURL = plan.executableURL
         process.arguments = plan.arguments
@@ -423,9 +445,13 @@ actor LocalPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessC
             workingDirectory: plan.workingDirectory,
             stopStrategy: plan.stopStrategy
         )
+#else
+        throw PrivateOverlayRuntimeProcessError.unsupportedOnPlatform
+#endif
     }
 
     func stop(_ handle: PrivateOverlayRuntimeProcessHandle) async {
+#if os(macOS)
         let process = processes[handle.profileID]
         switch handle.stopStrategy {
         case .terminateProcess:
@@ -447,6 +473,7 @@ actor LocalPrivateOverlayRuntimeProcessController: PrivateOverlayRuntimeProcessC
             process?.terminate()
         }
         processes.removeValue(forKey: handle.profileID)
+#endif
     }
 }
 
@@ -471,18 +498,21 @@ actor LocalPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
     private let resolver: any PrivateOverlayRuntimeExecutableResolving
     private let processController: any PrivateOverlayRuntimeProcessControlling
     private let rootDirectory: URL
+    private let supportsManagedProcesses: Bool
     private var runningHandles: [String: PrivateOverlayRuntimeProcessHandle] = [:]
 
     init(
         profiles: [PrivateOverlayManagedRuntimeProfile] = [.torArti, .i2pRouter],
         resolver: any PrivateOverlayRuntimeExecutableResolving = DefaultPrivateOverlayRuntimeExecutableResolver(),
         processController: any PrivateOverlayRuntimeProcessControlling = LocalPrivateOverlayRuntimeProcessController(),
-        rootDirectory: URL? = nil
+        rootDirectory: URL? = nil,
+        supportsManagedProcesses: Bool = LocalPrivateOverlayRuntimeProcessController.isSupportedOnCurrentPlatform
     ) {
         self.profiles = profiles
         self.resolver = resolver
         self.processController = processController
         self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory()
+        self.supportsManagedProcesses = supportsManagedProcesses
     }
 
     func snapshot(configuration: PrivateOverlayAdapterConfiguration) async -> PrivateOverlayManagedRuntimeSnapshot {
@@ -519,6 +549,9 @@ actor LocalPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
                 launchPlan: nil,
                 message: "\(profile.kind.title) is not configured as a local private-overlay adapter."
             )
+        }
+        guard supportsManagedProcesses else {
+            return unsupportedPlatformStatus(for: profile)
         }
         guard let executableURL = resolver.executableURL(for: profile) else {
             return notInstalledStatus(for: profile)
@@ -606,6 +639,9 @@ actor LocalPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
                 message: "\(profile.kind.title) is disabled because \(profile.network.title) has no configured local adapter endpoint."
             )
         }
+        guard supportsManagedProcesses else {
+            return unsupportedPlatformStatus(for: profile)
+        }
         guard let executableURL = resolver.executableURL(for: profile) else {
             return notInstalledStatus(for: profile)
         }
@@ -640,6 +676,19 @@ actor LocalPrivateOverlayRuntimeManager: PrivateOverlayRuntimeManaging {
             processIdentifier: nil,
             launchPlan: nil,
             message: "\(profile.kind.title) executable '\(profile.executableName)' was not found in the app bundle, default install paths, or PATH."
+        )
+    }
+
+    private func unsupportedPlatformStatus(
+        for profile: PrivateOverlayManagedRuntimeProfile
+    ) -> PrivateOverlayManagedRuntimeStatus {
+        PrivateOverlayManagedRuntimeStatus(
+            profile: profile,
+            lifecycle: .blocked,
+            executableURL: nil,
+            processIdentifier: nil,
+            launchPlan: nil,
+            message: "\(profile.kind.title) cannot start on iOS because apps cannot launch child executables. An in-process networking engine and Network Extension integration are required."
         )
     }
 

@@ -2012,3 +2012,19 @@ Validation notes:
 
 - `git diff --check -- STATUS.md` passed.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS,arch=arm64' -derivedDataPath /tmp/dBrowser-browseros-parity-build CODE_SIGNING_ALLOWED=NO` passed.
+
+## iOS Portability and Xcode Recommendations (#188)
+
+- [x] Replace the `/usr/bin/dig` child process with an in-process DNS TXT resolver available on iOS.
+- [x] Make managed private-overlay child-process launch explicitly unavailable on iOS while preserving desktop behavior.
+- [x] Add regression coverage for DNS identity verification and the unsupported managed-runtime state.
+- [x] Apply only the current Xcode-recommended project settings supported by the installed toolchain.
+- [x] Verify focused macOS regression tests plus iOS Simulator and macOS application builds.
+- [ ] Commit and push the scoped changes, then close #188 with validation evidence.
+
+Validation notes:
+
+- Xcode 26.6 (`17F113`) arm64 iOS Simulator build passed with `CODE_SIGNING_ALLOWED=NO`.
+- Xcode 26.6 arm64 macOS application build passed with `CODE_SIGNING_ALLOWED=NO`.
+- Focused macOS tests passed for in-process DNS identity verification, invalid-name fail-closed behavior, and the unsupported iOS managed-runtime state.
+- `git diff --check` passed.
