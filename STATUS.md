@@ -2020,7 +2020,7 @@ Validation notes:
 - [x] Add regression coverage for DNS identity verification and the unsupported managed-runtime state.
 - [x] Apply only the current Xcode-recommended project settings supported by the installed toolchain.
 - [x] Verify focused macOS regression tests plus iOS Simulator and macOS application builds.
-- [ ] Commit and push the scoped changes, then close #188 with validation evidence.
+- [x] Commit and push the scoped changes, then close #188 with validation evidence.
 
 Validation notes:
 
