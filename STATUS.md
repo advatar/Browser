@@ -21,6 +21,35 @@
 
 ## Active Task
 
+## ActiveChain Downstream Compatibility Upgrade (#187)
+
+Adopt ActiveChain's new dBrowser-facing compatibility contract while keeping
+unpublished, unaudited, and network-dependent capabilities fail-closed.
+
+- [x] Reassess current ActiveChain `origin/main` without modifying its dirty local checkout.
+- [x] Create the scoped GitHub issue with findings, plan, safety boundaries, and acceptance criteria.
+- [x] Re-pin the sandbox to the reviewed ActiveChain revision and wallet ABI v2.
+- [x] Add strict verifier, wallet, RPC, light-client, protocol, release, and audit manifest gates.
+- [x] Pin the new dBrowser, finality, light-client, and external-anchor vector metadata.
+- [x] Add offline verifier-result and development-RPC status validation models.
+- [x] Update runtime status and the ActiveChain architecture roadmap.
+- [x] Add focused regression coverage for compatibility and trust-boundary failures.
+- [x] Run focused Swift tests and the macOS build.
+- [x] Commit and push only the scoped changes, then close issue #187 with verification.
+
+Validation notes:
+
+- ActiveChain advanced during verification from `0dbaaa1` to `2befc06`; the
+  intervening commits repaired internal finality fixtures and completed the
+  workspace strict-Clippy gate without changing the published dBrowser
+  contracts or vector files. The final dBrowser pin uses `2befc06`.
+- Focused `ActiveChainSemanticSandboxTests` passed 12/12 at the final pin.
+- The macOS arm64 `dBrowser` build passed with automatic package resolution and
+  code signing disabled. Diagnostics were limited to existing MLX package
+  dependency/module-map warnings and the existing unassigned AppIcon child.
+- `git diff --check` passed, and the dirty ActiveChain checkout was never
+  modified; all upstream inspection used fetched `origin/main` objects.
+
 ## ActiveChain Landing Site Refresh (#186)
 
 Update the public web experience to describe the shipped ActiveChain

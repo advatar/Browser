@@ -734,10 +734,33 @@ AFMarket task:
 
 ## ActiveChain Integration Roadmap
 
-Status: **tracked; implementation intentionally maturity-gated**. The work is
-tracked in [GitHub issue #173](https://github.com/advatar/Browser/issues/173).
-At the time of assessment, ActiveChain is a protocol-design and semantic-devnet
-project, not a production distributed chain or public testnet.
+Status: **development integration active; production use remains maturity-gated**.
+The roadmap is tracked in [GitHub issue #173](https://github.com/advatar/Browser/issues/173),
+and the current downstream compatibility upgrade is tracked in
+[GitHub issue #187](https://github.com/advatar/Browser/issues/187).
+
+The 2026-07-26 reassessment pins ActiveChain
+`2befc06bcd1693dffe9a60cd103d6d9139a710b8`. ActiveChain now provides a
+persistent embeddable light client, proof-bearing development RPC records,
+finality and receipt verification, Apple verifier/wallet XCFramework build
+tooling, wallet ABI revision 2, and explicit dBrowser verifier, wallet, and RPC
+contracts. These are material downstream interfaces, not only roadmap prose.
+
+The available Apple distribution is still developmental and unaudited, no
+signed release archive is published, and independent-client and operational
+qualification gates remain incomplete. dBrowser therefore consumes the exact
+compatibility metadata and offline contract models now, but does not claim that
+the native verifier artifact is linked, enable ActiveChain network ingress, or
+promote any response to production finality.
+
+| Downstream boundary | Reviewed revision | dBrowser state |
+| --- | ---: | --- |
+| Verifier ABI / schema | 1 / 1 | Strictly modeled; packaged artifact not linked |
+| Wallet ABI | 2 | Accepted; revision 1 and unknown revisions fail closed |
+| Development RPC schema | 1 | Offline status validation only; no socket ownership |
+| Light-client schema | 1 | Compatibility and vectors pinned; runtime not embedded |
+| Protocol revision | 1 (`activechain-v1-dev`) | Development-only |
+| Release / audit | `developmental-unaudited` / false | Production claims rejected |
 
 ### Purpose and product fit
 
@@ -815,11 +838,13 @@ tested against normative positive and negative vectors.
 
 ### Maturity and specification gates
 
-ActiveChain currently has draft semantic-kernel implementations for canonical
-encoding and commitments, principals, capabilities, APL, objects, a sparse
-state tree, ObjectVM, public development action envelopes, and deterministic
-single-node block application. Its blueprint's planned specification catalog
-is comprehensive, but a planned identifier is not a completed normative spec.
+ActiveChain now implements canonical encoding and commitments, principals,
+capabilities, APL, objects, sparse state proofs, finalized headers and receipts,
+a persistent light client, bounded proof-bearing RPC records, and versioned C
+ABIs for verifier and wallet consumers. Several dBrowser-facing contracts and
+vectors are explicitly published. This is sufficient for a stricter Phase 2
+compatibility boundary, but implementation presence alone does not satisfy the
+release, audit, independent-client, or production-operations gates below.
 
 Production claims require actual versioned specifications, canonical and
 adversarial vectors, bounded behavior, compatibility rules, usable downstream
@@ -858,14 +883,23 @@ object transitions, witnesses, and receipts must pass positive and fail-closed
 negative tests. The sandbox cannot sign, spend, disclose, broadcast, or access
 the network and always states that it provides no network finality.
 
-Phase 2 introduces `ActiveChainKit` and local verification. It binds exact page
+Phase 2 introduces `ActiveChainKit` and local verification. The current slice
+models and validates ActiveChain's complete downstream compatibility manifest,
+pins the verifier/wallet/RPC/light-client revisions and new proof-bearing vector
+metadata, and represents verifier outcomes without silently promoting invalid,
+unsupported, or unavailable evidence. The native XCFramework remains unlinked
+until a signed release artifact and reproducible dependency policy are selected.
+The completed Phase 2 implementation must also bind exact page
 and navigation context, object versions, intent, model, tool, connector,
 identity, user gesture, policy, and expiry into approval evidence. Rust and
 independent Swift implementations must agree on accepted and rejected inputs;
 fuzz and property coverage must exercise decoders, bounds, attenuation, and
 proofs. Verification failure cannot degrade into implicit remote trust.
 
-Phase 3 adds configurable development-network endpoints. Discovery records
+Phase 3 adds configurable development-network endpoints. dBrowser now has an
+offline validator for the published development RPC status contract, but the
+semantic sandbox still denies network ingress and does not own endpoint
+configuration or transport. When enabled in a later slice, discovery records
 chain identity, genesis commitment, protocol version, supported proofs, health,
 staleness, and disagreement. Proof-bearing responses are preferred; independent
 endpoints are compared when proofs are unavailable. Wrong-chain, stale, replay,
