@@ -2075,7 +2075,17 @@ Resume checkpoint (2026-07-27):
 - Outstanding branch tips to merge: AFM `2b25b4f`, GUI Playwright `756b616`, GUI Undici `2db6a9a`, root Playwright `33740c5`, and root Vite `cf0b5e1`.
 - Resume order: AFM first, then the four dependency branches; preserve current mainline behavior during conflict resolution.
 
-- [ ] Merge every outstanding audited branch tip into `main`.
-- [ ] Confirm every local and remote branch tip is reachable from `main`.
-- [ ] Run validation appropriate to the combined changes.
-- [ ] Push consolidated `main` and close #190 with evidence.
+- [x] Merge every outstanding audited branch tip into `main`.
+- [x] Confirm every local and remote branch tip is reachable from `main`.
+- [x] Run validation appropriate to the combined changes.
+- [x] Push consolidated `main` and close #190 with evidence.
+
+Final evidence:
+
+- Merged AFM marketplace metering and all four outstanding Dependabot branch tips; a post-merge `git fetch --prune origin` followed by `git branch --no-merged main -a` returned no branches.
+- Preserved newer mainline `jsdom`, Vitest, and Tauri state while accepting Playwright 1.55.1, Undici 7.24.1, and Vite 5.4.21 branch changes; regenerated npm and pnpm lock metadata.
+- `pnpm install --frozen-lockfile --offline` passed.
+- AFM marketplace tests passed: 17 tests, 0 failures.
+- GUI Vitest command passed and the Vite 5.4.21 production build succeeded.
+- Both linked worktrees remained clean throughout consolidation.
+- `git diff --check` passed.
