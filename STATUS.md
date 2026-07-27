@@ -1134,6 +1134,20 @@ Validation notes:
 Validation notes:
 
 - `git diff --check` passed.
+
+## Opt-in Private-overlay Health Probes (#189)
+
+- [x] Disable optional localhost private-overlay adapters in the production runtime default.
+- [x] Preserve the explicit five-adapter localhost configuration for opt-in use and development.
+- [x] Add regression coverage proving default startup performs no private-overlay health probes.
+- [x] Verify focused tests plus iOS Simulator and macOS application builds.
+- [ ] Commit and push the scoped changes, then close #189 with validation evidence.
+
+Validation notes:
+
+- The focused default-configuration regression test passed and recorded zero health-check invocations.
+- Xcode 26.6 arm64 iOS Simulator and macOS application builds passed with `CODE_SIGNING_ALLOWED=NO`.
+- `git diff --check` passed.
 - Live-doc reference scan found no active pointers to removed root validation/plans, aside from intentional historical status entries.
 - `xcodebuild build -project swift/dBrowser/dBrowser.xcodeproj -scheme dBrowser -destination 'platform=macOS'` passed.
 

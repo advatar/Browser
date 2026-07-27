@@ -24,6 +24,22 @@ private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHeal
     }
 }
 
+private actor RecordingPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking {
+    private var checkedNetworks: [PrivateOverlayNetwork] = []
+
+    func check(
+        network: PrivateOverlayNetwork,
+        endpoint: PrivateOverlayAdapterEndpoint
+    ) async -> PrivateOverlayRuntimeProbeResult {
+        checkedNetworks.append(network)
+        return .notInstalled("Unexpected private-overlay health probe.")
+    }
+
+    func networks() -> [PrivateOverlayNetwork] {
+        checkedNetworks
+    }
+}
+
 private struct StubPrivateOverlayRuntimeSmokeVerifier: PrivateOverlayRuntimeSmokeVerifying {
     var result: PrivateOverlayRuntimeProbeResult
 
@@ -278,6 +294,25 @@ struct dBrowserTests {
         #expect(disabled.status(for: .tor)?.readiness == .notInstalled)
         #expect(disabled.status(for: .tor)?.blocksNavigation == true)
         #expect(disabled.summary.contains("required"))
+    }
+
+    @Test func defaultRuntimeConfigurationDoesNotProbeOptionalPrivateOverlays() async {
+        let configuration = RuntimeBridgeConfiguration().privateOverlayAdapters
+        let checker = RecordingPrivateOverlayRuntimeHealthChecker()
+
+        #expect(configuration == .disabled)
+        #expect(configuration.enabledNetworkIDs.isEmpty)
+
+        let snapshot = await PrivateOverlayRuntimeSnapshot.checking(
+            configuration: configuration,
+            healthChecker: checker
+        )
+
+        #expect(await checker.networks().isEmpty)
+        #expect(snapshot.statuses.allSatisfy { $0.endpoint == nil && $0.readiness == .notInstalled })
+        #expect(PrivateOverlayAdapterConfiguration.localDefaults.enabledNetworkIDs == Set(
+            PrivateOverlayNetwork.allCases.map(\.id)
+        ))
     }
 
     @Test func privateOverlayRuntimeHealthChecksMapPerNetworkReadiness() async {

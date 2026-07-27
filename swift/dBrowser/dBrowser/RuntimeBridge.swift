@@ -62,7 +62,7 @@ struct RuntimeBridgeConfiguration: Equatable {
         ensGatewaySuffix: String = "limo",
         walrusAggregatorBaseURL: URL = URL(string: "https://aggregator.walrus-mainnet.walrus.space")!,
         nativeStorageAdapters: DecentralizedStorageNativeAdapterConfiguration = DWebEngineManager.production.adapterConfiguration,
-        privateOverlayAdapters: PrivateOverlayAdapterConfiguration = .localDefaults,
+        privateOverlayAdapters: PrivateOverlayAdapterConfiguration = .disabled,
         vpnClient: BuiltInVPNClientConfiguration = .localDefaults,
         remoteRuntimeBaseURL: URL? = nil,
         afmServices: AFMServiceEndpointConfiguration = .local,
