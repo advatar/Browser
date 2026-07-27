@@ -66,7 +66,7 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
       vite:
-        specifier: ^5.0.0
+        specifier: ^5.4.21
         version: 5.4.21(@types/node@20.19.25)
       vitest:
         specifier: ^1.6.1
@@ -79,6 +79,8 @@ importers:
   services/registry: {}
 
   services/router: {}
+
+  services/storage-adapters: {}
 
 packages:
 
