@@ -2042,3 +2042,18 @@ Validation notes:
 - The focused default-configuration regression test passed and recorded zero health-check invocations.
 - Xcode 26.6 arm64 iOS Simulator and macOS application builds passed with `CODE_SIGNING_ALLOWED=NO`.
 - `git diff --check` passed.
+
+## All-branch Mainline Consolidation (#190)
+
+Resume checkpoint (2026-07-27):
+
+- Starting `main`: `8fbe211` (clean and synchronized with `origin/main`).
+- Clean linked worktrees: detached `a21d8c2` and `swiftlm-local-llms` at `4301a72`.
+- Already contained in `main`: `agent/comet-context-parity`, `feature/app-intents`, `swiftlm-local-llms`, and detached `a21d8c2`.
+- Outstanding branch tips to merge: AFM `2b25b4f`, GUI Playwright `756b616`, GUI Undici `2db6a9a`, root Playwright `33740c5`, and root Vite `cf0b5e1`.
+- Resume order: AFM first, then the four dependency branches; preserve current mainline behavior during conflict resolution.
+
+- [ ] Merge every outstanding audited branch tip into `main`.
+- [ ] Confirm every local and remote branch tip is reachable from `main`.
+- [ ] Run validation appropriate to the combined changes.
+- [ ] Push consolidated `main` and close #190 with evidence.
