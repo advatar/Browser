@@ -3,6 +3,7 @@ import Combine
 import SwiftUI
 import A2UISwiftCore
 import A2UISwiftUI
+import UniversalA2UI
 
 struct A2UITokenRenderSummary: Equatable {
     let messageCount: Int
@@ -566,6 +567,8 @@ struct A2UITokenSurfacePreview: View {
                         renderer.record(action)
                     }
                 }
+                // The shared look every app's A2UI surfaces use (UIK UniversalA2UI).
+                .universalTheme()
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("No A2UI surface", systemImage: "square.dashed")

@@ -1,5 +1,11 @@
 # Status
 
+## Shared A2UI layer — #202 (2026-10-14)
+
+- [x] Pin `a2ui-swift` to the shared `advatar/a2ui-swift@57d4244` (UIK UniversalA2UI, advatar/UniversalInteractionKit#89); drop the orphaned upstream `c98cdcc` pin and swift-foundation-icu.
+- [x] Link `UniversalA2UI` and render the A2UI token preview with the shared theme.
+- [x] dBrowser app builds on macOS against the fork pin (`xcodebuild build`, scheme dBrowser). The unit test target does not compile because of a pre-existing actor-isolation error in `dBrowserTests.swift:27`, unrelated to this change and tracked separately, so no unit tests ran.
+
 ## Strawberry Gap Closure
 
 - [x] Add smart-history recall in the Rust backend and expose it to the runtime UI.
