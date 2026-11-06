@@ -19,6 +19,9 @@
     "dev:chain-trust": "pnpm --filter @browser/chain-trust-service dev",
     "dev:storage-adapters": "pnpm --filter @browser/storage-adapters dev",
     "dev:marketplace": "pnpm --filter @browser/afm-marketplace dev",
+    "dev:mobile-browser-fixture": "node scripts/mobile-browser-fixture/server.mjs",
+    "check:mobile-browser-fixture": "node --check scripts/mobile-browser-fixture/server.mjs && node --check scripts/mobile-browser-fixture/client.js",
+    "test:mobile-browser-fixture": "node --test scripts/mobile-browser-fixture/*.test.mjs",
     "prepare": "husky"
   },
   "keywords": [

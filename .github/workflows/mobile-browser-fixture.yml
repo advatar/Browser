@@ -1,0 +1,39 @@
+name: Mobile browser fixture
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/mobile-browser-fixture/**'
+      - 'package.json'
+      - '.github/workflows/mobile-browser-fixture.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/mobile-browser-fixture/**'
+      - 'package.json'
+      - '.github/workflows/mobile-browser-fixture.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-browser-fixture-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixture:
+    name: HTTP and client regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Check fixture syntax
+        run: npm run check:mobile-browser-fixture
+      - name: Exercise real HTTP and client behavior
+        run: npm run test:mobile-browser-fixture
