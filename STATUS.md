@@ -1,5 +1,15 @@
 # Status
 
+## Mobile browser acceptance fixture — #209 (2026-11-06)
+
+- [x] Add owned synthetic source/form pages with input-triggered autosave and stable mobile browser selectors.
+- [x] Bind fixture operations to exact inputs; test replay, conflicts, stale revisions and response loss after commit.
+- [x] Keep provider readback behind a separate read-only oracle credential; bound inputs/state and test isolation.
+- [x] Add explicit fixture commands, focused CI and actual-HTTP regression tests.
+- [ ] Publish scoped source and verification evidence for review.
+- Local verification: Node v24.22.1; `npm run check:mobile-browser-fixture` and all 21 tests in `npm run test:mobile-browser-fixture` pass. Workflow YAML parses; independent code review found no remaining fixture-scope blocker.
+- Native WebKit and iOS simulator/device qualification are tracked in [#210](https://github.com/advatar/Browser/issues/210). App suspension and real authorization integration remain unqualified by this fixture.
+
 ## Shared A2UI layer — #202 (2026-10-14)
 
 - [x] Pin `a2ui-swift` to the shared `advatar/a2ui-swift@57d4244` (UIK UniversalA2UI, advatar/UniversalInteractionKit#89); drop the orphaned upstream `c98cdcc` pin and swift-foundation-icu.
