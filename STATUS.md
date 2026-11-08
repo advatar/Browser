@@ -1,5 +1,24 @@
 # Status
 
+## Native mobile WebKit qualification — #210 (2026-11-07)
+
+- [x] Add hosted iOS tests that mount the real UIKit `BrowserWebView` with `BrowserViewModel` callbacks (execution pending).
+- [x] Add native scenarios for source navigation/extraction, approved typing, autosave-before-submit, stale page/approval refusal and lost acknowledgements with independent readback (execution pending).
+- [x] Add a shared scheme and a private test-runner configuration using the existing #211 fixture, without exposing the oracle credential to pages or model context.
+- [x] Run available checks and document BrIAn/Kline integration requirements and exact evidence limits.
+- [ ] Run the hosted suite on a compatible iOS simulator and eligible physical iPhone.
+- [ ] Obtain explicit user approval before pushing, merging or deploying.
+
+Plan and acceptance criteria: [#210](https://github.com/advatar/Browser/issues/210).
+Base: PR #211 at `a1d98bb64418360ac5e28641014637fdc46341db`; reuse its fixture.
+Current execution host is Linux, without Swift/Xcode or an attached eligible iPhone.
+Native compilation and execution are pending; Node checks cannot qualify WebKit.
+The existing issue already records this increment; do not create a duplicate issue.
+Available checks: 24/24 Node tests pass on v24.22.1; JavaScript syntax, Swift
+grammar-only parsing, scheme/plist parsing and `git diff --check` pass.
+The native runner rejects this Linux host. No Swift typecheck, Xcode build or
+WebKit execution is claimed. [Runbook and remaining integration work](docs/NATIVE_MOBILE_WEBKIT_QUALIFICATION.md).
+
 ## Mobile browser acceptance fixture — #209 (2026-11-06)
 
 - [x] Add owned synthetic source/form pages with input-triggered autosave and stable mobile browser selectors.

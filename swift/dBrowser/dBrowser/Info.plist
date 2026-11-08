@@ -20,6 +20,8 @@
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>dBrowser uses the microphone only when you start voice input to create an editable Copilot draft.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>dBrowser connects to local websites you open, including a development Mac's synthetic browser test fixture.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>dBrowser transcribes speech only when you start voice input and never sends the resulting draft automatically.</string>
 	<key>UIBackgroundModes</key>
