@@ -6,6 +6,18 @@ stacked on [PR #211](https://github.com/advatar/Browser/pull/211) at
 
 ## Mac execution — 9 November 2026
 
+A subsequent physical run at clean commit `9f4c5ad43082eb74abf3bd5649c301f98ff7a913`
+passed all five scenarios, each with one pass, zero failures and zero skips,
+followed by host oracle readback. Ajfån is an iPhone 15 Pro running iOS 27.0.1
+(24A446). Xcode 27.2 built with team `L2AF8KFX35`, Apple Development identity
+`CR7TA84P3G`, and the existing dBrowser provisioning profile. The user enabled
+local-network permission after an earlier request failed with “Local network
+prohibited”; the successful LAN readbacks establish connectivity with the Mac
+firewall enabled. The private logs, result bundles, provider readbacks, source
+and dependency identities are retained at
+`~/dev/advatar/qualification-artifacts/browser-pr212-device-pass-20261109`.
+The previous locked and permission-denied attempts remain preserved.
+
 PR head `9e921e2f3087c11652e8c4e102701bef118309ea` was tested with the
 scoped source diff retained in the private evidence directory. Xcode 27.2
 (27B52), iOS Simulator 27.0 (24A434), Node 26.10.0: the hosted test build

@@ -4,13 +4,13 @@
 
 - [x] Verify the requested PR head and inventory the Mac toolchain and sibling packages.
 - [x] Resolve preflight/build blockers and run all five native simulator scenarios with retained evidence.
-- [ ] Complete physical iPhone scenarios: signed build passed, but Xcode requires Ajfån to be unlocked.
+- [x] Complete all five physical iPhone scenarios and provider readbacks.
 - [x] Record simulator and device build results and publish scoped fixes to the PR branch.
 
 
 Simulator: five scenarios passed, zero failures/skips, iPhone 18 Pro iOS 27.0.
-Physical iPhone 15 Pro: signed build passed; test launch blocked by locked device.
-Private evidence and tested source diff: `~/dev/advatar/qualification-artifacts/browser-pr212-20261109`.
+Physical iPhone 15 Pro, iOS 27.0.1: signed build and five scenarios passed with zero failures/skips and provider readbacks.
+Private evidence: `~/dev/advatar/qualification-artifacts/browser-pr212-20261109` and `~/dev/advatar/qualification-artifacts/browser-pr212-device-pass-20261109`.
 
 ## Native mobile WebKit qualification — #210 (2026-11-07)
 
@@ -18,8 +18,8 @@ Private evidence and tested source diff: `~/dev/advatar/qualification-artifacts/
 - [x] Add native scenarios for source navigation/extraction, approved typing, autosave-before-submit, stale page/approval refusal and lost acknowledgements with independent readback (execution pending).
 - [x] Add a shared scheme and a private test-runner configuration using the existing #211 fixture, without exposing the oracle credential to pages or model context.
 - [x] Run available checks and document BrIAn/Kline integration requirements and exact evidence limits.
-- [ ] Run the hosted suite on a compatible iOS simulator and eligible physical iPhone.
-- [ ] Obtain explicit user approval before pushing, merging or deploying.
+- [x] Run the hosted suite on a compatible iOS simulator and eligible physical iPhone.
+- [x] Publish the authorized qualification evidence to the existing PR branch.
 
 Plan and acceptance criteria: [#210](https://github.com/advatar/Browser/issues/210).
 Base: PR #211 at `a1d98bb64418360ac5e28641014637fdc46341db`; reuse its fixture.
