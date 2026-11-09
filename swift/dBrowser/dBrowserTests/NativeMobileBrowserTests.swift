@@ -3,6 +3,7 @@ import XCTest
 import Foundation
 import SwiftUI
 import UIKit
+import Combine
 import WebKit
 @testable import dBrowser
 
@@ -330,7 +331,7 @@ private final class NativeFixtureHost {
 
     private func findWebView(_ view: UIView) -> WKWebView? {
         if let web = view as? WKWebView { return web }
-        return view.subviews.lazy.compactMap { findWebView($0) }.first
+        return view.subviews.lazy.compactMap { self.findWebView($0) }.first
     }
 
     func waitUntil(_ description: String, predicate: () -> Bool) async throws {

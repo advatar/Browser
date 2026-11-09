@@ -1,5 +1,17 @@
 # Status
 
+## PR #212 native execution — #213 (2026-11-09)
+
+- [x] Verify the requested PR head and inventory the Mac toolchain and sibling packages.
+- [x] Resolve preflight/build blockers and run all five native simulator scenarios with retained evidence.
+- [ ] Complete physical iPhone scenarios: signed build passed, but Xcode requires Ajfån to be unlocked.
+- [x] Record simulator and device build results and publish scoped fixes to the PR branch.
+
+
+Simulator: five scenarios passed, zero failures/skips, iPhone 18 Pro iOS 27.0.
+Physical iPhone 15 Pro: signed build passed; test launch blocked by locked device.
+Private evidence and tested source diff: `~/dev/advatar/qualification-artifacts/browser-pr212-20261109`.
+
 ## Native mobile WebKit qualification — #210 (2026-11-07)
 
 - [x] Add hosted iOS tests that mount the real UIKit `BrowserWebView` with `BrowserViewModel` callbacks (execution pending).

@@ -4,6 +4,30 @@ Related work: [Browser #210](https://github.com/advatar/Browser/issues/210),
 stacked on [PR #211](https://github.com/advatar/Browser/pull/211) at
 `a1d98bb64418360ac5e28641014637fdc46341db`.
 
+## Mac execution — 9 November 2026
+
+PR head `9e921e2f3087c11652e8c4e102701bef118309ea` was tested with the
+scoped source diff retained in the private evidence directory. Xcode 27.2
+(27B52), iOS Simulator 27.0 (24A434), Node 26.10.0: the hosted test build
+and all five scenarios passed on iPhone 18 Pro, each with one pass and no
+failures or skips, followed by host oracle readback. The Node suite passed 24/24.
+
+The initial build exposed manual build ordering, an uninitialized blst gitlink,
+missing test imports and a pre-existing test actor-isolation failure. The scheme
+and test compilation fixes are included here. The exact logs are retained. The
+local UIK worktree was clean at `41f8d982f9b49b1c2fa52f5aa600752d99c22370`,
+matching the checked-in A2UI pin; the clean ZeroK SDK was at
+`555092ca1dd222803953b095d9a7f176f2743bc7`, and blst at
+`d29fef46c29a662ec215a9eeb9578e25f9146b6d`.
+
+The signed physical iPhone 15 Pro build succeeded with team `L2AF8KFX35`.
+Xcode could not launch tests because “Unlock Ajfån to Continue”; the waiting
+run was interrupted. No physical test or permission outcome is claimed. Unlock
+and keep the phone awake, then rerun the device command and allow local-network
+access and firewall connections if prompted. Private logs, xcresults, oracle
+readbacks, metadata and tested diff are retained under
+`~/dev/advatar/qualification-artifacts/browser-pr212-20261109`.
+
 ## Evidence status — 7 November 2026
 
 This increment supplies hosted iOS integration tests, a shared Xcode scheme and

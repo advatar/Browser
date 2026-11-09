@@ -136,6 +136,7 @@ async function main() {
       try {
         await runLogged('xcodebuild', ['test-without-building', '-xctestrun', resolve(products, manifests[0]),
           '-destination', values.destination, '-parallel-testing-enabled', 'NO',
+          '-maximum-concurrent-test-simulator-destinations', '1',
           '-only-testing:dBrowserTests/NativeMobileBrowserTests/' + scenario.method,
           '-resultBundlePath', resultBundle], resolve(output, `${scenario.method}.log`), {
             env: testEnvironment(process.env, fixture), secret: fixture.oracleToken
