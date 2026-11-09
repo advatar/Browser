@@ -179,7 +179,16 @@ a minimal DOM/storage/event harness. They cover server semantics and client
 control flow. They do not implement a browser, CSS layout, WebKit navigation,
 native approvals, iOS storage/lifecycle behavior or real account authorization.
 
-## Next native qualification
+## Native qualification candidate
+
+Hosted iOS test source, a shared scheme and a private local runner are now provided.
+See [native qualification instructions and evidence limits](../../docs/NATIVE_MOBILE_WEBKIT_QUALIFICATION.md).
+They have not been compiled or executed with Apple tooling in this increment.
+The fixture implementation itself is unchanged.
+
+The following describes the original fixture baseline and its prerequisites.
+
+## Original native qualification prerequisites
 
 The native implementation and device evidence are tracked separately in
 [#210](https://github.com/advatar/Browser/issues/210).
@@ -203,7 +212,8 @@ the driver's JavaScript into a test-only browser implementation.
 
 The project is `swift/dBrowser/dBrowser.xcodeproj`, with targets `dBrowser`,
 `dBrowserTests` and `dBrowserUITests`. The source baseline declares iOS 26.4.
-No shared scheme is checked in; discover the available scheme first. The existing
+The original fixture baseline had no shared scheme. This increment adds
+`NativeMobileBrowser`; discover available destinations with the runner preflight. The existing
 README uses `dBrowser` and records macOS commands, not an iOS qualification result.
 
 Restore the local package references relative to `swift/dBrowser`:
@@ -235,17 +245,18 @@ xcodebuild test \
   -only-testing:dBrowserTests
 ```
 
-The current test targets contain no fixture-specific native integration test.
-Running them cannot substitute for adding and running the test described above.
+The new `NativeMobileBrowserTests` supply the hosted integration cases.
+Existing unrelated tests cannot substitute for running those cases; use the
+dedicated runner above to enforce fresh fixtures and reject skipped tests.
 For a provisioned physical iPhone, select `platform=iOS,id=<DEVICE_UDID>` instead.
 Record the actual device, OS, source revision, fixture configuration, native events
 and separately collected outcome evidence.
 
 `127.0.0.1` on an iPhone refers to the phone, not the development Mac. Physical
 device connectivity needs a deliberately configured reachable test host. The
-current app plist allows ATS local networking but has no
-`NSLocalNetworkUsageDescription`; qualify local-network permission and a suitable
-purpose string in the native follow-up. Do not add broad ATS exceptions to make
+app plist allows ATS local networking and now includes
+`NSLocalNetworkUsageDescription`; permission and reachability still require
+qualification on the selected device. Do not add broad ATS exceptions to make
 this fixture appear qualified.
 
 After the positive native test, exercise stale document/grant invalidation,

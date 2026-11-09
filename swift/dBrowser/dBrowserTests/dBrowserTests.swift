@@ -24,7 +24,7 @@ private struct StubPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHeal
     }
 }
 
-private actor RecordingPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking {
+@MainActor private final class RecordingPrivateOverlayRuntimeHealthChecker: PrivateOverlayRuntimeHealthChecking {
     private var checkedNetworks: [PrivateOverlayNetwork] = []
 
     func check(

@@ -1,5 +1,36 @@
 # Status
 
+## PR #212 native execution — #213 (2026-11-09)
+
+- [x] Verify the requested PR head and inventory the Mac toolchain and sibling packages.
+- [x] Resolve preflight/build blockers and run all five native simulator scenarios with retained evidence.
+- [x] Complete all five physical iPhone scenarios and provider readbacks.
+- [x] Record simulator and device build results and publish scoped fixes to the PR branch.
+
+
+Simulator: five scenarios passed, zero failures/skips, iPhone 18 Pro iOS 27.0.
+Physical iPhone 15 Pro, iOS 27.0.1: signed build and five scenarios passed with zero failures/skips and provider readbacks.
+Private evidence: `~/dev/advatar/qualification-artifacts/browser-pr212-20261109` and `~/dev/advatar/qualification-artifacts/browser-pr212-device-pass-20261109`.
+
+## Native mobile WebKit qualification — #210 (2026-11-07)
+
+- [x] Add hosted iOS tests that mount the real UIKit `BrowserWebView` with `BrowserViewModel` callbacks (execution pending).
+- [x] Add native scenarios for source navigation/extraction, approved typing, autosave-before-submit, stale page/approval refusal and lost acknowledgements with independent readback (execution pending).
+- [x] Add a shared scheme and a private test-runner configuration using the existing #211 fixture, without exposing the oracle credential to pages or model context.
+- [x] Run available checks and document BrIAn/Kline integration requirements and exact evidence limits.
+- [x] Run the hosted suite on a compatible iOS simulator and eligible physical iPhone.
+- [x] Publish the authorized qualification evidence to the existing PR branch.
+
+Plan and acceptance criteria: [#210](https://github.com/advatar/Browser/issues/210).
+Base: PR #211 at `a1d98bb64418360ac5e28641014637fdc46341db`; reuse its fixture.
+Current execution host is Linux, without Swift/Xcode or an attached eligible iPhone.
+Native compilation and execution are pending; Node checks cannot qualify WebKit.
+The existing issue already records this increment; do not create a duplicate issue.
+Available checks: 24/24 Node tests pass on v24.22.1; JavaScript syntax, Swift
+grammar-only parsing, scheme/plist parsing and `git diff --check` pass.
+The native runner rejects this Linux host. No Swift typecheck, Xcode build or
+WebKit execution is claimed. [Runbook and remaining integration work](docs/NATIVE_MOBILE_WEBKIT_QUALIFICATION.md).
+
 ## Mobile browser acceptance fixture — #209 (2026-11-06)
 
 - [x] Add owned synthetic source/form pages with input-triggered autosave and stable mobile browser selectors.
