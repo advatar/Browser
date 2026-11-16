@@ -1,5 +1,10 @@
 # Status
 
+## Poppy read-only integration — #214
+
+- [x] Discover and show advertised Poppy 1.x channels in Copilot for the current HTTPS site. Verified five discovery tests, including a URLSession fixture that checks the outgoing request.
+- [ ] Add signed-out offer lookup and governed local OpenMind ranking.
+
 ## Shared A2UI layer — #202 (2026-10-14)
 
 - [x] Pin `a2ui-swift` to the shared `advatar/a2ui-swift@57d4244` (UIK UniversalA2UI, advatar/UniversalInteractionKit#89); drop the orphaned upstream `c98cdcc` pin and swift-foundation-icu.

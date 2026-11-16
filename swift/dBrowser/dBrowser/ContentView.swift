@@ -1132,6 +1132,9 @@ private struct CopilotPanelView: View {
     @State private var workflowIntervalHours = 24
     @State private var showsEarlierRuns = false
     @State private var visibleEarlierRunCount = 4
+    @State private var poppyManifestURL: URL?
+    @State private var poppyRequestID: UUID?
+    @State private var poppyStatus: String?
 
     private var latestRun: CopilotRun? {
         conversationRuns.first
@@ -1164,6 +1167,20 @@ private struct CopilotPanelView: View {
                     .help("Close Copilot")
                     .accessibilityLabel("Close Copilot")
                     .accessibilityIdentifier("copilot-sidecar-close")
+                }
+
+                if let tab = browser.activeTab, !tab.isTraceMinimized,
+                   let page = URL(string: tab.urlString), let manifestURL = PoppyDiscovery.discoveryURL(for: page) {
+                    Button("Check company agent access") {
+                        poppyStatus = "Checking this site for Poppy…"
+                        poppyManifestURL = manifestURL
+                        poppyRequestID = UUID()
+                    }
+                    if manifestURL == poppyManifestURL, let poppyStatus {
+                        Text(poppyStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -1793,6 +1810,33 @@ private struct CopilotPanelView: View {
         .onChange(of: browser.llmConversation.id) { _, _ in
             showsEarlierRuns = false
             visibleEarlierRunCount = 4
+        }
+        .task(id: poppyRequestID) {
+            guard let page = poppyManifestURL else { return }
+            let status: String
+            do {
+                let manifest = try await PoppyDiscovery().discover(page: page)
+                let channels = manifest.capabilities.joined(separator: ", ")
+                status = channels.isEmpty
+                    ? "\(manifest.organization.domain) publishes Poppy."
+                    : "\(manifest.organization.domain) advertises \(channels) through Poppy."
+            } catch let error as PoppyDiscovery.Failure {
+                status = error.localizedDescription
+            } catch {
+                status = PoppyDiscovery.Failure.unavailable.localizedDescription
+            }
+            guard !Task.isCancelled else { return }
+            poppyStatus = status
+        }
+        .onChange(of: browser.activeTab?.urlString) {
+            poppyManifestURL = nil
+            poppyRequestID = nil
+            poppyStatus = nil
+        }
+        .onChange(of: browser.activeTabID) {
+            poppyManifestURL = nil
+            poppyRequestID = nil
+            poppyStatus = nil
         }
     }
 
