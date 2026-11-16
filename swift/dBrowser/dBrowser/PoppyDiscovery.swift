@@ -168,9 +168,13 @@ private nonisolated final class PoppyDiscoveryRedirects: NSObject, URLSessionTas
         _ session: URLSession,
         task: URLSessionTask,
         willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest
-    ) async -> URLRequest? {
-        guard let url = request.url, PoppyDiscovery.allowsRedirect(to: url, from: origin) else { return nil }
-        return request
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        guard let url = request.url, PoppyDiscovery.allowsRedirect(to: url, from: origin) else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }
